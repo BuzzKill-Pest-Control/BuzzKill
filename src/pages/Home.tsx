@@ -1,52 +1,83 @@
 import { Link } from "react-router-dom";
 import ContactForm from "../components/ContactForm";
+import FAQ from "../components/FAQ";
+import Icon from "../components/Icon";
 
 export default function Home() {
   return (
     <>
       {/* Hero */}
       <section className="hero">
-        <div className="hero-content">
-          <h1>
-            Safe for Families.{" "}
-            <span className="highlight">Tough on Pests.</span>
-          </h1>
-          <p className="hero-subtitle">
-            Built for condos. Built for convenience. Built for peace of mind.
-          </p>
-          <p className="hero-body">
-            BuzzKill Pest Control provides professional pest control for
-            condominiums, HOAs, and shared living communities across
-            Massachusetts. We specialize in common-area pest management for
-            boards and property managers—then offer optional, discounted in-unit
-            service for owners when we're already onsite.
-          </p>
-          <div className="hero-ctas">
-            <a href="#contact" className="btn btn-primary">
-              Request HOA Proposal
-            </a>
-            <a href="#contact" className="btn btn-outline">
-              Schedule In-Unit Service
-            </a>
+        <div className="dotgrid" aria-hidden="true" />
+        <div className="inner">
+          <div>
+            <div className="hero-eyebrow">
+              Condo &amp; HOA pest control · Massachusetts
+            </div>
+            <h1>
+              Safe for families.{" "}
+              <em>
+                Tough on pests.<span className="dot" />
+              </em>
+            </h1>
+            <p className="hero-sub">
+              Professional pest control for condominiums, HOAs, and shared
+              living communities—built for boards, built for convenience, built
+              for peace of mind.
+            </p>
+            <div className="hero-ctas">
+              <a href="#contact" className="btn btn-primary">
+                Request HOA Proposal
+                <Icon name="arrow" className="lu arr" />
+              </a>
+              <a href="#contact" className="btn btn-secondary">
+                Schedule In-Unit Service
+              </a>
+            </div>
+            <div className="hero-trust">
+              <div className="trust-item">
+                <span className="num">40+</span>
+                <span className="lab">HOAs served</span>
+              </div>
+              <div className="trust-item">
+                <span className="num">12yr</span>
+                <span className="lab">avg. contract</span>
+              </div>
+              <div className="trust-item">
+                <span className="num">MA</span>
+                <span className="lab">licensed &amp; insured</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="hero-image">
-          <img
-            src="/images/hero-home-1.jpg"
-            alt="Professional pest control for condominiums"
-          />
+          <div className="hero-media">
+            <div className="frame">
+              <img
+                src="/images/hero-home-1.jpg"
+                alt="Professional pest control for condominiums"
+              />
+            </div>
+            <div className="sticker">
+              <div className="s-icon">
+                <Icon name="shield" className="" />
+              </div>
+              <div>
+                <div className="s-title">Board-friendly reporting</div>
+                <div className="s-sub">Clean docs after every visit</div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Smart Way */}
-      <section className="section">
-        <div className="section-inner">
-          <div className="section-text">
+      {/* The approach */}
+      <section className="band band-alt">
+        <div className="container-narrow">
+          <div className="section-head">
+            <span className="eye">The approach</span>
             <h2>
-              Condo & HOA Pest Control,{" "}
-              <span className="highlight">Done the Smart Way</span>
+              Condo &amp; HOA pest control, <em>done the smart way.</em>
             </h2>
-            <p>
+            <p className="intro">
               Most pest issues in condos don't respect unit boundaries. That's
               why we focus on building-wide prevention and consistent
               service—not one-off reactions.
@@ -55,200 +86,245 @@ export default function Home() {
         </div>
       </section>
 
-      {/* What We Do Best */}
-      <section className="section section-dark">
-        <div className="section-inner section-split">
-          <div className="section-image">
-            <img
-              src="/images/hero-home-2.jpg"
-              alt="Pest control technician at work"
-            />
-          </div>
-          <div className="section-text">
-            <h2>What We Do Best</h2>
-            <ul className="check-list">
-              <li>
-                HOA common-area pest control (basements, utility rooms, trash
-                areas, exterior perimeter, common hallways, shared spaces)
-              </li>
-              <li>Optional in-unit service for owners</li>
-              <li>Preventative programs designed for shared living</li>
-              <li>Clear reporting for boards and property managers</li>
-            </ul>
-            <Link to="/in-unit-services" className="btn btn-link">
-              Learn About In-Unit Service &rarr;
-            </Link>
+      {/* What we do best */}
+      <section className="band">
+        <div className="container">
+          <div className="split">
+            <div className="split-image">
+              <img
+                src="/images/hero-home-2.jpg"
+                alt="Pest control technician at work"
+              />
+            </div>
+            <div>
+              <span className="eye">What we do best</span>
+              <h3>A single program that covers your whole community.</h3>
+              <ul className="check-list">
+                <li>
+                  HOA common-area pest control — basements, utility rooms,
+                  trash areas, exterior perimeter, common hallways
+                </li>
+                <li>Optional discounted in-unit service for owners</li>
+                <li>Preventative programs designed for shared living</li>
+                <li>Clear reporting for boards and property managers</li>
+              </ul>
+              <Link to="/in-unit-services" className="btn btn-link">
+                Learn about in-unit service{" "}
+                <Icon name="arrow" className="lu arr" />
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* How Our Model Works */}
-      <section className="section">
-        <div className="section-inner">
-          <h2 className="section-title">
-            How Our Condo & HOA Model{" "}
-            <span className="highlight">Works</span>
-          </h2>
-          <div className="steps-grid">
-            <div className="step-card">
-              <span className="step-number">1</span>
-              <h3>We service common areas (HOA contract)</h3>
-              <p>
-                Your association receives consistent, scheduled pest control for
-                common areas—done professionally, with minimal disruption.
-              </p>
-            </div>
-            <div className="step-card">
-              <span className="step-number">2</span>
-              <h3>Owners can add discounted in-unit service</h3>
-              <p>
-                About a week before our scheduled visit, owners can choose to
-                schedule and pay online for in-unit treatment during the same
-                visit window.
-              </p>
-            </div>
-            <div className="step-card">
-              <span className="step-number">3</span>
-              <h3>Everything is grouped onsite (efficient + affordable)</h3>
-              <p>
-                Owners get convenience and lower pricing. The community benefits
-                from a stronger, building-wide approach.
-              </p>
-            </div>
+      {/* How it works */}
+      <section className="band band-dark">
+        <div className="container">
+          <div className="section-head">
+            <span className="eye">How it works</span>
+            <h2>
+              The BuzzKill model, <em>in three steps.</em>
+            </h2>
           </div>
-          <div className="section-cta">
-            <Link to="/condo-services" className="btn btn-link">
-              See HOA/Common-Area Services &rarr;
-            </Link>
+          <div className="grid-3">
+            <div className="step">
+              <div className="num">1</div>
+              <h3>We service common areas</h3>
+              <p>
+                Your association receives consistent, scheduled pest control
+                for common areas—done professionally, with minimal disruption.
+              </p>
+            </div>
+            <div className="step">
+              <div className="num">2</div>
+              <h3>Owners add discounted in-unit service</h3>
+              <p>
+                About a week before our visit, owners can schedule and pay
+                online for in-unit treatment during the same window.
+              </p>
+            </div>
+            <div className="step">
+              <div className="num">3</div>
+              <h3>Everything is grouped onsite</h3>
+              <p>
+                Owners get convenience and lower pricing. The community
+                benefits from a stronger, building-wide approach.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Why Choose BuzzKill */}
-      <section className="section section-dark">
-        <div className="section-inner">
-          <h2 className="section-title">
-            Why HOAs and Property Managers{" "}
-            <span className="highlight">Choose BuzzKill</span>
-          </h2>
-          <div className="features-grid">
-            <div className="feature-card">
-              <h3>Condo-specific expertise</h3>
+      {/* Why choose BuzzKill */}
+      <section className="band">
+        <div className="container">
+          <div className="section-head">
+            <span className="eye">Why BuzzKill</span>
+            <h2>
+              Why boards and property managers <em>choose us.</em>
+            </h2>
+          </div>
+          <div className="grid-3">
+            <div className="feature">
+              <div className="icon">
+                <Icon name="building" className="" />
+              </div>
+              <span className="eye">Expertise</span>
+              <h3>Condo-specific know-how</h3>
               <p>
-                We understand shared walls, common infrastructure spaces, and
-                recurring patterns that drive pest pressure in multi-unit
+                We understand shared walls, utility chases, and recurring
+                pressure points that drive pest activity in multi-unit
                 buildings.
               </p>
             </div>
-            <div className="feature-card">
+            <div className="feature">
+              <div className="icon">
+                <Icon name="leaf" className="" />
+              </div>
+              <span className="eye">Safety</span>
               <h3>Safety-first mindset</h3>
               <p>
                 We prioritize methods and products appropriate for occupied
-                spaces and follow all label and regulatory requirements.
+                homes and follow all label and regulatory requirements.
               </p>
             </div>
-            <div className="feature-card">
+            <div className="feature">
+              <div className="icon">
+                <Icon name="doc" className="" />
+              </div>
+              <span className="eye">Coordination</span>
               <h3>Professional communication</h3>
               <p>
-                Clear scheduling, consistent service, and board-friendly
-                documentation.
+                Clear scheduling, consistent presence, and documentation
+                suitable for HOA records and board meetings.
               </p>
             </div>
-          </div>
-          <div className="section-cta">
-            <Link to="/about" className="btn btn-link">
-              Learn More &rarr;
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ */}
-      <section className="section">
-        <div className="section-inner">
-          <h2 className="section-title">BuzzKill FAQs</h2>
-          <div className="faq-list">
-            <details className="faq-item">
-              <summary>Do you only work with condos/HOAs?</summary>
-              <p>
-                Our primary focus is condos and HOAs, because that's where our
-                model provides the most value.
-              </p>
-            </details>
-            <details className="faq-item">
-              <summary>Is in-unit service required?</summary>
-              <p>
-                No. In-unit service is optional and scheduled directly by the
-                unit owner.
-              </p>
-            </details>
-            <details className="faq-item">
-              <summary>
-                Do you coordinate communication to owners?
-              </summary>
-              <p>
-                Yes—BuzzKill provides a scheduling/payment link and suggested
-                announcement copy; your property manager can distribute it to
-                owners.
-              </p>
-            </details>
           </div>
         </div>
       </section>
 
       {/* Services */}
-      <section className="section section-dark">
-        <div className="section-inner">
+      <section className="band band-alt">
+        <div className="container">
+          <div className="section-head">
+            <span className="eye">Services</span>
+            <h2>
+              Two programs, <em>one visit.</em>
+            </h2>
+          </div>
           <div className="services-duo">
-            <div className="service-card">
-              <img src="/images/hero-home-3.jpg" alt="HOA common-area pest control" />
-              <h3>HOA Common-Area Pest Control</h3>
-              <p>
-                Preventative service for HOA-owned areas and building exteriors.
-              </p>
-              <Link to="/condo-services" className="btn btn-outline">
-                Learn More
-              </Link>
+            <div className="svc">
+              <div className="img">
+                <span className="tag">HOA Contract</span>
+                <img
+                  src="/images/hero-home-3.jpg"
+                  alt="HOA common-area pest control"
+                />
+              </div>
+              <div className="body">
+                <h3>HOA Common-Area Pest Control</h3>
+                <p>
+                  Preventative service for HOA-owned areas and building
+                  exteriors. Consistent scheduling, board-friendly
+                  documentation, and recommendations that reduce pressure long
+                  term.
+                </p>
+                <Link to="/condo-services" className="btn btn-primary">
+                  Learn More <Icon name="arrow" className="lu arr" />
+                </Link>
+              </div>
             </div>
-            <div className="service-card">
-              <img src="/images/hero-home-2.jpg" alt="In-unit pest control" />
-              <h3>In-Unit Pest Control for Owners</h3>
-              <p>
-                Optional, discounted in-unit service timed with common-area
-                service days.
-              </p>
-              <Link to="/in-unit-services" className="btn btn-outline">
-                Learn More
-              </Link>
+            <div className="svc">
+              <div className="img">
+                <span className="tag">Owner Add-on</span>
+                <img
+                  src="/images/hero-home-2.jpg"
+                  alt="In-unit pest control service"
+                />
+              </div>
+              <div className="body">
+                <h3>In-Unit Service for Owners</h3>
+                <p>
+                  Optional, discounted in-unit service timed with your
+                  community's common-area visit. Schedule and pay
+                  online—no HOA coordination required.
+                </p>
+                <Link to="/in-unit-services" className="btn btn-secondary">
+                  Learn More
+                </Link>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
+      {/* FAQ */}
+      <section className="band">
+        <div className="container-narrow">
+          <div className="section-head">
+            <span className="eye">Questions</span>
+            <h2>
+              BuzzKill <em>FAQs.</em>
+            </h2>
+          </div>
+          <FAQ
+            items={[
+              {
+                q: "Do you only work with condos and HOAs?",
+                a: "Our primary focus is condos and HOAs, because that's where our model provides the most value. We can discuss other shared-living arrangements case-by-case.",
+              },
+              {
+                q: "Is in-unit service required?",
+                a: "No. In-unit service is optional and scheduled directly by the unit owner. HOA contracts and in-unit appointments are separate agreements.",
+              },
+              {
+                q: "Do you coordinate communication to owners?",
+                a: "Yes—BuzzKill provides a scheduling and payment link along with suggested announcement copy. Your property manager distributes it to owners.",
+              },
+              {
+                q: "Can you service multiple buildings in a community?",
+                a: "Yes. One program can cover all buildings and common areas with a single schedule and a single point of contact.",
+              },
+            ]}
+          />
+        </div>
+      </section>
+
       {/* Contact */}
-      <section className="section" id="contact">
-        <div className="section-inner">
-          <div className="contact-section">
+      <section className="band band-alt" id="contact">
+        <div className="container">
+          <div className="contact">
             <div className="contact-info">
-              <h2>Contact Us Today</h2>
+              <span className="eye">Contact</span>
+              <h2>Let's make your community pest-free.</h2>
               <p>
                 Whether you're an HOA board member, a property manager, or a
                 condo owner, we'll make it easy to get the right service.
               </p>
-              <div className="contact-details">
-                <div className="contact-item">
-                  <strong>Address</strong>
-                  <p>1257 Worcester Rd #1045<br />Framingham, MA 01701</p>
+              <dl className="contact-dl">
+                <div>
+                  <dt>Office</dt>
+                  <dd>
+                    1257 Worcester Rd #1045
+                    <br />
+                    Framingham, MA 01701
+                  </dd>
                 </div>
-                <div className="contact-item">
-                  <strong>Phone</strong>
-                  <a href="tel:508-258-9294">508-258-9294</a>
+                <div>
+                  <dt>Phone</dt>
+                  <dd>
+                    <a href="tel:508-258-9294">508-258-9294</a>
+                  </dd>
                 </div>
-                <div className="contact-item">
-                  <strong>Email</strong>
-                  <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a>
+                <div>
+                  <dt>Email</dt>
+                  <dd>
+                    <a href="mailto:info@pestbuzzkill.com">
+                      info@pestbuzzkill.com
+                    </a>
+                  </dd>
                 </div>
-              </div>
+              </dl>
             </div>
             <ContactForm />
           </div>

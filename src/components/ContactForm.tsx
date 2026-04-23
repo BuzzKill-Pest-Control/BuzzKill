@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import Icon from "./Icon";
+
+type PropertyType = "Residential" | "Commercial";
 
 export default function ContactForm() {
   const [formData, setFormData] = useState({
-    propertyType: "Residential",
+    propertyType: "Residential" as PropertyType,
     squareFootage: "",
     unitCount: "",
     companyName: "",
@@ -13,14 +16,20 @@ export default function ContactForm() {
     phone: "",
     serviceAddress: "",
     city: "",
-    state: "",
+    state: "MA",
     zip: "",
     serviceFrequency: "Monthly",
   });
   const [submitted, setSubmitted] = useState(false);
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+  function handleChange(
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  }
+
+  function setPropertyType(value: PropertyType) {
+    setFormData({ ...formData, propertyType: value });
   }
 
   function handleSubmit(e: FormEvent) {
@@ -33,48 +42,57 @@ export default function ContactForm() {
   if (submitted) {
     return (
       <div className="form-success">
-        <h3>Thank you!</h3>
-        <p>Your request has been submitted. You'll receive a confirmation email shortly.</p>
+        <div className="check">
+          <Icon name="check" className="" />
+        </div>
+        <h3>Thank you.</h3>
+        <p>
+          Your request has been submitted. You'll receive a confirmation email
+          shortly.
+        </p>
       </div>
     );
   }
 
   return (
-    <form className="contact-form" onSubmit={handleSubmit}>
-      <h3>Start Service</h3>
-      <p className="form-description">
-        This form creates a customer lead. You'll receive a confirmation email after submission.
+    <form className="form" onSubmit={handleSubmit}>
+      <h3>Start service</h3>
+      <p className="fdesc">
+        This form creates a customer lead. We'll follow up within one business
+        day.
       </p>
 
-      <div className="form-group">
-        <label>Residential or Commercial?</label>
-        <div className="radio-group">
-          <label>
+      <div className="fg">
+        <label>Residential or commercial?</label>
+        <div className="radio-pills" role="radiogroup" aria-label="Property type">
+          <label className={formData.propertyType === "Residential" ? "on" : ""}>
             <input
               type="radio"
               name="propertyType"
               value="Residential"
               checked={formData.propertyType === "Residential"}
-              onChange={handleChange}
+              onChange={() => setPropertyType("Residential")}
             />
+            <span className="bullet" />
             Residential
           </label>
-          <label>
+          <label className={formData.propertyType === "Commercial" ? "on" : ""}>
             <input
               type="radio"
               name="propertyType"
               value="Commercial"
               checked={formData.propertyType === "Commercial"}
-              onChange={handleChange}
+              onChange={() => setPropertyType("Commercial")}
             />
+            <span className="bullet" />
             Commercial
           </label>
         </div>
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
-          <label htmlFor="squareFootage">Square Footage</label>
+      <div className="frow">
+        <div className="fg">
+          <label htmlFor="squareFootage">Square footage</label>
           <input
             type="number"
             id="squareFootage"
@@ -83,8 +101,8 @@ export default function ContactForm() {
             onChange={handleChange}
           />
         </div>
-        <div className="form-group">
-          <label htmlFor="unitCount">Unit Count</label>
+        <div className="fg">
+          <label htmlFor="unitCount">Unit count</label>
           <input
             type="number"
             id="unitCount"
@@ -95,8 +113,8 @@ export default function ContactForm() {
         </div>
       </div>
 
-      <div className="form-group">
-        <label htmlFor="companyName">Company Name</label>
+      <div className="fg">
+        <label htmlFor="companyName">Company name</label>
         <input
           type="text"
           id="companyName"
@@ -106,9 +124,9 @@ export default function ContactForm() {
         />
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
-          <label htmlFor="firstName">First Name *</label>
+      <div className="frow">
+        <div className="fg">
+          <label htmlFor="firstName">First name *</label>
           <input
             type="text"
             id="firstName"
@@ -118,8 +136,8 @@ export default function ContactForm() {
             required
           />
         </div>
-        <div className="form-group">
-          <label htmlFor="lastName">Last Name *</label>
+        <div className="fg">
+          <label htmlFor="lastName">Last name *</label>
           <input
             type="text"
             id="lastName"
@@ -131,8 +149,8 @@ export default function ContactForm() {
         </div>
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
+      <div className="frow">
+        <div className="fg">
           <label htmlFor="email">Email *</label>
           <input
             type="email"
@@ -143,7 +161,7 @@ export default function ContactForm() {
             required
           />
         </div>
-        <div className="form-group">
+        <div className="fg">
           <label htmlFor="phone">Phone *</label>
           <input
             type="tel"
@@ -156,8 +174,8 @@ export default function ContactForm() {
         </div>
       </div>
 
-      <div className="form-group">
-        <label htmlFor="serviceAddress">Service Address *</label>
+      <div className="fg">
+        <label htmlFor="serviceAddress">Service address *</label>
         <input
           type="text"
           id="serviceAddress"
@@ -168,8 +186,8 @@ export default function ContactForm() {
         />
       </div>
 
-      <div className="form-row form-row-3">
-        <div className="form-group">
+      <div className="frow frow-3">
+        <div className="fg">
           <label htmlFor="city">City *</label>
           <input
             type="text"
@@ -180,20 +198,25 @@ export default function ContactForm() {
             required
           />
         </div>
-        <div className="form-group">
+        <div className="fg">
           <label htmlFor="state">State *</label>
           <input
             type="text"
             id="state"
             name="state"
             value={formData.state}
-            onChange={handleChange}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                state: e.target.value.toUpperCase().slice(0, 2),
+              })
+            }
             required
             maxLength={2}
             placeholder="MA"
           />
         </div>
-        <div className="form-group">
+        <div className="fg">
           <label htmlFor="zip">Zip *</label>
           <input
             type="text"
@@ -206,8 +229,8 @@ export default function ContactForm() {
         </div>
       </div>
 
-      <div className="form-group">
-        <label htmlFor="serviceFrequency">Service Frequency</label>
+      <div className="fg">
+        <label htmlFor="serviceFrequency">Service frequency</label>
         <select
           id="serviceFrequency"
           name="serviceFrequency"
@@ -220,7 +243,9 @@ export default function ContactForm() {
         </select>
       </div>
 
-      <button type="submit" className="btn btn-primary btn-full">Submit</button>
+      <button type="submit" className="btn btn-primary btn-full">
+        Submit request
+      </button>
     </form>
   );
 }

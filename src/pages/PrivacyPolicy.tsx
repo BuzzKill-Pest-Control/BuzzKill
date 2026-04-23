@@ -1,7 +1,7 @@
 export default function PrivacyPolicy() {
   return (
-    <section className="section legal-page">
-      <div className="section-inner section-narrow">
+    <section className="legal-page">
+      <div className="container-narrow">
         <h1>Privacy Policy</h1>
         <p className="legal-meta">
           <strong>Effective Date:</strong> January 1, 2026 &nbsp;|&nbsp;{" "}
