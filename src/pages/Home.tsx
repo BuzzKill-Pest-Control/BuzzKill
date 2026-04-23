@@ -305,9 +305,9 @@ export default function Home() {
                 <div>
                   <dt>Office</dt>
                   <dd>
-                    1257 Worcester Rd #1045
+                    420 Lakeside Ave, Suite 104
                     <br />
-                    Framingham, MA 01701
+                    Marlborough, MA 01752
                   </dd>
                 </div>
                 <div>

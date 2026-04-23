@@ -56,9 +56,9 @@ export default function Footer() {
               <a href="tel:508-258-9294">508-258-9294</a>
               <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a>
               <span>
-                1257 Worcester Rd #1045
+                420 Lakeside Ave, Suite 104
                 <br />
-                Framingham, MA 01701
+                Marlborough, MA 01752
               </span>
             </div>
           </div>

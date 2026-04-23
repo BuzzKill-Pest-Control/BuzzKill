@@ -183,7 +183,7 @@ export default function PrivacyPolicy() {
 
         <h2>Contact</h2>
         <p>
-          1257 Worcester Rd #1045, Framingham, MA 01701
+          420 Lakeside Ave, Suite 104, Marlborough, MA 01752
           <br />
           <a href="tel:508-258-9294">508-258-9294</a>
           <br />
