@@ -4,7 +4,8 @@ type HeroProps = {
   image: string;
   eyebrow?: string;
   headline: ReactNode;
-  sub?: string;
+  sub?: ReactNode;
+  body?: ReactNode;
   primaryCta?: { label: string; onClick?: () => void; href?: string };
   secondaryCta?: { label: string; onClick?: () => void; href?: string };
 };
@@ -36,6 +37,7 @@ export default function Hero({
   eyebrow,
   headline,
   sub,
+  body,
   primaryCta,
   secondaryCta,
 }: HeroProps) {
@@ -49,6 +51,7 @@ export default function Hero({
         {eyebrow && <div className="bk-hero-eyebrow">{eyebrow}</div>}
         <h1 className="bk-hero-headline">{headline}</h1>
         {sub && <p className="bk-hero-sub">{sub}</p>}
+        {body && <p className="bk-hero-sub">{body}</p>}
         {(primaryCta || secondaryCta) && (
           <div className="bk-hero-ctas">
             {primaryCta && <CtaButton cta={primaryCta} variant="primary" />}

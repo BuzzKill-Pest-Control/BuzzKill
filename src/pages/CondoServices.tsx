@@ -1,10 +1,9 @@
-import Hero from "../components/Hero";
-import NumberedSteps from "../components/NumberedSteps";
-import ServiceSection from "../components/ServiceSection";
+import { useNavigate } from "react-router-dom";
 import FAQ from "../components/FAQ";
 import ContactForm from "../components/ContactForm";
 
 export default function CondoServices() {
+  const navigate = useNavigate();
   const goToForm = () => {
     const el = document.getElementById("form");
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -12,50 +11,132 @@ export default function CondoServices() {
 
   return (
     <>
-      <Hero
-        image="/images/condo-hero.jpg"
-        eyebrow="HOA Common-Area Service"
-        headline={<>Condo Services</>}
-        sub="Preventative pest control for HOA-owned areas and building exteriors — scheduled, documented, and built around shared-living realities."
-        primaryCta={{ label: "Request HOA Proposal", onClick: goToForm }}
-      />
+      {/* Lowercase title hero — matches live site quirk */}
+      <section className="bk-section bk-section-light">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">For HOA Boards &amp; Property Managers</div>
+          <h1 className="bk-h1-lower">condo services</h1>
+          <h2 className="bk-h2" style={{ marginTop: 24 }}>
+            HOA &amp; Condo Common-Area Pest Control
+          </h2>
+          <p className="bk-body-lead">
+            BuzzKill provides reliable common-area pest control for
+            condominiums, HOAs, and multi-unit residential communities. Our
+            programs are designed to reduce pest pressure at the building
+            level&mdash;so issues don&rsquo;t keep cycling back from shared
+            spaces.
+          </p>
+          <div style={{ display: "flex", gap: 14, marginTop: 24, flexWrap: "wrap" }}>
+            <button type="button" className="bk-btn bk-btn-primary" onClick={goToForm}>
+              Request HOA Proposal
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <NumberedSteps
-        eyebrow="What's Included"
-        title="Common-Area Coverage"
-        steps={[
-          {
-            title: "Exterior perimeter",
-            body: "Foundation, dumpster pads, doorways, and entry points—the front line of building-wide pressure.",
-          },
-          {
-            title: "Shared interiors",
-            body: "Basements, utility rooms, trash chutes, common hallways, mechanical rooms.",
-          },
-          {
-            title: "Reporting",
-            body: "Visit summaries delivered to the board and property manager after every service.",
-          },
-        ]}
-      />
+      {/* What Common-Area Pest Control Covers */}
+      <section className="bk-section bk-section-cream">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">What&rsquo;s Covered</div>
+          <h2 className="bk-h2">What Common-Area Pest Control Covers</h2>
+          <p className="bk-body-lead">
+            Every community is different, but common-area service often
+            includes:
+          </p>
+          <ul className="bk-bullets">
+            <li>Building exterior perimeter monitoring and treatment as needed</li>
+            <li>Basements and foundation areas</li>
+            <li>Trash and recycling rooms, compactors, dumpsters (as applicable)</li>
+            <li>Mechanical / utility rooms and chase areas where pests travel</li>
+            <li>Hallways / common corridors (as appropriate)</li>
+            <li>Entry points and pest pressure zones identified during inspection</li>
+          </ul>
+          <p className="bk-p">
+            {"We\u2019ll tailor scope to your building layout and association needs."}
+          </p>
+          <div style={{ marginTop: 24 }}>
+            <button
+              type="button"
+              className="bk-btn bk-btn-outline"
+              onClick={() => navigate("/in-unit-services")}
+            >
+              {"Learn About In\u2011Unit Service"}
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <ServiceSection
-        image="/images/hero-home-3.jpg"
-        eyebrow="Preventative Program"
-        title="A Program Built for Shared Living"
-        body="Condo pest control requires a different mindset than single-family homes. Our approach emphasizes consistent scheduling, monitoring, and practical recommendations that reduce pressure over time."
-        bullets={[
-          "Monthly, bi-monthly, or quarterly service plans",
-          "Monitoring and pattern tracking",
-          "Board-friendly documentation",
-          "Practical recommendations on conditions that attract pests",
-        ]}
-        cta={{ label: "Request Proposal", onClick: goToForm }}
-      />
+      {/* A Preventative Program Built for Shared Living */}
+      <section className="bk-section bk-section-light">
+        <div className="bk-container">
+          <h2 className="bk-h2 bk-center">A Preventative Program Built for Shared Living</h2>
+          <p className="bk-body-lead bk-center" style={{ maxWidth: 760, margin: "0 auto 28px" }}>
+            Condo pest control requires a different mindset than single-family
+            homes. Our approach emphasizes:
+          </p>
+          <div className="bk-why-grid" style={{ marginTop: 48 }}>
+            <div className="bk-why-item">
+              <h4 className="bk-h4">Consistent scheduling</h4>
+              <p className="bk-p">
+                {"Monthly, bi\u2011monthly, or quarterly service plans to maintain control and reduce recurring issues."}
+              </p>
+            </div>
+            <div className="bk-why-item">
+              <h4 className="bk-h4">Monitoring and documentation</h4>
+              <p className="bk-p">
+                We track pest activity patterns and provide board-friendly notes
+                that help you make informed decisions.
+              </p>
+            </div>
+            <div className="bk-why-item">
+              <h4 className="bk-h4">Practical recommendations</h4>
+              <p className="bk-p">
+                {"We\u2019ll flag conditions that attract pests (trash handling, clutter in storage areas, entry points, moisture issues) and recommend improvements that help reduce pressure over time."}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* How it works — owner add-on flow */}
+      <section className="bk-section bk-section-cream">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">How it works</div>
+          <h2 className="bk-h2">Owner Add-On, Done Cleanly</h2>
+          <ul className="bk-bullets">
+            <li>
+              Prior to the common-area visit, BuzzKill provides a
+              property-specific scheduling + payment link
+            </li>
+            <li>The property manager can send it as an announcement to owners</li>
+            <li>Owners who want service schedule and pay online</li>
+            <li>{"In\u2011unit appointments are grouped onsite during the scheduled visit window"}</li>
+          </ul>
+          <p className="bk-body-lead" style={{ marginTop: 16 }}>
+            This improves building-wide results while offering owners
+            convenience and a discount.
+          </p>
+        </div>
+      </section>
+
+      {/* What Boards and Property Managers Get */}
+      <section className="bk-section bk-section-dark">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow" style={{ color: "var(--bk-green)" }}>For Boards &amp; PMs</div>
+          <h2 className="bk-h2 bk-on-dark">What Boards and Property Managers Get</h2>
+          <ul className="bk-bullets">
+            <li>Predictable common-area service schedule</li>
+            <li>Clear communication and professional onsite presence</li>
+            <li>Documentation suitable for HOA records</li>
+            <li>A simple owner upsell option (without the HOA handling payments)</li>
+            <li>An approach aligned with resident comfort and safety</li>
+          </ul>
+        </div>
+      </section>
 
       <FAQ
-        eyebrow="HOA Questions"
-        title="Common-Area FAQs"
+        eyebrow="HOA / Common-Area"
+        title="FAQs"
         items={[
           {
             q: "Do you require owner participation?",
@@ -63,20 +144,16 @@ export default function CondoServices() {
           },
           {
             q: "Can you service multiple buildings within a community?",
-            a: "Yes. We can set up one program that covers all buildings and common areas, with a single schedule and a single point of contact.",
+            a: "Yes. We can set up one program that covers all buildings and common areas, with clear scheduling.",
           },
           {
             q: "Do you provide reports or notes after service?",
-            a: "Yes—service notes are provided in a format that works for property management and board records.",
+            a: "Yes\u2014service notes are provided in a format that works for property management and board records.",
           },
         ]}
       />
 
-      <ContactForm
-        eyebrow="Request a Proposal"
-        title="Start a Common-Area Program"
-        intro="Share a few details about your community and we'll put together a clean program—plus a scheduling link for interested owners."
-      />
+      <ContactForm />
     </>
   );
 }

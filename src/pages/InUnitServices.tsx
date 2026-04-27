@@ -1,6 +1,3 @@
-import Hero from "../components/Hero";
-import ServiceSection from "../components/ServiceSection";
-import NumberedSteps from "../components/NumberedSteps";
 import FAQ from "../components/FAQ";
 import ContactForm from "../components/ContactForm";
 
@@ -12,71 +9,131 @@ export default function InUnitServices() {
 
   return (
     <>
-      <Hero
-        image="/images/inunit-1.jpg"
-        eyebrow="For Unit Owners"
-        headline={<>In&#8209;Unit Services</>}
-        sub={"Optional, discounted in\u2011unit treatment scheduled the same day your community gets serviced — no extra trip charges, no coordination headache."}
-        primaryCta={{ label: "Schedule In\u2011Unit Service", onClick: goToForm }}
-      />
+      {/* Lowercase title hero — matches live site quirk */}
+      <section className="bk-section bk-section-light">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">For Unit Owners</div>
+          <h1 className="bk-h1-lower">in-unit services</h1>
+          <p className="bk-body-lead">
+            {"If BuzzKill is already scheduled to service your community\u2019s common areas, you may be able to book discounted in\u2011unit pest control during the same visit window."}
+          </p>
+          <h3 className="bk-h3" style={{ marginTop: 24 }}>
+            {"It\u2019s simple:"}
+          </h3>
+          <ul className="bk-bullets">
+            <li>Schedule online</li>
+            <li>Pay online</li>
+            <li>We arrive during the scheduled window and complete the service efficiently.</li>
+          </ul>
+          <div style={{ display: "flex", gap: 14, marginTop: 24, flexWrap: "wrap" }}>
+            <button type="button" className="bk-btn bk-btn-primary" onClick={goToForm}>
+              {"Schedule In\u2011Unit Service"}
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <ServiceSection
-        image="/images/inunit-2.jpg"
-        eyebrow="How it works"
-        title="Same Visit. Lower Price. Online Scheduling."
-        body="About a week before our scheduled visit to your building, you'll receive a link to schedule and pay online. We'll already be onsite — so pricing is grouped and discounted."
-        bullets={[
-          "Online scheduling and payment",
-          "Grouped onsite pricing — discounted vs. standalone visits",
-          "Coordinated with your HOA service day",
-          "Optional and owner-initiated",
-        ]}
-        cta={{ label: "Schedule Now", onClick: goToForm }}
-      />
+      {/* What In-Unit Service Typically Includes */}
+      <section className="bk-section bk-section-cream">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">What&rsquo;s Included</div>
+          <h2 className="bk-h2">{"What In\u2011Unit Service Typically Includes"}</h2>
+          <p className="bk-body-lead">
+            {"In\u2011unit service is customized to the issue and unit layout, but commonly includes:"}
+          </p>
+          <ul className="bk-bullets">
+            <li>Inspection of key pest activity areas (kitchen, bath, entry points)</li>
+            <li>Targeted treatment where appropriate</li>
+            <li>Guidance on prevention and best practices</li>
+            <li>Follow-up recommendations if needed</li>
+          </ul>
+          <p className="bk-p">
+            We prioritize methods that are appropriate for occupied homes and
+            follow all label directions and any applicable re-entry guidance.
+          </p>
+        </div>
+      </section>
 
-      <NumberedSteps
-        eyebrow="It's Simple"
-        title="Three Steps, No Phone Tag"
-        steps={[
-          {
-            title: "Schedule online",
-            body: "Pick a service window during your building's next visit.",
-          },
-          {
-            title: "Pay online",
-            body: "Secure checkout. Discounted HOA-onsite pricing is applied automatically.",
-          },
-          {
-            title: "We arrive on schedule",
-            body: "We arrive during the scheduled window and complete the service efficiently.",
-          },
-        ]}
-      />
+      {/* Preparing for Your Appointment */}
+      <section className="bk-section bk-section-light">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">Get Ready</div>
+          <h2 className="bk-h2">Preparing for Your Appointment</h2>
+          <p className="bk-body-lead">To make service quick and effective:</p>
+          <ul className="bk-bullets">
+            <li>Ensure access to kitchen / bath areas</li>
+            <li>Move small items away from baseboards if possible</li>
+            <li>Keep pets secured during the visit</li>
+            <li>Follow any instructions included in your confirmation email</li>
+          </ul>
+        </div>
+      </section>
+
+      {/* Why Schedule During the HOA Service Window? */}
+      <section className="bk-section bk-section-dark">
+        <div className="bk-container">
+          <h2 className="bk-h2 bk-center bk-on-dark">
+            Why Schedule During the HOA Service Window?
+          </h2>
+          <div className="bk-why-grid" style={{ marginTop: 48 }}>
+            <div className="bk-why-item">
+              <h4 className="bk-h4 bk-on-dark">Discounted and efficient</h4>
+              <p className="bk-p bk-on-dark-soft">
+                {"Because we\u2019re already onsite for common-area service, we can group in\u2011unit appointments\u2014saving time and reducing cost."}
+              </p>
+            </div>
+            <div className="bk-why-item">
+              <h4 className="bk-h4 bk-on-dark">Better building-wide results</h4>
+              <p className="bk-p bk-on-dark-soft">
+                When both common areas and select units are treated, the
+                community often experiences improved overall control.
+              </p>
+            </div>
+            <div className="bk-why-item">
+              <h4 className="bk-h4 bk-on-dark">Convenient scheduling</h4>
+              <p className="bk-p bk-on-dark-soft">
+                {"No waiting weeks for a separate visit\u2014book your spot while BuzzKill is already scheduled."}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* How Scheduling Works */}
+      <section className="bk-section bk-section-cream">
+        <div className="bk-container bk-narrow">
+          <div className="bk-eyebrow">Step-by-Step</div>
+          <h2 className="bk-h2">How Scheduling Works</h2>
+          <ul className="bk-bullets">
+            <li>Choose your property and unit</li>
+            <li>Select a time window</li>
+            <li>Pay online</li>
+            <li>Receive confirmation</li>
+            <li>BuzzKill completes service onsite during the scheduled window</li>
+          </ul>
+        </div>
+      </section>
 
       <FAQ
-        eyebrow="Owner Questions"
-        title={"In\u2011Unit FAQs"}
+        eyebrow="in-unit"
+        title="FAQs"
         items={[
           {
             q: "Do I need in\u2011unit service if the HOA treats common areas?",
-            a: "Not always. It's most beneficial if you're actively seeing pest activity or the building has recurring pressure.",
+            a: "Not always. But in\u2011unit service can help if you\u2019re actively seeing pest activity, or if your building has recurring pressure.",
           },
           {
             q: "How much does it cost?",
-            a: "Pricing varies by service type and issue. Discounted HOA-onsite pricing is shown during the booking process.",
+            a: "Pricing varies by service type and issue. When available, HOA-onsite pricing will be clearly shown during booking.",
           },
           {
             q: "Is it safe for kids and pets?",
-            a: "Our methods prioritize occupied homes. All products are applied per label directions and regulations.",
+            a: "We prioritize methods suitable for occupied homes and apply all products according to label and regulations. You\u2019ll receive any guidance needed for your specific service.",
           },
         ]}
       />
 
-      <ContactForm
-        eyebrow="Schedule"
-        title={"Schedule In\u2011Unit Service"}
-        intro={"Ready to book discounted in\u2011unit pest control? Fill out the form and we'll get you set up for the next visit window."}
-      />
+      <ContactForm />
     </>
   );
 }
