@@ -174,10 +174,26 @@ export const handler: Handler = async (event) => {
   const token = process.env.FIELDROUTES_TOKEN ?? "";
   const dryRun = process.env.LEAD_INTAKE_DRY_RUN === "1";
 
-  if (!key || !token) {
-    console.error("FieldRoutes credentials missing from environment");
+  // Guard against Amplify Gen 2 returning the literal placeholder string
+  // when a secret hasn't been set in the deployed branch's secret store.
+  // Without this, the placeholder gets concatenated into the URL and you
+  // get a cryptic "Invalid URL" error instead of a useful one.
+  const isPlaceholder = (s: string) =>
+    s.includes("<value will be resolved during runtime>");
+  const unresolved: string[] = [];
+  if (!key || isPlaceholder(key)) unresolved.push("FIELDROUTES_KEY");
+  if (!token || isPlaceholder(token)) unresolved.push("FIELDROUTES_TOKEN");
+  if (!subdomain || isPlaceholder(subdomain))
+    unresolved.push("FIELDROUTES_SUBDOMAIN");
+  if (unresolved.length > 0) {
+    console.error("FieldRoutes credentials missing or unresolved", {
+      unresolved,
+    });
     return jsonResponse(500, {
-      error: "Server misconfigured (credentials missing)",
+      error:
+        "Server misconfigured: required secrets are not set for this branch.",
+      unresolved,
+      hint: "Set them in Amplify Console → App settings → Secrets, scoped to this branch, then redeploy.",
     });
   }
 
@@ -209,8 +225,23 @@ export const handler: Handler = async (event) => {
     upstreamStatus = resp.status;
     upstreamText = await resp.text();
   } catch (err) {
-    console.error("FieldRoutes fetch failed", err);
-    return jsonResponse(502, { error: "Upstream request failed" });
+    // Capture the underlying error (DNS, TLS, connect refused, undici
+    // issues with HTTP/2, etc.) so it surfaces in both CloudWatch and the
+    // browser response body. None of this contains credentials — the
+    // body we built is only sent on successful connect.
+    const e = err as { name?: string; message?: string; cause?: unknown };
+    const cause = e?.cause as { code?: string; message?: string } | undefined;
+    const detail = {
+      name: e?.name ?? "Error",
+      message: e?.message ?? String(err),
+      causeCode: cause?.code,
+      causeMessage: cause?.message,
+    };
+    console.error("FieldRoutes fetch failed", detail);
+    return jsonResponse(502, {
+      error: "Upstream request failed",
+      detail,
+    });
   }
 
   // FieldRoutes typically returns JSON like
