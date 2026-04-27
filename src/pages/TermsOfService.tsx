@@ -1,9 +1,9 @@
 export default function TermsOfService() {
   return (
-    <section className="legal-page">
-      <div className="container-narrow">
+    <section className="bk-legal">
+      <div className="bk-container bk-narrow">
         <h1>Terms of Service</h1>
-        <p className="legal-meta">
+        <p className="bk-legal-meta">
           <strong>Effective Date:</strong> January 1, 2026 &nbsp;|&nbsp;{" "}
           <strong>Last Updated:</strong> January 1, 2026
         </p>

@@ -1,251 +1,235 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import Icon from "./Icon";
 
 type PropertyType = "Residential" | "Commercial";
 
-export default function ContactForm() {
-  const [formData, setFormData] = useState({
-    propertyType: "Residential" as PropertyType,
-    squareFootage: "",
-    unitCount: "",
-    companyName: "",
-    firstName: "",
-    lastName: "",
+type ContactFormProps = {
+  eyebrow?: string;
+  title?: string;
+  intro?: string;
+};
+
+export default function ContactForm({
+  eyebrow = "Contact Us Today",
+  title = "Start Service",
+  intro = "This form creates a FieldRoutes customer + lead. You'll receive a confirmation email after submission.",
+}: ContactFormProps) {
+  const [type, setType] = useState<PropertyType>("Residential");
+  const [submitted, setSubmitted] = useState(false);
+  const [data, setData] = useState({
+    first: "",
+    last: "",
     email: "",
     phone: "",
-    serviceAddress: "",
+    addr: "",
     city: "",
     state: "MA",
     zip: "",
-    serviceFrequency: "Monthly",
+    units: "",
+    sqft: "",
+    freq: "Monthly",
+    company: "",
   });
-  const [submitted, setSubmitted] = useState(false);
 
-  function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  }
-
-  function setPropertyType(value: PropertyType) {
-    setFormData({ ...formData, propertyType: value });
-  }
+  const update =
+    (k: keyof typeof data) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      setData({ ...data, [k]: e.target.value });
+    };
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    // TODO: Connect to FieldRoutes via webhook
-    console.log("Form submitted:", formData);
+    // TODO: POST to FieldRoutes proxy (Amplify Function) with `type` + data
+    console.log("Lead submitted:", { propertyType: type, ...data });
     setSubmitted(true);
   }
 
   if (submitted) {
     return (
-      <div className="form-success">
-        <div className="check">
-          <Icon name="check" className="" />
+      <section className="bk-section bk-section-light" id="form">
+        <div className="bk-container bk-narrow bk-confirm">
+          <div className="bk-eyebrow">Confirmation</div>
+          <h2 className="bk-h2">Request received.</h2>
+          <p className="bk-body-lead">
+            Thanks{data.first ? `, ${data.first}` : ""}—we'll be in touch within
+            one business day. A confirmation has been sent to{" "}
+            {data.email || "your email"}.
+          </p>
+          <button
+            type="button"
+            className="bk-btn bk-btn-outline"
+            onClick={() => setSubmitted(false)}
+          >
+            Submit Another
+          </button>
         </div>
-        <h3>Thank you.</h3>
-        <p>
-          Your request has been submitted. You'll receive a confirmation email
-          shortly.
-        </p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <form className="form" onSubmit={handleSubmit}>
-      <h3>Start service</h3>
-      <p className="fdesc">
-        This form creates a customer lead. We'll follow up within one business
-        day.
-      </p>
+    <section className="bk-section bk-section-light" id="form">
+      <div className="bk-container bk-narrow">
+        <div className="bk-eyebrow">{eyebrow}</div>
+        <h2 className="bk-h2">{title}</h2>
+        <p className="bk-body-lead">{intro}</p>
 
-      <div className="fg">
-        <label>Residential or commercial?</label>
-        <div className="radio-pills" role="radiogroup" aria-label="Property type">
-          <label className={formData.propertyType === "Residential" ? "on" : ""}>
+        <form className="bk-form" onSubmit={handleSubmit}>
+          <div className="bk-field bk-full">
+            <label>Residential or Commercial?</label>
+            <div className="bk-segmented" role="radiogroup" aria-label="Property type">
+              {(["Residential", "Commercial"] as PropertyType[]).map((opt) => (
+                <button
+                  type="button"
+                  key={opt}
+                  className={`bk-seg ${type === opt ? "is-active" : ""}`}
+                  aria-pressed={type === opt}
+                  onClick={() => setType(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bk-field">
+            <label htmlFor="sqft">Square Footage</label>
             <input
-              type="radio"
-              name="propertyType"
-              value="Residential"
-              checked={formData.propertyType === "Residential"}
-              onChange={() => setPropertyType("Residential")}
+              id="sqft"
+              inputMode="numeric"
+              value={data.sqft}
+              onChange={update("sqft")}
+              placeholder="3200"
             />
-            <span className="bullet" />
-            Residential
-          </label>
-          <label className={formData.propertyType === "Commercial" ? "on" : ""}>
+            <div className="bk-help">Whole numbers only</div>
+          </div>
+          <div className="bk-field">
+            <label htmlFor="units">Unit Count</label>
             <input
-              type="radio"
-              name="propertyType"
-              value="Commercial"
-              checked={formData.propertyType === "Commercial"}
-              onChange={() => setPropertyType("Commercial")}
+              id="units"
+              inputMode="numeric"
+              value={data.units}
+              onChange={update("units")}
+              placeholder="48"
             />
-            <span className="bullet" />
-            Commercial
-          </label>
-        </div>
-      </div>
+            <div className="bk-help">Whole numbers only</div>
+          </div>
 
-      <div className="frow">
-        <div className="fg">
-          <label htmlFor="squareFootage">Square footage</label>
-          <input
-            type="number"
-            id="squareFootage"
-            name="squareFootage"
-            value={formData.squareFootage}
-            onChange={handleChange}
-          />
-        </div>
-        <div className="fg">
-          <label htmlFor="unitCount">Unit count</label>
-          <input
-            type="number"
-            id="unitCount"
-            name="unitCount"
-            value={formData.unitCount}
-            onChange={handleChange}
-          />
-        </div>
-      </div>
+          {type === "Commercial" && (
+            <div className="bk-field bk-full">
+              <label htmlFor="company">Company Name</label>
+              <input
+                id="company"
+                value={data.company}
+                onChange={update("company")}
+                placeholder="Brookfield Condominium Trust"
+              />
+            </div>
+          )}
 
-      <div className="fg">
-        <label htmlFor="companyName">Company name</label>
-        <input
-          type="text"
-          id="companyName"
-          name="companyName"
-          value={formData.companyName}
-          onChange={handleChange}
-        />
-      </div>
+          <div className="bk-field">
+            <label htmlFor="first">First Name *</label>
+            <input
+              id="first"
+              value={data.first}
+              onChange={update("first")}
+              required
+            />
+          </div>
+          <div className="bk-field">
+            <label htmlFor="last">Last Name *</label>
+            <input
+              id="last"
+              value={data.last}
+              onChange={update("last")}
+              required
+            />
+          </div>
 
-      <div className="frow">
-        <div className="fg">
-          <label htmlFor="firstName">First name *</label>
-          <input
-            type="text"
-            id="firstName"
-            name="firstName"
-            value={formData.firstName}
-            onChange={handleChange}
-            required
-          />
-        </div>
-        <div className="fg">
-          <label htmlFor="lastName">Last name *</label>
-          <input
-            type="text"
-            id="lastName"
-            name="lastName"
-            value={formData.lastName}
-            onChange={handleChange}
-            required
-          />
-        </div>
-      </div>
+          <div className="bk-field">
+            <label htmlFor="email">Email *</label>
+            <input
+              id="email"
+              type="email"
+              value={data.email}
+              onChange={update("email")}
+              required
+            />
+          </div>
+          <div className="bk-field">
+            <label htmlFor="phone">Phone *</label>
+            <input
+              id="phone"
+              type="tel"
+              value={data.phone}
+              onChange={update("phone")}
+              required
+            />
+          </div>
 
-      <div className="frow">
-        <div className="fg">
-          <label htmlFor="email">Email *</label>
-          <input
-            type="email"
-            id="email"
-            name="email"
-            value={formData.email}
-            onChange={handleChange}
-            required
-          />
-        </div>
-        <div className="fg">
-          <label htmlFor="phone">Phone *</label>
-          <input
-            type="tel"
-            id="phone"
-            name="phone"
-            value={formData.phone}
-            onChange={handleChange}
-            required
-          />
-        </div>
-      </div>
+          <div className="bk-field bk-full">
+            <label htmlFor="addr">Service Address *</label>
+            <input
+              id="addr"
+              value={data.addr}
+              onChange={update("addr")}
+              required
+            />
+          </div>
 
-      <div className="fg">
-        <label htmlFor="serviceAddress">Service address *</label>
-        <input
-          type="text"
-          id="serviceAddress"
-          name="serviceAddress"
-          value={formData.serviceAddress}
-          onChange={handleChange}
-          required
-        />
-      </div>
+          <div className="bk-field">
+            <label htmlFor="city">City *</label>
+            <input
+              id="city"
+              value={data.city}
+              onChange={update("city")}
+              required
+            />
+          </div>
+          <div className="bk-field bk-third">
+            <label htmlFor="state">State *</label>
+            <input
+              id="state"
+              value={data.state}
+              onChange={(e) =>
+                setData({
+                  ...data,
+                  state: e.target.value.toUpperCase().slice(0, 2),
+                })
+              }
+              placeholder="MA"
+              maxLength={2}
+              required
+            />
+            <div className="bk-help">2-letter code</div>
+          </div>
+          <div className="bk-field bk-third">
+            <label htmlFor="zip">Zip *</label>
+            <input
+              id="zip"
+              inputMode="numeric"
+              value={data.zip}
+              onChange={update("zip")}
+              required
+            />
+          </div>
 
-      <div className="frow frow-3">
-        <div className="fg">
-          <label htmlFor="city">City *</label>
-          <input
-            type="text"
-            id="city"
-            name="city"
-            value={formData.city}
-            onChange={handleChange}
-            required
-          />
-        </div>
-        <div className="fg">
-          <label htmlFor="state">State *</label>
-          <input
-            type="text"
-            id="state"
-            name="state"
-            value={formData.state}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                state: e.target.value.toUpperCase().slice(0, 2),
-              })
-            }
-            required
-            maxLength={2}
-            placeholder="MA"
-          />
-        </div>
-        <div className="fg">
-          <label htmlFor="zip">Zip *</label>
-          <input
-            type="text"
-            id="zip"
-            name="zip"
-            value={formData.zip}
-            onChange={handleChange}
-            required
-          />
-        </div>
-      </div>
+          <div className="bk-field bk-full">
+            <label htmlFor="freq">Service Frequency</label>
+            <select id="freq" value={data.freq} onChange={update("freq")}>
+              <option>Monthly</option>
+              <option>Every 2 Months</option>
+              <option>Every 3 Months</option>
+            </select>
+          </div>
 
-      <div className="fg">
-        <label htmlFor="serviceFrequency">Service frequency</label>
-        <select
-          id="serviceFrequency"
-          name="serviceFrequency"
-          value={formData.serviceFrequency}
-          onChange={handleChange}
-        >
-          <option value="Monthly">Monthly</option>
-          <option value="Every 2 Months">Every 2 Months</option>
-          <option value="Every 3 Months">Every 3 Months</option>
-        </select>
+          <div className="bk-full bk-submit-row">
+            <button type="submit" className="bk-btn bk-btn-primary">
+              Submit
+            </button>
+          </div>
+        </form>
       </div>
-
-      <button type="submit" className="btn btn-primary btn-full">
-        Submit request
-      </button>
-    </form>
+    </section>
   );
 }
