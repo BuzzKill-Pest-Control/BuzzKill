@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { submitLead } from "../lib/leadIntake";
 
 type PropertyType = "Residential" | "Commercial";
 
@@ -16,6 +17,8 @@ export default function ContactForm({
 }: ContactFormProps) {
   const [type, setType] = useState<PropertyType>("Residential");
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [data, setData] = useState({
     first: "",
     last: "",
@@ -37,11 +40,30 @@ export default function ContactForm({
       setData({ ...data, [k]: e.target.value });
     };
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    // TODO: POST to FieldRoutes proxy (Amplify Function) with `type` + data
-    console.log("Lead submitted:", { propertyType: type, ...data });
-    setSubmitted(true);
+    if (submitting) return;
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const result = await submitLead({ propertyType: type, ...data });
+      if (result.ok) {
+        setSubmitted(true);
+      } else {
+        const msg =
+          ("error" in result.body && result.body.error) ||
+          `Something went wrong (status ${result.status}). Please try again or call 508-258-9294.`;
+        setErrorMsg(String(msg));
+      }
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "Network error. Please try again or call 508-258-9294.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (submitted) {
@@ -223,9 +245,37 @@ export default function ContactForm({
             </select>
           </div>
 
+          {errorMsg && (
+            <div
+              className="bk-full"
+              role="alert"
+              style={{
+                background: "#FFF4F2",
+                border: "1px solid #E53935",
+                color: "#7A1A0F",
+                borderRadius: 6,
+                padding: "12px 14px",
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              {errorMsg}
+            </div>
+          )}
+
           <div className="bk-full bk-submit-row">
-            <button type="submit" className="bk-btn bk-btn-primary">
-              Submit
+            <button
+              type="submit"
+              className="bk-btn bk-btn-primary"
+              disabled={submitting}
+              aria-busy={submitting}
+              style={
+                submitting
+                  ? { opacity: 0.7, cursor: "not-allowed" }
+                  : undefined
+              }
+            >
+              {submitting ? "Submitting…" : "Submit"}
             </button>
           </div>
         </form>
