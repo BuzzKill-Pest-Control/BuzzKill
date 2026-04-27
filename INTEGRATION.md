@@ -122,6 +122,29 @@ the upstream call. Useful when iterating on the mapping.
   add an AWS WAF rule on the Function URL or wire in reCAPTCHA / Cloudflare
   Turnstile on the client.
 
+## Hosting env vars and `amplify.yml`
+
+Amplify Hosting does **not** automatically pass env vars set in the
+Hosting Console into the Vite build process — see
+[aws-amplify/amplify-backend#2190](https://github.com/aws-amplify/amplify-backend/issues/2190).
+
+`amplify.yml` works around this with one line in the frontend phase:
+
+```yaml
+- env | grep -E '^VITE_' >> .env || true
+```
+
+That forwards any Hosting env var prefixed `VITE_` into a `.env` file
+so Vite picks it up. None of our integration paths *require* this —
+the lead-intake Function URL flows through `amplify_outputs.json`, not
+through env vars — but the line is there so a future
+`VITE_LEAD_INTAKE_URL` (or any other `VITE_*` override) just works
+without surprises.
+
+The Lambda's own env vars (`FIELDROUTES_KEY`, `FIELDROUTES_TOKEN`,
+`FIELDROUTES_SUBDOMAIN`) are injected into the Lambda runtime by
+CloudFormation via `secret()` and are unaffected by this issue.
+
 ## Rotating credentials
 
 If the API key + token are ever exposed (e.g. pasted in a chat),

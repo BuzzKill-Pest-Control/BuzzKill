@@ -67,34 +67,19 @@ const REQUIRED_FIELDS: (keyof LeadInput)[] = [
   "zip",
 ];
 
-const ALLOWED_ORIGINS = [
-  "https://www.pestbuzzkill.com",
-  "https://pestbuzzkill.com",
-  "https://buzzkill-pest-control.squarespace.com",
-  "http://localhost:5173",
-];
-
-function corsHeaders(origin: string | undefined): Record<string, string> {
-  const allowed =
-    origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
-  return {
-    "Access-Control-Allow-Origin": allowed,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "86400",
-    Vary: "Origin",
-  };
-}
+// CORS is configured on the Lambda Function URL itself (see
+// amplify/backend.ts). AWS adds the Access-Control-* headers to every
+// response automatically and handles OPTIONS preflight without invoking
+// the function. Setting CORS headers here too produces duplicate
+// values that browsers reject — see issue from prod 2026-04-27.
 
 function jsonResponse(
   statusCode: number,
   body: unknown,
-  origin: string | undefined,
 ): APIGatewayLikeResponse {
   return {
     statusCode,
     headers: {
-      ...corsHeaders(origin),
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(body),
@@ -148,17 +133,11 @@ function mapToFieldRoutes(input: LeadInput): Record<string, string> {
 }
 
 export const handler: Handler = async (event) => {
-  const origin = event.headers?.origin ?? event.headers?.Origin;
   const method =
     event.httpMethod ?? event.requestContext?.http?.method ?? "POST";
 
-  // CORS preflight
-  if (method === "OPTIONS") {
-    return { statusCode: 204, headers: corsHeaders(origin), body: "" };
-  }
-
   if (method !== "POST") {
-    return jsonResponse(405, { error: "Method not allowed" }, origin);
+    return jsonResponse(405, { error: "Method not allowed" });
   }
 
   // Parse body
@@ -168,30 +147,26 @@ export const handler: Handler = async (event) => {
       ? Buffer.from(event.body ?? "", "base64").toString("utf-8")
       : event.body ?? "";
   } catch {
-    return jsonResponse(400, { error: "Invalid body encoding" }, origin);
+    return jsonResponse(400, { error: "Invalid body encoding" });
   }
 
   let input: LeadInput;
   try {
     input = JSON.parse(raw || "{}") as LeadInput;
   } catch {
-    return jsonResponse(400, { error: "Body must be JSON" }, origin);
+    return jsonResponse(400, { error: "Body must be JSON" });
   }
 
   // Validate
   const missing = REQUIRED_FIELDS.filter((k) => !(input[k] ?? "").trim());
   if (missing.length > 0) {
-    return jsonResponse(
-      422,
-      { error: "Missing required fields", missing },
-      origin,
-    );
+    return jsonResponse(422, { error: "Missing required fields", missing });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((input.email ?? "").trim())) {
-    return jsonResponse(422, { error: "Invalid email" }, origin);
+    return jsonResponse(422, { error: "Invalid email" });
   }
   if (digitsOnly(input.phone).length < 7) {
-    return jsonResponse(422, { error: "Invalid phone" }, origin);
+    return jsonResponse(422, { error: "Invalid phone" });
   }
 
   const subdomain = process.env.FIELDROUTES_SUBDOMAIN ?? "buzzkill";
@@ -201,18 +176,16 @@ export const handler: Handler = async (event) => {
 
   if (!key || !token) {
     console.error("FieldRoutes credentials missing from environment");
-    return jsonResponse(
-      500,
-      { error: "Server misconfigured (credentials missing)" },
-      origin,
-    );
+    return jsonResponse(500, {
+      error: "Server misconfigured (credentials missing)",
+    });
   }
 
   const payload = mapToFieldRoutes(input);
 
   if (dryRun) {
     console.log("[dry-run] would-be FieldRoutes payload:", payload);
-    return jsonResponse(200, { ok: true, dryRun: true, payload }, origin);
+    return jsonResponse(200, { ok: true, dryRun: true, payload });
   }
 
   const url = `https://${subdomain}.pestroutes.com/api/customer/create`;
@@ -237,11 +210,7 @@ export const handler: Handler = async (event) => {
     upstreamText = await resp.text();
   } catch (err) {
     console.error("FieldRoutes fetch failed", err);
-    return jsonResponse(
-      502,
-      { error: "Upstream request failed" },
-      origin,
-    );
+    return jsonResponse(502, { error: "Upstream request failed" });
   }
 
   // FieldRoutes typically returns JSON like
@@ -263,15 +232,11 @@ export const handler: Handler = async (event) => {
   });
 
   if (upstreamStatus < 200 || upstreamStatus >= 300) {
-    return jsonResponse(
-      502,
-      {
-        error: "FieldRoutes rejected the request",
-        upstreamStatus,
-        upstreamBody: parsed ?? upstreamText.slice(0, 500),
-      },
-      origin,
-    );
+    return jsonResponse(502, {
+      error: "FieldRoutes rejected the request",
+      upstreamStatus,
+      upstreamBody: parsed ?? upstreamText.slice(0, 500),
+    });
   }
 
   // Success — but FieldRoutes may still report logical failure with HTTP 200.
@@ -281,22 +246,14 @@ export const handler: Handler = async (event) => {
     "success" in parsed &&
     (parsed as { success?: unknown }).success === false
   ) {
-    return jsonResponse(
-      502,
-      {
-        error: "FieldRoutes reported failure",
-        upstreamBody: parsed,
-      },
-      origin,
-    );
+    return jsonResponse(502, {
+      error: "FieldRoutes reported failure",
+      upstreamBody: parsed,
+    });
   }
 
-  return jsonResponse(
-    200,
-    {
-      ok: true,
-      upstream: parsed ?? upstreamText.slice(0, 500),
-    },
-    origin,
-  );
+  return jsonResponse(200, {
+    ok: true,
+    upstream: parsed ?? upstreamText.slice(0, 500),
+  });
 };
