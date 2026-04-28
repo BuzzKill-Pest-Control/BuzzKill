@@ -446,11 +446,41 @@ export const handler: Handler = async (event) => {
     }
   }
 
+  // ── Step 4: Create contract and email to customer ─────────────────
+  // contract/create generates the default agreement for the subscription
+  // and emailCustomer=1 sends the signing link to the customer.
+  let contractWarning: string | undefined;
+  let contractID: number | undefined;
+
+  if (subscriptionID) {
+    try {
+      const contractResult = await frPost(subdomain, key, token, "contract/create", {
+        subscriptionID,
+        emailCustomer: 1,
+        notifyCustomerOnSignedAgreement: 1,
+      });
+      console.log("contract/create response", contractResult);
+
+      if (contractResult.body.success === false) {
+        contractWarning = `contract/create rejected: ${JSON.stringify(contractResult.body)}`;
+        console.warn(contractWarning);
+      } else {
+        contractID = Number(contractResult.body.result) || undefined;
+      }
+    } catch (err) {
+      const e = err as { message?: string };
+      contractWarning = `contract/create failed: ${e?.message ?? String(err)}`;
+      console.error(contractWarning);
+    }
+  }
+
   return jsonResponse(200, {
     ok: true,
     customerID,
     subscriptionID: subscriptionID || undefined,
+    contractID,
     ...(ticketWarning ? { ticketWarning } : {}),
+    ...(contractWarning ? { contractWarning } : {}),
     upstream: {
       customer: customerResult.body,
       subscription: subResult.body,
