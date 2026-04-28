@@ -370,64 +370,35 @@ export const handler: Handler = async (event) => {
 
   const subscriptionID = Number(subResult.body.result);
 
-  // ── Step 3: Set CNT (quantity) on subscription initial addon ──────
-  // The CNT on the base service line is the `quantity` on the initial
-  // addon item. Use subscription/getInitialAddOns to find the addOnID,
-  // then subscription/updateInitialAddOn to set the quantity.
-  // These endpoints work at the subscription level (before tickets exist).
+  // ── Step 3: Set quantity via subscription/createInitialAddOn ──────
+  // The base service charge is created automatically by FieldRoutes
+  // from the service type template. To set the CNT (quantity) column,
+  // we add an initial addon with the unit count / sqft as quantity.
+  // This requires a productID — we use serviceID as the product
+  // reference since they map to the same service type.
   const isAssociation = input.propertyType === "Association";
   const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
   let ticketWarning: string | undefined;
 
   if (subscriptionID && cnt > 0) {
     try {
-      const addonsResult = await frPost(subdomain, key, token, "subscription/getInitialAddOns", {
+      const addonResult = await frPost(subdomain, key, token, "subscription/createInitialAddOn", {
         subscriptionID,
+        productID: 0,
+        amount: 0,
+        quantity: cnt,
+        taxable: 0,
+        description: isAssociation ? "Units" : "Square Footage",
       });
-      console.log("subscription/getInitialAddOns response", addonsResult);
+      console.log("subscription/createInitialAddOn response", addonResult);
 
-      // Response is an array of addon objects with addOnID, quantity, amount, etc.
-      const addons = addonsResult.body;
-      let baseAddon: Record<string, unknown> | undefined;
-
-      // Find the base service item
-      if (addons && typeof addons === "object") {
-        const arr = Array.isArray(addons.result)
-          ? addons.result
-          : Array.isArray(addons)
-            ? addons
-            : Object.values(addons).filter((v): v is Record<string, unknown> =>
-                typeof v === "object" && v !== null && "addOnID" in (v as Record<string, unknown>));
-
-        if (arr.length > 0) {
-          baseAddon = arr[0] as Record<string, unknown>;
-        }
-      }
-
-      if (baseAddon) {
-        const addOnID = Number(baseAddon.addOnID);
-        const currentAmount = baseAddon.amount ?? 0;
-
-        const updateResult = await frPost(subdomain, key, token, "subscription/updateInitialAddOn", {
-          subscriptionID,
-          addOnID,
-          quantity: cnt,
-          amount: Number(currentAmount),
-          taxable: Number(baseAddon.taxable ?? 0),
-        });
-        console.log("subscription/updateInitialAddOn response", updateResult);
-
-        if (updateResult.body.success === false) {
-          ticketWarning = `updateInitialAddOn rejected: ${JSON.stringify(updateResult.body)}`;
-          console.warn(ticketWarning);
-        }
-      } else {
-        ticketWarning = "No initial addons found on subscription";
-        console.warn(ticketWarning, { subscriptionID });
+      if (addonResult.body.success === false) {
+        ticketWarning = `createInitialAddOn rejected: ${JSON.stringify(addonResult.body)}`;
+        console.warn(ticketWarning);
       }
     } catch (err) {
       const e = err as { message?: string };
-      ticketWarning = `Subscription addon update failed: ${e?.message ?? String(err)}`;
+      ticketWarning = `createInitialAddOn failed: ${e?.message ?? String(err)}`;
       console.error(ticketWarning);
     }
   }
