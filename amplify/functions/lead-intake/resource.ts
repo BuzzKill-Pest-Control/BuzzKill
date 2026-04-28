@@ -24,9 +24,6 @@ export const leadIntake = defineFunction({
   name: "lead-intake",
   entry: "./handler.ts",
   timeoutSeconds: 30,
-  bundling: {
-    externalModules: ["@aws-sdk/*"],
-  },
   environment: {
     FIELDROUTES_KEY: secret("FIELDROUTES_KEY"),
     FIELDROUTES_TOKEN: secret("FIELDROUTES_TOKEN"),

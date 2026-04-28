@@ -1,5 +1,13 @@
+import SEO from "../components/SEO";
+
 export default function PrivacyPolicy() {
   return (
+    <>
+    <SEO
+      title="Privacy Policy"
+      description="BuzzKill Pest Control privacy policy. Learn how we collect, use, and protect your information when you use our services or visit our website."
+      noindex
+    />
     <section className="bk-legal">
       <div className="bk-container bk-narrow">
         <h1>Privacy Policy</h1>
@@ -191,5 +199,6 @@ export default function PrivacyPolicy() {
         </p>
       </div>
     </section>
+    </>
   );
 }

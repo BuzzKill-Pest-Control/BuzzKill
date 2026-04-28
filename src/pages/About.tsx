@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import ContactForm from "../components/ContactForm";
+import SEO, { buildBreadcrumbSchema } from "../components/SEO";
 
 export default function About() {
   const navigate = useNavigate();
@@ -10,6 +11,14 @@ export default function About() {
 
   return (
     <>
+      <SEO
+        title="About BuzzKill Pest Control"
+        description="BuzzKill Pest Control specializes in condo and HOA pest management across Massachusetts, New Hampshire, and Rhode Island. Building-wide prevention, professional communication, and owner convenience."
+        jsonLd={buildBreadcrumbSchema([
+          { name: "Home", url: "/" },
+          { name: "About", url: "/about" },
+        ])}
+      />
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">About BuzzKill</div>
@@ -64,7 +73,7 @@ export default function About() {
           <h2 className="bk-h2 bk-center">What Makes BuzzKill Different</h2>
           <div className="bk-why-grid" style={{ marginTop: 48 }}>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Condo-first expertise</h4>
+              <h3 className="bk-h4">Condo-first expertise</h3>
               <p className="bk-p">
                 We focus on the areas where pests travel and hide in multi-unit
                 buildings&mdash;shared spaces, utility areas, basements, and
@@ -72,14 +81,14 @@ export default function About() {
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Prevention over panic</h4>
+              <h3 className="bk-h4">Prevention over panic</h3>
               <p className="bk-p">
                 Our programs are built around reducing pest pressure long-term,
                 not just responding to complaints.
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Simple coordination for owners</h4>
+              <h3 className="bk-h4">Simple coordination for owners</h3>
               <p className="bk-p">
                 {"When we\u2019re already onsite for HOA service, owners can schedule discounted in\u2011unit service online\u2014without burdening the HOA or property manager with payments or manual scheduling."}
               </p>

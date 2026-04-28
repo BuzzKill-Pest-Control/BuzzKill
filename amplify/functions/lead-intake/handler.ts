@@ -230,18 +230,17 @@ const EMAIL_SIGNATURE = `
 </table>`;
 
 // ── SES email helper ─────────────────────────────────────────────────
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+
+const sesClient = new SESClient({});
+
 async function sendEmail(
   from: string,
   to: string,
   subject: string,
   htmlBody: string,
 ): Promise<void> {
-  // Dynamic import — only loads the SDK if we actually send
-  const { SESClient, SendEmailCommand } = await import(
-    "@aws-sdk/client-ses"
-  );
-  const ses = new SESClient({});
-  await ses.send(
+  await sesClient.send(
     new SendEmailCommand({
       Source: from,
       Destination: { ToAddresses: [to] },

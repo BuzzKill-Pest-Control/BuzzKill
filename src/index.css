@@ -976,3 +976,74 @@ h6 {
 .bk-legal a:hover {
   color: var(--bk-green-deep);
 }
+
+/* =========================================================================
+   ACCESSIBILITY
+   ========================================================================= */
+
+/* Focus-visible for keyboard users on all interactive elements */
+.bk-btn:focus-visible,
+.bk-nav-link:focus-visible,
+.bk-nav-login:focus-visible,
+.bk-seg:focus-visible,
+.bk-hamburger:focus-visible {
+  outline: 3px solid var(--bk-green);
+  outline-offset: 2px;
+}
+.bk-field input:focus-visible,
+.bk-field select:focus-visible {
+  outline: 2px solid var(--bk-green);
+  outline-offset: 1px;
+}
+a:focus-visible {
+  outline: 2px solid var(--bk-green);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip to content link (screen-reader accessible) */
+.bk-skip-link {
+  position: absolute;
+  top: -100px;
+  left: 16px;
+  z-index: 9999;
+  background: var(--bk-green);
+  color: var(--bk-black);
+  padding: 12px 24px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: top var(--dur-fast);
+}
+.bk-skip-link:focus {
+  top: 16px;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .bk-hero-video {
+    display: none;
+  }
+}
+
+/* Screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

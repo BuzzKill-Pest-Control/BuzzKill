@@ -18,7 +18,7 @@ export default function WhyUs({ title, items }: WhyUsProps) {
         <div className="bk-why-grid">
           {items.map((it, i) => (
             <div className="bk-why-item" key={i}>
-              <h4 className="bk-h4 bk-on-dark">{it.title}</h4>
+              <h3 className="bk-h4 bk-on-dark">{it.title}</h3>
               <p className="bk-p bk-on-dark-soft">{it.body}</p>
             </div>
           ))}

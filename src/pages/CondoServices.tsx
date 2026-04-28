@@ -1,6 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import FAQ from "../components/FAQ";
 import ContactForm from "../components/ContactForm";
+import SEO, { buildServiceSchema, buildBreadcrumbSchema, buildFAQSchema } from "../components/SEO";
+
+const CONDO_FAQS = [
+  { q: "Do you require owner participation?", a: "No. Owner participation is optional. The HOA contract remains separate from any owner in‑unit service." },
+  { q: "Can you service multiple buildings within a community?", a: "Yes. We can set up one program that covers all buildings and common areas, with clear scheduling." },
+  { q: "Do you provide reports or notes after service?", a: "Yes—service notes are provided in a format that works for property management and board records." },
+];
 
 export default function CondoServices() {
   const navigate = useNavigate();
@@ -11,7 +18,23 @@ export default function CondoServices() {
 
   return (
     <>
-      {/* Lowercase title hero — matches live site quirk */}
+      <SEO
+        title="HOA & Condo Common-Area Pest Control"
+        description="Reliable common-area pest control for condominiums, HOAs, and multi-unit communities in Massachusetts, New Hampshire, and Rhode Island. Preventative programs with board-friendly documentation."
+        jsonLd={[
+          buildServiceSchema(
+            "HOA & Condo Common-Area Pest Control",
+            "Preventative pest control for HOA-owned areas, building exteriors, basements, utility rooms, and shared spaces in multi-unit residential communities.",
+            "/condo-services",
+          ),
+          buildBreadcrumbSchema([
+            { name: "Home", url: "/" },
+            { name: "Condo Services", url: "/condo-services" },
+          ]),
+          buildFAQSchema(CONDO_FAQS),
+        ]}
+      />
+      {/* Hero */}
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">For HOA Boards &amp; Property Managers</div>
@@ -76,20 +99,20 @@ export default function CondoServices() {
           </p>
           <div className="bk-why-grid" style={{ marginTop: 48 }}>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Consistent scheduling</h4>
+              <h3 className="bk-h4">Consistent scheduling</h3>
               <p className="bk-p">
                 {"Monthly, bi\u2011monthly, or quarterly service plans to maintain control and reduce recurring issues."}
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Monitoring and documentation</h4>
+              <h3 className="bk-h4">Monitoring and documentation</h3>
               <p className="bk-p">
                 We track pest activity patterns and provide board-friendly notes
                 that help you make informed decisions.
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4">Practical recommendations</h4>
+              <h3 className="bk-h4">Practical recommendations</h3>
               <p className="bk-p">
                 {"We\u2019ll flag conditions that attract pests (trash handling, clutter in storage areas, entry points, moisture issues) and recommend improvements that help reduce pressure over time."}
               </p>

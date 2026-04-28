@@ -1,5 +1,12 @@
 import FAQ from "../components/FAQ";
 import ContactForm from "../components/ContactForm";
+import SEO, { buildServiceSchema, buildBreadcrumbSchema, buildFAQSchema } from "../components/SEO";
+
+const INUNIT_FAQS = [
+  { q: "Do I need in‑unit service if the HOA treats common areas?", a: "Not always. But in‑unit service can help if you’re actively seeing pest activity, or if your building has recurring pressure." },
+  { q: "How much does it cost?", a: "Pricing varies by service type and issue. When available, HOA-onsite pricing will be clearly shown during booking." },
+  { q: "Is it safe for kids and pets?", a: "We prioritize methods suitable for occupied homes and apply all products according to label and regulations. You’ll receive any guidance needed for your specific service." },
+];
 
 export default function InUnitServices() {
   const goToForm = () => {
@@ -9,7 +16,23 @@ export default function InUnitServices() {
 
   return (
     <>
-      {/* Lowercase title hero — matches live site quirk */}
+      <SEO
+        title="In-Unit Pest Control for Condo Owners"
+        description="Optional, discounted in-unit pest control timed with your HOA's common-area service days. Schedule and pay online for convenient, grouped appointments in Massachusetts, NH, and RI."
+        jsonLd={[
+          buildServiceSchema(
+            "In-Unit Pest Control for Condo Owners",
+            "Optional, discounted in-unit pest control for condo owners, timed with HOA common-area service visits for convenience and savings.",
+            "/in-unit-services",
+          ),
+          buildBreadcrumbSchema([
+            { name: "Home", url: "/" },
+            { name: "In-Unit Services", url: "/in-unit-services" },
+          ]),
+          buildFAQSchema(INUNIT_FAQS),
+        ]}
+      />
+      {/* Hero */}
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">For Unit Owners</div>
@@ -17,9 +40,9 @@ export default function InUnitServices() {
           <p className="bk-body-lead">
             {"If BuzzKill is already scheduled to service your community\u2019s common areas, you may be able to book discounted in\u2011unit pest control during the same visit window."}
           </p>
-          <h3 className="bk-h3" style={{ marginTop: 24 }}>
+          <h2 className="bk-h3" style={{ marginTop: 24 }}>
             {"It\u2019s simple:"}
-          </h3>
+          </h2>
           <ul className="bk-bullets">
             <li>Schedule online</li>
             <li>Pay online</li>
@@ -77,20 +100,20 @@ export default function InUnitServices() {
           </h2>
           <div className="bk-why-grid" style={{ marginTop: 48 }}>
             <div className="bk-why-item">
-              <h4 className="bk-h4 bk-on-dark">Discounted and efficient</h4>
+              <h3 className="bk-h4 bk-on-dark">Discounted and efficient</h3>
               <p className="bk-p bk-on-dark-soft">
                 {"Because we\u2019re already onsite for common-area service, we can group in\u2011unit appointments\u2014saving time and reducing cost."}
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4 bk-on-dark">Better building-wide results</h4>
+              <h3 className="bk-h4 bk-on-dark">Better building-wide results</h3>
               <p className="bk-p bk-on-dark-soft">
                 When both common areas and select units are treated, the
                 community often experiences improved overall control.
               </p>
             </div>
             <div className="bk-why-item">
-              <h4 className="bk-h4 bk-on-dark">Convenient scheduling</h4>
+              <h3 className="bk-h4 bk-on-dark">Convenient scheduling</h3>
               <p className="bk-p bk-on-dark-soft">
                 {"No waiting weeks for a separate visit\u2014book your spot while BuzzKill is already scheduled."}
               </p>

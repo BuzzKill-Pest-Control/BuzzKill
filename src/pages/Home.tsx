@@ -4,6 +4,27 @@ import NumberedSteps from "../components/NumberedSteps";
 import WhyUs from "../components/WhyUs";
 import FAQ from "../components/FAQ";
 import ContactForm from "../components/ContactForm";
+import SEO, {
+  ORG_SCHEMA,
+  LOCAL_BUSINESS_SCHEMA,
+  WEBSITE_SCHEMA,
+  buildFAQSchema,
+} from "../components/SEO";
+
+const HOME_FAQS = [
+  {
+    q: "Do you only work with condos / HOAs?",
+    a: "Our primary focus is condos and HOAs, because that’s where our model provides the most value.",
+  },
+  {
+    q: "Is in‑unit service required?",
+    a: "No. In‑unit service is optional and scheduled directly by the unit owner.",
+  },
+  {
+    q: "Do you coordinate communication to owners?",
+    a: "Yes—BuzzKill provides a scheduling / payment link and suggested announcement copy; your property manager can distribute it to owners.",
+  },
+];
 
 export default function Home() {
   const navigate = useNavigate();
@@ -14,6 +35,10 @@ export default function Home() {
 
   return (
     <>
+      <SEO
+        description="Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts, New Hampshire, and Rhode Island. Common-area pest management and optional discounted in-unit service."
+        jsonLd={[ORG_SCHEMA, LOCAL_BUSINESS_SCHEMA, WEBSITE_SCHEMA, buildFAQSchema(HOME_FAQS)]}
+      />
       <Hero
         image="/images/hero-home-1.jpg"
         video="/images/hero-video.mp4"

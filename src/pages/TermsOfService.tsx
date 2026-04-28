@@ -1,5 +1,13 @@
+import SEO from "../components/SEO";
+
 export default function TermsOfService() {
   return (
+    <>
+    <SEO
+      title="Terms of Service"
+      description="BuzzKill Pest Control terms of service. Review the terms governing use of our website and pest control services."
+      noindex
+    />
     <section className="bk-legal">
       <div className="bk-container bk-narrow">
         <h1>Terms of Service</h1>
@@ -143,5 +151,6 @@ export default function TermsOfService() {
         </p>
       </div>
     </section>
+    </>
   );
 }

@@ -47,6 +47,8 @@ export default function Hero({
     <section
       className={`bk-hero${video ? " bk-hero--video" : ""}`}
       style={video ? undefined : { backgroundImage: `url(${image})` }}
+      role="img"
+      aria-label="BuzzKill Pest Control — professional pest management for condos and HOAs"
     >
       {video && (
         <video
