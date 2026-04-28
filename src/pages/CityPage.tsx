@@ -83,9 +83,7 @@ export default function CityPage() {
             technicians understand the pest pressures unique to the{" "}
             {stateAbbr === "MA"
               ? "Greater Boston and MetroWest"
-              : stateAbbr === "NH"
-                ? "Southern New Hampshire"
-                : "Rhode Island"}{" "}
+              : "Rhode Island"}{" "}
             area.
           </p>
         </div>

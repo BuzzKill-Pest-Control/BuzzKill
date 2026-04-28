@@ -24,6 +24,7 @@ type Property = {
   city: string;
   state: string;
   zip: string;
+  frequency?: string; // "Monthly" | "Every 2 Months" | "Every 3 Months"
 };
 
 const PROPERTY_MAP: Record<string, Property> = {};
@@ -46,6 +47,13 @@ export default function Schedule() {
 
   if (!property) return <Navigate to="/" replace />;
 
+  const freq = property.frequency ?? "Monthly";
+  const freqLabel =
+    freq === "Every 2 Months"
+      ? "Bi-Monthly"
+      : freq === "Every 3 Months"
+        ? "Quarterly"
+        : "Monthly";
   const fullAddr = `${property.address}${unit ? `, Unit ${unit}` : ""}`;
 
   async function handleSubmit(e: FormEvent) {
@@ -65,7 +73,7 @@ export default function Schedule() {
         zip: property!.zip,
         sqft: "",
         units: "",
-        freq: "Monthly",
+        freq: freq,
         company: property!.name,
       });
       if (result.ok) {
@@ -219,6 +227,9 @@ export default function Schedule() {
                 <div style={{ fontSize: 13, color: "var(--fg2)" }}>
                   {property.address}, {property.city}, {property.state}{" "}
                   {property.zip}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--bk-green-deep)", fontWeight: 600, marginTop: 2 }}>
+                  {freqLabel} service
                 </div>
               </div>
             </div>
@@ -407,11 +418,48 @@ export default function Schedule() {
               </button>
             </form>
 
-            {/* Trust signals */}
+            {/* Payment timing notice */}
+            <div
+              style={{
+                marginTop: 20,
+                padding: "14px 18px",
+                background: "rgba(126, 211, 33, 0.08)",
+                border: "1px solid rgba(126, 211, 33, 0.3)",
+                borderLeft: "4px solid var(--bk-green)",
+                borderRadius: "0 8px 8px 0",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--bk-green-deep)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0, marginTop: 2 }}
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div style={{ fontSize: 13, color: "var(--fg1)", lineHeight: 1.55 }}>
+                <strong>No payment required to sign up.</strong> Your invoice
+                is generated <em>after</em> we complete your service — pay
+                only once the work is done.
+              </div>
+            </div>
+
+            {/* How it works */}
             <div
               style={{
                 textAlign: "center",
-                marginTop: 24,
+                marginTop: 20,
                 fontSize: 13,
                 color: "var(--fg3)",
                 lineHeight: 1.6,
@@ -432,7 +480,7 @@ export default function Schedule() {
                 marginTop: 20,
               }}
             >
-              {["Licensed & Insured", "Safe for Families", "Discounted Rate"].map(
+              {["Licensed & Insured", "Pay After Service", "Discounted Rate"].map(
                 (t, i) => (
                   <div
                     key={i}
@@ -513,8 +561,9 @@ export default function Schedule() {
               <strong>
                 Unit {unit} at {property.name}
               </strong>{" "}
-              during our upcoming visit. A confirmation has been sent to{" "}
-              <strong>{email}</strong>.
+              on the same <strong>{freqLabel}</strong> schedule as your
+              community&rsquo;s common-area service. A confirmation has been
+              sent to <strong>{email}</strong>.
             </p>
             <p style={{ fontSize: 14, color: "var(--fg3)", marginTop: 16 }}>
               Questions? Call{" "}

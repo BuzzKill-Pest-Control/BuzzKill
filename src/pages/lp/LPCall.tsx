@@ -149,7 +149,7 @@ export default function LPCall() {
 
             {/* Trust bar */}
             <div style={{ marginTop: 40, display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
-              {["Licensed & Insured", "MA • NH • RI", "HOA Specialists"].map((t, i) => (
+              {["Licensed & Insured", "MA • RI", "HOA Specialists"].map((t, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--bk-green)" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5" /></svg>
                   {t}

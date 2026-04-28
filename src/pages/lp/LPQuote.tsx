@@ -181,7 +181,7 @@ export default function LPQuote() {
             </form>
 
             <div style={{ textAlign: "center", marginTop: 24, fontSize: 13, color: "var(--fg3)" }}>
-              Licensed &amp; insured in MA, NH, and RI &bull; 508-258-9294
+              Licensed &amp; insured in MA and RI &bull; 508-258-9294
             </div>
           </>
         )}

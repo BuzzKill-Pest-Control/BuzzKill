@@ -36,7 +36,7 @@ export default function Home() {
   return (
     <>
       <SEO
-        description="Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts, New Hampshire, and Rhode Island. Common-area pest management and optional discounted in-unit service."
+        description="Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts and Rhode Island. Common-area pest management and optional discounted in-unit service."
         jsonLd={[ORG_SCHEMA, LOCAL_BUSINESS_SCHEMA, WEBSITE_SCHEMA, buildFAQSchema(HOME_FAQS)]}
       />
       <Hero

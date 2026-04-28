@@ -20,9 +20,6 @@ function entry(city: string, state: string, stateAbbr: string): CityEntry {
 // ── Massachusetts ────────────────────────────────────────────────────
 const MA = (city: string) => entry(city, "Massachusetts", "MA");
 
-// ── New Hampshire ────────────────────────────────────────────────────
-const NH = (city: string) => entry(city, "New Hampshire", "NH");
-
 // ── Rhode Island ─────────────────────────────────────────────────────
 const RI = (city: string) => entry(city, "Rhode Island", "RI");
 
@@ -82,8 +79,6 @@ export const CITIES: CityEntry[] = [
   MA("Whitman"),
   MA("Worcester"),
   MA("Wrentham"),
-  // New Hampshire
-  NH("Nashua"),
   // Rhode Island
   RI("North Providence"),
   RI("Providence"),

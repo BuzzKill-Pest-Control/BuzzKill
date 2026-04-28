@@ -504,7 +504,6 @@ h6 {
   font-weight: 700;
   font-size: clamp(56px, 8vw, 96px);
   line-height: 1;
-  text-transform: lowercase;
   margin: 0 0 32px;
   color: inherit;
 }
@@ -785,6 +784,300 @@ h6 {
 @media (max-width: 880px) {
   .bk-form {
     grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================================
+   WIZARD FORM (multi-step ContactForm)
+   ========================================================================= */
+.bk-form-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  margin-top: 32px;
+  box-shadow: var(--shadow-md);
+}
+
+/* Stepper / progress indicator */
+.bk-stepper {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 36px;
+  position: relative;
+  padding: 0 8px;
+}
+.bk-stepper__step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+.bk-stepper__num {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--border-strong);
+  color: var(--fg2);
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-base) var(--ease-out);
+}
+.bk-stepper__label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg2);
+  transition: color var(--dur-base);
+}
+.bk-stepper__line {
+  position: absolute;
+  top: 17px;
+  left: calc(50% + 22px);
+  right: calc(-50% + 22px);
+  height: 2px;
+  background: var(--border-strong);
+  z-index: -1;
+  transition: background var(--dur-base);
+}
+.bk-stepper__step.is-active .bk-stepper__num {
+  background: var(--bk-black);
+  border-color: var(--bk-black);
+  color: var(--bk-green);
+  box-shadow: 0 0 0 4px rgba(126, 211, 33, 0.18);
+}
+.bk-stepper__step.is-active .bk-stepper__label {
+  color: var(--fg1);
+}
+.bk-stepper__step.is-done .bk-stepper__num {
+  background: var(--bk-green);
+  border-color: var(--bk-green);
+  color: var(--bk-black);
+}
+.bk-stepper__step.is-done .bk-stepper__line {
+  background: var(--bk-green);
+}
+.bk-stepper__step.is-done .bk-stepper__label {
+  color: var(--fg1);
+}
+
+/* Wizard form steps */
+.bk-form-wizard {
+  display: block;
+}
+.bk-form-step {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  animation: bkFadeIn var(--dur-base) var(--ease-out);
+}
+.bk-form-step .bk-field {
+  grid-column: span 1;
+}
+.bk-form-step .bk-field.bk-full {
+  grid-column: 1 / -1;
+}
+.bk-form-step__title {
+  grid-column: 1 / -1;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--fg1);
+  margin: 0 0 4px;
+}
+.bk-form-step__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.bk-form-step__actions .bk-btn:only-child {
+  margin-left: auto;
+}
+
+/* Multi-column rows inside steps */
+.bk-form-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.bk-form-row--3 {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+/* Segmented control — full width variant */
+.bk-segmented--full {
+  display: flex;
+  width: 100%;
+}
+.bk-segmented--full .bk-seg {
+  flex: 1;
+  text-align: center;
+}
+
+/* Live quote preview card */
+.bk-quote-preview {
+  grid-column: 1 / -1;
+  background: linear-gradient(
+    180deg,
+    rgba(126, 211, 33, 0.08) 0%,
+    rgba(126, 211, 33, 0.02) 100%
+  );
+  border: 1px solid rgba(126, 211, 33, 0.3);
+  border-left: 4px solid var(--bk-green);
+  border-radius: 0 8px 8px 0;
+  padding: 18px 22px;
+  animation: bkFadeIn var(--dur-base) var(--ease-out);
+}
+.bk-quote-preview__label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bk-green-deep);
+  margin-bottom: 6px;
+}
+.bk-quote-preview__price {
+  font-family: var(--font-heading);
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg1);
+}
+.bk-quote-preview__per {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--fg2);
+}
+.bk-quote-preview__meta {
+  font-size: 13px;
+  color: var(--fg2);
+  margin-top: 4px;
+}
+
+/* Inline error */
+.bk-form-error {
+  grid-column: 1 / -1;
+  background: #FFF4F2;
+  border: 1px solid #E53935;
+  color: #7A1A0F;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Success state */
+.bk-form-success-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bk-green);
+  color: var(--bk-black);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+/* Final quote card on success */
+.bk-quote-card {
+  background: #F7F7F4;
+  border-left: 4px solid var(--bk-green);
+  border-radius: 0 8px 8px 0;
+  padding: 20px 24px;
+  margin: 24px auto;
+  max-width: 380px;
+  text-align: left;
+}
+.bk-quote-card__label {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bk-green-deep);
+  margin-bottom: 6px;
+}
+.bk-quote-card__price {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg1);
+}
+.bk-quote-card__per {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--fg2);
+}
+.bk-quote-card__meta {
+  font-size: 14px;
+  color: var(--fg2);
+  margin-top: 6px;
+}
+
+/* Trust bar */
+.bk-form-trust {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding: 0 16px;
+}
+.bk-form-trust__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+.bk-form-trust__item svg {
+  color: var(--bk-green-deep);
+}
+
+@keyframes bkFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .bk-form-card {
+    padding: 24px 18px;
+  }
+  .bk-form-step,
+  .bk-form-row {
+    grid-template-columns: 1fr;
+  }
+  .bk-form-row--3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .bk-stepper__label {
+    font-size: 11px;
   }
 }
 

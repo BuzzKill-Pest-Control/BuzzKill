@@ -94,7 +94,7 @@ export default function LPProtect() {
               "Common areas, basements, exteriors — covered",
               "Optional discounted in-unit service for owners",
               "Board-friendly documentation and scheduling",
-              "Licensed & insured in MA, NH, and RI",
+              "Licensed & insured in MA and RI",
             ].map((t, i) => (
               <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--bk-green)" strokeWidth="3" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 2 }}><path d="M20 6L9 17l-5-5" /></svg>

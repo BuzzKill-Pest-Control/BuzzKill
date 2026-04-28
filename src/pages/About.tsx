@@ -13,7 +13,7 @@ export default function About() {
     <>
       <SEO
         title="About BuzzKill Pest Control"
-        description="BuzzKill Pest Control specializes in condo and HOA pest management across Massachusetts, New Hampshire, and Rhode Island. Building-wide prevention, professional communication, and owner convenience."
+        description="BuzzKill Pest Control specializes in condo and HOA pest management across Massachusetts and Rhode Island. Building-wide prevention, professional communication, and owner convenience."
         jsonLd={buildBreadcrumbSchema([
           { name: "Home", url: "/" },
           { name: "About", url: "/about" },

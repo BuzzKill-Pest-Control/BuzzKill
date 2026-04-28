@@ -1,5 +1,11 @@
 User-agent: *
 Allow: /
 
+# Private resident-signup pages (per-property links shared by HOAs only)
+Disallow: /schedule/
+
+# Ad landing pages (paid traffic only — should not compete with organic)
+Disallow: /lp/
+
 # Sitemap
 Sitemap: https://www.pestbuzzkill.com/sitemap.xml

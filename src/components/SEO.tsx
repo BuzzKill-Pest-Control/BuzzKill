@@ -6,7 +6,7 @@ const SITE_NAME = "BuzzKill Pest Control";
 const DEFAULT_TITLE =
   "BuzzKill Pest Control | HOA & Condo Pest Control in Massachusetts";
 const DEFAULT_DESCRIPTION =
-  "Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts, New Hampshire, and Rhode Island. Common-area pest management and optional in-unit service.";
+  "Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts and Rhode Island. Common-area pest management and optional in-unit service.";
 const DEFAULT_IMAGE = `${SITE_URL}/images/hero-home-1.jpg`;
 
 interface SEOProps {
@@ -174,7 +174,6 @@ export const LOCAL_BUSINESS_SCHEMA = {
   },
   areaServed: [
     { "@type": "State", name: "Massachusetts" },
-    { "@type": "State", name: "New Hampshire" },
     { "@type": "State", name: "Rhode Island" },
   ],
   openingHoursSpecification: {
@@ -234,7 +233,6 @@ export function buildServiceSchema(
     provider: { "@id": `${SITE_URL}/#organization` },
     areaServed: [
       { "@type": "State", name: "Massachusetts" },
-      { "@type": "State", name: "New Hampshire" },
       { "@type": "State", name: "Rhode Island" },
     ],
     serviceType: "Pest Control",

@@ -18,7 +18,7 @@ export default function InUnitServices() {
     <>
       <SEO
         title="In-Unit Pest Control for Condo Owners"
-        description="Optional, discounted in-unit pest control timed with your HOA's common-area service days. Schedule and pay online for convenient, grouped appointments in Massachusetts, NH, and RI."
+        description="Optional, discounted in-unit pest control timed with your HOA's common-area service days. Schedule and pay online for convenient, grouped appointments in Massachusetts and Rhode Island."
         jsonLd={[
           buildServiceSchema(
             "In-Unit Pest Control for Condo Owners",

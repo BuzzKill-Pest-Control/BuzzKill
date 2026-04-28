@@ -20,7 +20,7 @@ export default function CondoServices() {
     <>
       <SEO
         title="HOA & Condo Common-Area Pest Control"
-        description="Reliable common-area pest control for condominiums, HOAs, and multi-unit communities in Massachusetts, New Hampshire, and Rhode Island. Preventative programs with board-friendly documentation."
+        description="Reliable common-area pest control for condominiums, HOAs, and multi-unit communities in Massachusetts and Rhode Island. Preventative programs with board-friendly documentation."
         jsonLd={[
           buildServiceSchema(
             "HOA & Condo Common-Area Pest Control",
