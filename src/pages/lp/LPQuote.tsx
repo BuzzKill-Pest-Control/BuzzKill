@@ -6,16 +6,13 @@
  * - Interactive calculator creates investment (sunk-cost)
  * - Price reveal creates urgency to "lock it in"
  * - Minimal form after price is shown (progressive disclosure)
- *
- * Best for: Property managers comparison-shopping, price-sensitive leads
- * Google Ads match: "HOA pest control cost", "condo pest control pricing"
  */
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { submitLead } from "../../lib/leadIntake";
 import SEO from "../../components/SEO";
 
-// Pricing logic (mirrors handler.ts)
+// Pricing logic mirrors handler.ts; tables are monthly billing rates.
 const BASE: Record<string, number> = {
   "Association:Monthly": 110,
   "Association:Every 2 Months": 90,
@@ -25,13 +22,58 @@ const BASE: Record<string, number> = {
   "Residential:Every 3 Months": 45,
 };
 
-const TIERS: Record<string, { threshold: number; tiers: { min: number; max: number; per: number; premium: number }[] }> = {
-  "Association:Monthly": { threshold: 10, tiers: [{ min: 11, max: 25, per: 15, premium: 55 }, { min: 26, max: 50, per: 25, premium: 100 }, { min: 51, max: 100, per: 50, premium: 140 }, { min: 101, max: 0, per: 100, premium: 275 }] },
-  "Association:Every 2 Months": { threshold: 10, tiers: [{ min: 11, max: 25, per: 15, premium: 40 }, { min: 26, max: 50, per: 25, premium: 80 }, { min: 51, max: 100, per: 50, premium: 115 }, { min: 101, max: 0, per: 100, premium: 150 }] },
-  "Association:Every 3 Months": { threshold: 10, tiers: [{ min: 11, max: 25, per: 15, premium: 35 }, { min: 26, max: 50, per: 25, premium: 65 }, { min: 51, max: 100, per: 50, premium: 90 }, { min: 101, max: 0, per: 100, premium: 180 }] },
-  "Residential:Monthly": { threshold: 1000, tiers: [{ min: 1001, max: 4000, per: 1000, premium: 15 }, { min: 4001, max: 0, per: 1000, premium: 23 }] },
-  "Residential:Every 2 Months": { threshold: 1000, tiers: [{ min: 1001, max: 4000, per: 1000, premium: 13 }, { min: 4001, max: 0, per: 1000, premium: 19 }] },
-  "Residential:Every 3 Months": { threshold: 1000, tiers: [{ min: 1001, max: 4000, per: 1000, premium: 10 }, { min: 4001, max: 0, per: 1000, premium: 15 }] },
+const TIERS: Record<
+  string,
+  { threshold: number; tiers: { min: number; max: number; per: number; premium: number }[] }
+> = {
+  "Association:Monthly": {
+    threshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 55 },
+      { min: 26, max: 50, per: 25, premium: 100 },
+      { min: 51, max: 100, per: 50, premium: 140 },
+      { min: 101, max: 0, per: 100, premium: 275 },
+    ],
+  },
+  "Association:Every 2 Months": {
+    threshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 40 },
+      { min: 26, max: 50, per: 25, premium: 80 },
+      { min: 51, max: 100, per: 50, premium: 115 },
+      { min: 101, max: 0, per: 100, premium: 150 },
+    ],
+  },
+  "Association:Every 3 Months": {
+    threshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 35 },
+      { min: 26, max: 50, per: 25, premium: 65 },
+      { min: 51, max: 100, per: 50, premium: 90 },
+      { min: 101, max: 0, per: 100, premium: 180 },
+    ],
+  },
+  "Residential:Monthly": {
+    threshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 15 },
+      { min: 4001, max: 0, per: 1000, premium: 23 },
+    ],
+  },
+  "Residential:Every 2 Months": {
+    threshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 13 },
+      { min: 4001, max: 0, per: 1000, premium: 19 },
+    ],
+  },
+  "Residential:Every 3 Months": {
+    threshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 10 },
+      { min: 4001, max: 0, per: 1000, premium: 15 },
+    ],
+  },
 };
 
 function calcPrice(type: string, freq: string, cnt: number): number {
@@ -49,8 +91,6 @@ function calcPrice(type: string, freq: string, cnt: number): number {
   return base + prem;
 }
 
-// Pricing tables are monthly billing rates. Display result as-is.
-
 function fmt(n: number) {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
@@ -65,7 +105,17 @@ export default function LPQuote() {
   const [price, setPrice] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState({ first: "", last: "", email: "", phone: "", addr: "", city: "", state: "MA", zip: "", company: "" });
+  const [data, setData] = useState({
+    first: "",
+    last: "",
+    email: "",
+    phone: "",
+    addr: "",
+    city: "",
+    state: "MA",
+    zip: "",
+    company: "",
+  });
 
   const cntNum = parseInt(cnt) || 0;
   const livePrice = cntNum > 0 ? calcPrice(type, freq, cntNum) : 0;
@@ -90,7 +140,12 @@ export default function LPQuote() {
         freq,
       });
       if (result.ok) setStep("done");
-      else setError("error" in result.body ? String(result.body.error) : "Something went wrong. Call 508-258-9294.");
+      else
+        setError(
+          "error" in result.body
+            ? String(result.body.error)
+            : "Something went wrong. Call 508-258-9294.",
+        );
     } catch {
       setError("Network error. Please call 508-258-9294.");
     } finally {
@@ -98,92 +153,168 @@ export default function LPQuote() {
     }
   }
 
-  const update = (k: keyof typeof data) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setData({ ...data, [k]: e.target.value });
+  const update =
+    (k: keyof typeof data) => (e: React.ChangeEvent<HTMLInputElement>) =>
+      setData({ ...data, [k]: e.target.value });
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bk-cream)" }}>
+    <div className="bk-lp bk-lp--light">
       <SEO
         title="Get Your Instant Pest Control Quote"
         description="See your HOA or condo pest control price in seconds. No waiting, no sales calls — just your quote."
         noindex
       />
 
-      {/* Minimal header — no nav escape routes */}
-      <div style={{ background: "var(--bk-black)", padding: "16px 24px", textAlign: "center" }}>
-        <img src="/images/logo.png" alt="BuzzKill Pest Control" style={{ height: 48, margin: "0 auto" }} />
-      </div>
+      <header className="bk-lp-header bk-lp-header--dark-on-light">
+        <img src="/images/logo.png" alt="BuzzKill Pest Control" />
+      </header>
 
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px 80px" }}>
-
+      <main className="bk-lp-container">
         {step === "calc" && (
           <>
-            <div style={{ textAlign: "center", marginBottom: 36 }}>
-              <div className="bk-eyebrow" style={{ marginBottom: 8 }}>Instant Quote</div>
-              <h1 style={{ fontFamily: "var(--font-heading)", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 700, textTransform: "uppercase", margin: "0 0 12px", color: "var(--fg1)" }}>
-                See Your Price in Seconds
-              </h1>
-              <p style={{ fontSize: 16, color: "var(--fg2)", maxWidth: 440, margin: "0 auto" }}>
-                No sales calls. No waiting. Just your customized pest control quote — instantly.
+            <div style={{ textAlign: "center", marginBottom: 32 }}>
+              <div className="bk-lp-eyebrow">Instant Quote</div>
+              <h1 className="bk-lp-h1">See Your Price in Seconds</h1>
+              <p
+                className="bk-lp-lead"
+                style={{ maxWidth: 460, margin: "0 auto" }}
+              >
+                No sales calls. No waiting. Just your customized pest control
+                quote — instantly.
               </p>
             </div>
 
-            <form onSubmit={handleCalc} style={{ background: "var(--bk-white)", borderRadius: "var(--radius-lg)", padding: 28, border: "1px solid var(--border)" }}>
-              <div className="bk-field bk-full" style={{ marginBottom: 20 }}>
-                <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, display: "block" }}>Property Type</label>
-                <div className="bk-segmented" role="radiogroup">
+            <form
+              onSubmit={handleCalc}
+              className="bk-lp-card bk-lp-card--light"
+            >
+              <div className="bk-lp-field">
+                <label className="bk-lp-field-label">Property type</label>
+                <div
+                  className="bk-segmented bk-segmented--full"
+                  role="radiogroup"
+                  aria-label="Property type"
+                >
                   {(["Association", "Residential"] as const).map((opt) => (
-                    <button type="button" key={opt} className={`bk-seg ${type === opt ? "is-active" : ""}`} onClick={() => setType(opt)}>
+                    <button
+                      type="button"
+                      key={opt}
+                      className={`bk-seg ${type === opt ? "is-active" : ""}`}
+                      aria-pressed={type === opt}
+                      onClick={() => setType(opt)}
+                    >
                       {opt === "Association" ? "HOA / Condo" : "Residential"}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="bk-field" style={{ marginBottom: 20 }}>
-                <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, display: "block" }}>
-                  {type === "Association" ? "Number of Units" : "Square Footage"}
+              <div className="bk-lp-field">
+                <label className="bk-lp-field-label" htmlFor="lp-cnt">
+                  {type === "Association" ? "Number of units" : "Square footage"}
                 </label>
                 <input
+                  id="lp-cnt"
                   type="number"
                   inputMode="numeric"
+                  className="bk-lp-input bk-lp-input--light"
                   value={cnt}
                   onChange={(e) => setCnt(e.target.value)}
                   placeholder={type === "Association" ? "e.g. 48" : "e.g. 2400"}
                   required
-                  style={{ width: "100%", padding: "12px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 16 }}
                 />
               </div>
 
-              <div className="bk-field" style={{ marginBottom: 24 }}>
-                <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, display: "block" }}>Service Frequency</label>
-                <select value={freq} onChange={(e) => setFreq(e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 16, background: "var(--bk-white)" }}>
+              <div className="bk-lp-field">
+                <label className="bk-lp-field-label" htmlFor="lp-freq">
+                  Service frequency
+                </label>
+                <select
+                  id="lp-freq"
+                  className="bk-lp-input bk-lp-input--light"
+                  value={freq}
+                  onChange={(e) => setFreq(e.target.value)}
+                >
                   <option>Monthly</option>
                   <option>Every 2 Months</option>
                   <option>Every 3 Months</option>
                 </select>
               </div>
 
-              {/* Live price preview */}
+              {/* Live quote preview */}
               {livePrice > 0 && (
-                <div style={{ textAlign: "center", padding: "20px 0 4px", borderTop: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--bk-green-deep)", fontWeight: 700 }}>
-                    Estimated Price
-                  </div>
-                  <div style={{ fontSize: 44, fontWeight: 800, color: "var(--fg1)", lineHeight: 1.1 }}>
+                <div
+                  className="bk-lp-quote bk-lp-quote--card"
+                  aria-live="polite"
+                  style={{ marginTop: 16 }}
+                >
+                  <div className="bk-lp-quote-label">Estimated price</div>
+                  <div className="bk-lp-quote-price">
                     {fmt(livePrice)}
-                    <span style={{ fontSize: 16, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span>
+                    <span className="bk-lp-quote-per">
+                      / month <span className="bk-lp-quote-tax">+ tax</span>
+                    </span>
                   </div>
                 </div>
               )}
 
-              <button type="submit" className="bk-btn bk-btn-primary" style={{ width: "100%", marginTop: 20, padding: "14px 24px", fontSize: 16 }}>
-                {livePrice > 0 ? `Lock In ${fmt(livePrice)}/mo — Get Started` : "Calculate My Quote"}
+              <button
+                type="submit"
+                className="bk-btn bk-btn-primary bk-lp-cta"
+                style={{ marginTop: 18 }}
+              >
+                {livePrice > 0 ? "Continue with this Quote →" : "Calculate My Quote"}
               </button>
             </form>
 
-            <div style={{ textAlign: "center", marginTop: 24, fontSize: 13, color: "var(--fg3)" }}>
-              Licensed &amp; insured in MA and RI &bull; 508-258-9294
+            <div className="bk-lp-trust">
+              <div className="bk-lp-trust__item">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Licensed &amp; Insured
+              </div>
+              <div className="bk-lp-trust__item">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                MA &bull; RI
+              </div>
+              <div className="bk-lp-trust__item">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                <a
+                  href="tel:508-258-9294"
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  508-258-9294
+                </a>
+              </div>
             </div>
           </>
         )}
@@ -191,98 +322,281 @@ export default function LPQuote() {
         {step === "contact" && (
           <>
             <div style={{ textAlign: "center", marginBottom: 28 }}>
-              <div style={{ background: "var(--bk-white)", borderLeft: "4px solid var(--bk-green)", borderRadius: "0 8px 8px 0", padding: "20px 24px", display: "inline-block", marginBottom: 20 }}>
-                <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--bk-green-deep)", fontWeight: 700 }}>Your Quote</div>
-                <div style={{ fontSize: 36, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 15, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span></div>
+              <div
+                className="bk-lp-quote--card"
+                style={{
+                  padding: "16px 22px",
+                  display: "inline-block",
+                  marginBottom: 20,
+                }}
+              >
+                <div className="bk-lp-quote-label">Your Quote</div>
+                <div className="bk-lp-quote-price">
+                  {fmt(price)}
+                  <span className="bk-lp-quote-per">
+                    / month <span className="bk-lp-quote-tax">+ tax</span>
+                  </span>
+                </div>
               </div>
-              <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 24, fontWeight: 700, textTransform: "uppercase", margin: "0 0 8px" }}>
-                Almost There
-              </h2>
-              <p style={{ fontSize: 15, color: "var(--fg2)" }}>
-                Enter your details and we&rsquo;ll send a formal quote with a service agreement within one business day.
+              <h2 className="bk-lp-h2">Almost There</h2>
+              <p className="bk-lp-lead">
+                Enter your details and we&rsquo;ll send a formal quote with a
+                service agreement within one business day.
               </p>
             </div>
 
-            <form onSubmit={handleSubmit} style={{ background: "var(--bk-white)", borderRadius: "var(--radius-lg)", padding: 28, border: "1px solid var(--border)" }}>
+            <form
+              onSubmit={handleSubmit}
+              className="bk-lp-card bk-lp-card--light"
+            >
               {type === "Association" && (
-                <div className="bk-field" style={{ marginBottom: 16 }}>
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Association Name</label>
-                  <input value={data.company} onChange={update("company")} placeholder="Brookfield Condo Trust" style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+                <div className="bk-lp-field">
+                  <label className="bk-lp-field-label" htmlFor="lp-company">
+                    Association name
+                  </label>
+                  <input
+                    id="lp-company"
+                    className="bk-lp-input bk-lp-input--light"
+                    value={data.company}
+                    onChange={update("company")}
+                    placeholder="Brookfield Condo Trust"
+                    autoComplete="organization"
+                  />
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>First Name *</label>
-                  <input required value={data.first} onChange={update("first")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+              <div className="bk-lp-row bk-lp-row--2">
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-first">
+                    First name *
+                  </label>
+                  <input
+                    id="lp-first"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    autoComplete="given-name"
+                    value={data.first}
+                    onChange={update("first")}
+                  />
                 </div>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Last Name *</label>
-                  <input required value={data.last} onChange={update("last")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-last">
+                    Last name *
+                  </label>
+                  <input
+                    id="lp-last"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    autoComplete="family-name"
+                    value={data.last}
+                    onChange={update("last")}
+                  />
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Email *</label>
-                  <input required type="email" value={data.email} onChange={update("email")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+              <div className="bk-lp-row bk-lp-row--2">
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-email">
+                    Email *
+                  </label>
+                  <input
+                    id="lp-email"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    type="email"
+                    autoComplete="email"
+                    value={data.email}
+                    onChange={update("email")}
+                  />
                 </div>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Phone *</label>
-                  <input required type="tel" value={data.phone} onChange={update("phone")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-phone">
+                    Phone *
+                  </label>
+                  <input
+                    id="lp-phone"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    type="tel"
+                    autoComplete="tel"
+                    value={data.phone}
+                    onChange={update("phone")}
+                  />
                 </div>
               </div>
-              <div className="bk-field" style={{ marginBottom: 16 }}>
-                <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Service Address *</label>
-                <input required value={data.addr} onChange={update("addr")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+              <div className="bk-lp-field">
+                <label className="bk-lp-field-label" htmlFor="lp-addr">
+                  Service address *
+                </label>
+                <input
+                  id="lp-addr"
+                  className="bk-lp-input bk-lp-input--light"
+                  required
+                  autoComplete="street-address"
+                  value={data.addr}
+                  onChange={update("addr")}
+                />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>City *</label>
-                  <input required value={data.city} onChange={update("city")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+              <div className="bk-lp-row bk-lp-row--3">
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-city">
+                    City *
+                  </label>
+                  <input
+                    id="lp-city"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    autoComplete="address-level2"
+                    value={data.city}
+                    onChange={update("city")}
+                  />
                 </div>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>State *</label>
-                  <input required maxLength={2} value={data.state} onChange={(e) => setData({ ...data, state: e.target.value.toUpperCase().slice(0, 2) })} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-state">
+                    State *
+                  </label>
+                  <input
+                    id="lp-state"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    maxLength={2}
+                    autoComplete="address-level1"
+                    value={data.state}
+                    onChange={(e) =>
+                      setData({
+                        ...data,
+                        state: e.target.value.toUpperCase().slice(0, 2),
+                      })
+                    }
+                  />
                 </div>
-                <div className="bk-field">
-                  <label style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, display: "block" }}>Zip *</label>
-                  <input required value={data.zip} onChange={update("zip")} style={{ width: "100%", padding: "10px 14px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 15 }} />
+                <div className="bk-lp-field" style={{ marginBottom: 0 }}>
+                  <label className="bk-lp-field-label" htmlFor="lp-zip">
+                    Zip *
+                  </label>
+                  <input
+                    id="lp-zip"
+                    className="bk-lp-input bk-lp-input--light"
+                    required
+                    inputMode="numeric"
+                    autoComplete="postal-code"
+                    value={data.zip}
+                    onChange={update("zip")}
+                  />
                 </div>
               </div>
 
               {error && (
-                <div style={{ background: "#FFF4F2", border: "1px solid #E53935", color: "#7A1A0F", borderRadius: 6, padding: "10px 14px", fontSize: 14, marginBottom: 16 }}>{error}</div>
+                <div className="bk-lp-error" role="alert">
+                  {error}
+                </div>
               )}
 
-              <button type="submit" disabled={submitting} className="bk-btn bk-btn-primary" style={{ width: "100%", padding: "14px 24px", fontSize: 16 }}>
-                {submitting ? "Submitting..." : "Get My Formal Quote & Agreement"}
+              <button
+                type="submit"
+                disabled={submitting}
+                aria-busy={submitting}
+                className="bk-btn bk-btn-primary bk-lp-cta"
+                style={{ marginTop: 6 }}
+              >
+                {submitting ? "Submitting…" : "Get My Formal Quote & Agreement"}
               </button>
             </form>
 
-            <button type="button" onClick={() => setStep("calc")} style={{ display: "block", margin: "16px auto 0", background: "none", border: 0, color: "var(--fg3)", fontSize: 13, cursor: "pointer" }}>
-              &larr; Recalculate
+            <button
+              type="button"
+              className="bk-lp-textlink"
+              onClick={() => setStep("calc")}
+            >
+              ← Recalculate
             </button>
           </>
         )}
 
         {step === "done" && (
-          <div style={{ textAlign: "center", paddingTop: 40 }}>
-            <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--bk-green)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--bk-black)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+          <div style={{ textAlign: "center", paddingTop: 24 }}>
+            <div className="bk-lp-success-icon" aria-hidden="true">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
             </div>
-            <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 28, fontWeight: 700, textTransform: "uppercase", marginBottom: 12 }}>You&rsquo;re All Set!</h2>
-            <div style={{ background: "var(--bk-white)", borderLeft: "4px solid var(--bk-green)", borderRadius: "0 8px 8px 0", padding: "16px 24px", display: "inline-block", marginBottom: 20 }}>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--bk-green-deep)", fontWeight: 700 }}>Your Estimated Quote</div>
-              <div style={{ fontSize: 32, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 14, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span></div>
+            <h2 className="bk-lp-h2">You&rsquo;re All Set!</h2>
+
+            <div
+              className="bk-lp-quote--card bk-lp-quote-card--center"
+              style={{
+                display: "inline-block",
+                margin: "16px 0 24px",
+                padding: "16px 24px",
+              }}
+            >
+              <div className="bk-lp-quote-label">Your Estimated Quote</div>
+              <div className="bk-lp-quote-price">
+                {fmt(price)}
+                <span className="bk-lp-quote-per">
+                  / month <span className="bk-lp-quote-tax">+ tax</span>
+                </span>
+              </div>
             </div>
-            <p style={{ fontSize: 16, color: "var(--fg2)", maxWidth: 420, margin: "0 auto 8px" }}>
-              We&rsquo;ve sent a confirmation and quote to <strong>{data.email}</strong>. You&rsquo;ll receive a formal service agreement within one business day.
+
+            <p
+              className="bk-lp-lead"
+              style={{ maxWidth: 420, margin: "0 auto 12px" }}
+            >
+              We&rsquo;ve sent a confirmation and quote to{" "}
+              <strong>{data.email}</strong>. You&rsquo;ll receive a formal
+              service agreement within one business day.
             </p>
             <p style={{ fontSize: 14, color: "var(--fg3)" }}>
-              Questions? Call <a href="tel:508-258-9294" style={{ color: "var(--bk-green-deep)", fontWeight: 600 }}>508-258-9294</a>
+              Questions? Call{" "}
+              <a
+                href="tel:508-258-9294"
+                style={{ color: "var(--bk-green-deep)", fontWeight: 600 }}
+              >
+                508-258-9294
+              </a>
             </p>
+
+            <div className="bk-lp-trust">
+              <div className="bk-lp-trust__item">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Licensed &amp; Insured
+              </div>
+              <div className="bk-lp-trust__item">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Reply within 1 business day
+              </div>
+            </div>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

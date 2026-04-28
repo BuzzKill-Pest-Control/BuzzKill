@@ -1340,3 +1340,477 @@ a:focus-visible {
   white-space: nowrap;
   border: 0;
 }
+
+/* =========================================================================
+   LANDING PAGES (LP) — shared design system for /lp/* routes
+   Standalone pages without site nav. Light + dark card variants.
+   ========================================================================= */
+
+/* Outer page shell */
+.bk-lp {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.bk-lp--light {
+  background: var(--bk-cream);
+  color: var(--fg1);
+}
+.bk-lp--dark {
+  background: var(--bk-black);
+  color: #fff;
+}
+
+/* Minimal logo header */
+.bk-lp-header {
+  padding: 16px 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.bk-lp-header--bordered {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.bk-lp-header--dark-on-light {
+  background: var(--bk-black);
+}
+.bk-lp-header img {
+  height: 48px;
+  margin: 0 auto;
+  display: block;
+}
+
+/* Container widths */
+.bk-lp-container {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+  width: 100%;
+}
+.bk-lp-container--narrow {
+  max-width: 480px;
+}
+.bk-lp-container--wide {
+  max-width: 720px;
+}
+
+/* Eyebrow / category label */
+.bk-lp-eyebrow {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--bk-green-deep);
+  margin-bottom: 12px;
+}
+.bk-lp-eyebrow--dark {
+  color: var(--bk-green);
+}
+
+/* Headlines */
+.bk-lp-h1 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: clamp(28px, 6vw, 44px);
+  line-height: 1.05;
+  text-transform: uppercase;
+  margin: 0 0 14px;
+  color: inherit;
+}
+.bk-lp-h1--xl {
+  font-size: clamp(32px, 7vw, 52px);
+}
+.bk-lp-h2 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: clamp(22px, 4vw, 32px);
+  line-height: 1.1;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+}
+.bk-lp-lead {
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0;
+}
+.bk-lp--dark .bk-lp-lead {
+  color: rgba(255, 255, 255, 0.78);
+}
+.bk-lp--light .bk-lp-lead {
+  color: var(--fg2);
+}
+
+/* Card containers (form wrappers) */
+.bk-lp-card {
+  border-radius: var(--radius-xl);
+  padding: 28px;
+}
+.bk-lp-card--light {
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+.bk-lp-card--dark {
+  background: var(--bk-neutral-800);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+@media (max-width: 480px) {
+  .bk-lp-card {
+    padding: 22px 18px;
+  }
+}
+
+/* Field group (label + input) */
+.bk-lp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.bk-lp-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.bk-lp--light .bk-lp-field-label {
+  color: var(--fg1);
+}
+.bk-lp--dark .bk-lp-field-label {
+  color: rgba(255, 255, 255, 0.85);
+}
+.bk-lp-field-help {
+  font-size: 11px;
+}
+.bk-lp--light .bk-lp-field-help {
+  color: var(--fg2);
+}
+.bk-lp--dark .bk-lp-field-help {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Input + select */
+.bk-lp-input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.bk-lp-input--light {
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  color: var(--fg1);
+}
+.bk-lp-input--light::placeholder {
+  color: var(--fg3);
+}
+.bk-lp-input--light:focus,
+.bk-lp-input--light:focus-visible {
+  border-color: var(--bk-green);
+  box-shadow: 0 0 0 3px rgba(126, 211, 33, 0.22);
+}
+.bk-lp-input--dark {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.bk-lp-input--dark::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+.bk-lp-input--dark:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+.bk-lp-input--dark:focus,
+.bk-lp-input--dark:focus-visible {
+  border-color: var(--bk-green);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(126, 211, 33, 0.28);
+}
+
+/* Field row layouts */
+.bk-lp-row {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.bk-lp-row--2 {
+  grid-template-columns: 1fr 1fr;
+}
+.bk-lp-row--3 {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+@media (max-width: 480px) {
+  .bk-lp-row--3 {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+
+/* Quote display card (live preview / done state) */
+.bk-lp-quote {
+  text-align: center;
+  padding: 20px 24px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.bk-lp-quote--card {
+  background: linear-gradient(
+    180deg,
+    rgba(126, 211, 33, 0.1) 0%,
+    rgba(126, 211, 33, 0.02) 100%
+  );
+  border: 1px solid rgba(126, 211, 33, 0.3);
+  border-left: 4px solid var(--bk-green);
+  border-top: none;
+  border-radius: 0 8px 8px 0;
+  padding: 18px 22px;
+  text-align: left;
+  margin: 0;
+}
+.bk-lp-quote-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bk-green-deep);
+  margin-bottom: 6px;
+}
+.bk-lp-quote-price {
+  font-family: var(--font-heading);
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg1);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bk-lp-quote-card--center .bk-lp-quote-price {
+  justify-content: center;
+}
+.bk-lp-quote-per {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--fg2);
+  white-space: nowrap;
+}
+.bk-lp-quote-per .bk-lp-quote-tax {
+  color: var(--fg3);
+  font-size: 12px;
+}
+.bk-lp-quote-meta {
+  font-size: 13px;
+  color: var(--fg2);
+  margin-top: 6px;
+}
+
+/* Success icon */
+.bk-lp-success-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bk-green);
+  color: var(--bk-black);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+/* Trust bar — used at bottom of every LP */
+.bk-lp-trust {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 32px;
+  padding: 0 16px;
+}
+.bk-lp-trust__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bk-lp--light .bk-lp-trust__item {
+  color: var(--fg2);
+}
+.bk-lp--dark .bk-lp-trust__item {
+  color: rgba(255, 255, 255, 0.55);
+}
+.bk-lp-trust__item svg {
+  color: var(--bk-green-deep);
+  flex-shrink: 0;
+}
+.bk-lp--dark .bk-lp-trust__item svg {
+  color: var(--bk-green);
+}
+
+/* CTA refinements for LP buttons */
+.bk-lp-cta {
+  width: 100%;
+  padding: 14px 24px;
+  font-size: 16px;
+  margin-top: 4px;
+}
+.bk-lp-cta--lg {
+  padding: 18px 24px;
+  font-size: 18px;
+  font-weight: 800;
+}
+.bk-lp-cta-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* Inline error banner */
+.bk-lp-error {
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.bk-lp--light .bk-lp-error {
+  background: #FFF4F2;
+  border: 1px solid #E53935;
+  color: #7A1A0F;
+}
+.bk-lp--dark .bk-lp-error {
+  background: rgba(229, 57, 53, 0.16);
+  border: 1px solid #E53935;
+  color: #ff9d96;
+}
+
+/* Recalculate / back link */
+.bk-lp-textlink {
+  display: block;
+  margin: 18px auto 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--bk-green-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.bk-lp--dark .bk-lp-textlink {
+  color: var(--bk-green);
+}
+.bk-lp-textlink:hover {
+  color: var(--bk-green-deep);
+}
+.bk-lp-textlink:focus-visible {
+  outline: 2px solid var(--bk-green);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* Stat tiles for LPProtect */
+.bk-lp-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+.bk-lp-stat {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 24px 22px;
+}
+.bk-lp-stat__num {
+  font-family: var(--font-heading);
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--bk-green);
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.bk-lp-stat__text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 0;
+}
+
+/* Bullet list (LPProtect benefits) */
+.bk-lp-bullets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bk-lp-bullets__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.85);
+}
+.bk-lp-bullets__item svg {
+  color: var(--bk-green);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+/* Urgency banner (LPProtect) */
+.bk-lp-urgency {
+  background: var(--bk-green);
+  color: var(--bk-black);
+  padding: 14px 24px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Section helpers */
+.bk-lp-section {
+  padding: 56px 24px;
+}
+.bk-lp-section--hero {
+  padding: 56px 24px 40px;
+}
+.bk-lp-section--inner-dark {
+  background: var(--bk-neutral-900);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.bk-lp-section__inner {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+/* OR divider for LPCall */
+.bk-lp-divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 32px 0;
+}
+.bk-lp-divider__line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.bk-lp-divider__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 600;
+}
