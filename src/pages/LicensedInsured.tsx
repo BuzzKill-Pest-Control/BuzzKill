@@ -217,6 +217,7 @@ export default function LicensedInsured() {
               title="Massachusetts Pesticide Commercial Certification"
               accent
               details={[
+                { label: "License #", value: "CC-0060592" },
                 {
                   label: "Category",
                   value: "41 — General Pest Control",
@@ -243,6 +244,7 @@ export default function LicensedInsured() {
               icon={<DocIcon />}
               title="Massachusetts Applicator (Core) License"
               details={[
+                { label: "License #", value: "AL-0060551" },
                 {
                   label: "Agency",
                   value:
