@@ -190,10 +190,7 @@ function buildSubscriptionPayload(
   const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
   const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
 
-  // CNT = unit count for associations, square footage for residential
-  const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
-
-  const out: Record<string, string | number> = {
+  return {
     customerID,
     serviceID,
     active: 1,
@@ -201,22 +198,6 @@ function buildSubscriptionPayload(
     sourceID: SOURCE_WEBSITE,
     convertToLead: 1,
   };
-
-  // Set quantity on both initial and recurring ticket templates via
-  // inline addon objects (see ticket/createAddon params).
-  // The addon uses quantity to populate the CNT column on the ticket.
-  if (cnt > 0) {
-    const addonObj = JSON.stringify([{
-      description: isAssociation ? "Units" : "Square Footage",
-      quantity: cnt,
-      amount: 0,
-      taxable: 0,
-    }]);
-    out.initialAddons = addonObj as unknown as number;
-    out.addons = addonObj as unknown as number;
-  }
-
-  return out;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
@@ -389,10 +370,87 @@ export const handler: Handler = async (event) => {
 
   const subscriptionID = Number(subResult.body.result);
 
+  // ── Step 3: Set CNT (quantity) on ticket templates ───────────────
+  // The base service line item's CNT is the quantity on the ticket
+  // item itself, not an addon. We find the ticket templates created
+  // by the subscription, get their addon/item lists, and update the
+  // base item's quantity via ticket/updateAddOn.
+  const isAssociation = input.propertyType === "Association";
+  const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
+  let ticketWarning: string | undefined;
+
+  if (subscriptionID && cnt > 0) {
+    try {
+      // Find both Initial (I) and Recurring (R) ticket templates
+      for (const tmplType of ["I", "R"] as const) {
+        const searchResult = await frPost(subdomain, key, token, "ticket/search", {
+          subscriptionIDs: subscriptionID,
+          templateType: tmplType,
+          includeData: 1,
+        });
+        console.log(`ticket/search (${tmplType}) response`, searchResult);
+
+        const ticketIDs = searchResult.body.ticketIDs as number[] | undefined;
+        const ticketID = ticketIDs?.[0];
+        if (!ticketID) {
+          console.warn(`No ${tmplType} ticket template found for subscription ${subscriptionID}`);
+          continue;
+        }
+
+        // Get the existing items on this ticket
+        const addonsResult = await frPost(subdomain, key, token, "ticket/getAddons", {
+          ticketID,
+        });
+        console.log(`ticket/getAddons (${tmplType}) response`, addonsResult);
+
+        // Find the base service item (the one with the service charge)
+        // The result can be an array or object keyed by itemID
+        const items = addonsResult.body;
+        let baseItemID: number | undefined;
+
+        if (items && typeof items === "object") {
+          // Try array format first
+          const arr = Array.isArray(items.result)
+            ? items.result
+            : Array.isArray(items)
+              ? items
+              : Object.values(items).filter((v): v is Record<string, unknown> =>
+                  typeof v === "object" && v !== null && "itemID" in (v as Record<string, unknown>));
+
+          if (arr.length > 0) {
+            // Use the first item — it's typically the base service charge
+            const first = arr[0] as Record<string, unknown>;
+            baseItemID = Number(first.itemID ?? first.id);
+          }
+        }
+
+        if (baseItemID && !isNaN(baseItemID)) {
+          const updateResult = await frPost(subdomain, key, token, "ticket/updateAddOn", {
+            ticketID,
+            itemID: baseItemID,
+            quantity: cnt,
+          });
+          console.log(`ticket/updateAddOn (${tmplType}) response`, updateResult);
+
+          if (updateResult.body.success === false) {
+            console.warn(`updateAddOn (${tmplType}) rejected`, updateResult.body);
+          }
+        } else {
+          console.warn(`No base item found on ${tmplType} ticket ${ticketID}`);
+        }
+      }
+    } catch (err) {
+      const e = err as { message?: string };
+      ticketWarning = `Ticket quantity update failed: ${e?.message ?? String(err)}`;
+      console.error(ticketWarning);
+    }
+  }
+
   return jsonResponse(200, {
     ok: true,
     customerID,
     subscriptionID: subscriptionID || undefined,
+    ...(ticketWarning ? { ticketWarning } : {}),
     upstream: {
       customer: customerResult.body,
       subscription: subResult.body,
