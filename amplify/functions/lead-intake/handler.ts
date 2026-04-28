@@ -586,17 +586,18 @@ export const handler: Handler = async (event) => {
     }
   }
 
-  // ── Step 4: Create contract and email to customer ─────────────────
-  // contract/create generates the default agreement for the subscription
-  // and emailCustomer=1 sends the signing link to the customer.
+  // ── Step 4: Create contract (no FieldRoutes email — we send our own) ─
+  // contract/create generates the agreement. emailCustomer=0 suppresses
+  // the FieldRoutes email so we control the messaging via SES instead.
+  // The signing URL comes back in the `result` field.
   let contractWarning: string | undefined;
-  let contractID: number | undefined;
+  let agreementUrl: string | undefined;
 
   if (subscriptionID) {
     try {
       const contractResult = await frPost(subdomain, key, token, "contract/create", {
         subscriptionID,
-        emailCustomer: 1,
+        emailCustomer: 0,
         notifyCustomerOnSignedAgreement: 1,
       });
       console.log("contract/create response", contractResult);
@@ -605,7 +606,11 @@ export const handler: Handler = async (event) => {
         contractWarning = `contract/create rejected: ${JSON.stringify(contractResult.body)}`;
         console.warn(contractWarning);
       } else {
-        contractID = Number(contractResult.body.result) || undefined;
+        // result is the signing URL, e.g. https://buzzkill.pestportals.com/loginagree/...
+        const resultVal = String(contractResult.body.result ?? "");
+        if (resultVal.startsWith("http")) {
+          agreementUrl = resultVal;
+        }
       }
     } catch (err) {
       const e = err as { message?: string };
@@ -658,9 +663,32 @@ export const handler: Handler = async (event) => {
     console.error("Failed to send notification email", (err as Error).message);
   }
 
-  // 5b: Customer quote email
+  // 5b: Customer quote email (includes agreement signing link if available)
   try {
     const firstName = (input.first ?? "").trim();
+
+    const agreementBlock = agreementUrl
+      ? `
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="${agreementUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #7ED321; color: #0A0A0A; font-weight: 800; font-size: 16px; text-decoration: none; padding: 16px 36px; border-radius: 8px; letter-spacing: 0.02em; text-transform: uppercase;">
+            Review &amp; Sign Agreement
+          </a>
+          <div style="font-size: 12px; color: #9A9A9A; margin-top: 10px;">Secure link — opens your service agreement for review and e-signature</div>
+        </div>
+
+        <p><strong>Once you've signed:</strong></p>
+        <ol style="padding-left: 20px; color: #4A4A4A;">
+          <li style="margin-bottom: 8px;">We'll confirm receipt and <strong>schedule your first appointment</strong></li>
+          <li style="margin-bottom: 8px;">You'll receive an appointment confirmation with date, time, and technician details</li>
+        </ol>`
+      : `
+        <p><strong>What happens next:</strong></p>
+        <ol style="padding-left: 20px; color: #4A4A4A;">
+          <li style="margin-bottom: 8px;">We'll review your information and follow up within <strong>one business day</strong></li>
+          <li style="margin-bottom: 8px;">You'll receive a <strong>formal service agreement</strong> to review and sign</li>
+          <li style="margin-bottom: 8px;">Once signed, we'll <strong>schedule your first appointment</strong></li>
+        </ol>`;
+
     const customerHtml = `
       <div style="font-family: Arial, sans-serif; font-size: 15px; color: #1A1A1A; line-height: 1.7; max-width: 600px;">
         <p>Hi ${firstName},</p>
@@ -673,14 +701,9 @@ export const handler: Handler = async (event) => {
           <div style="font-size: 14px; color: #4A4A4A;">${propLabel} &bull; ${freqLabel} service${isAssoc && input.units ? ` &bull; ${input.units} units` : ""}${!isAssoc && input.sqft ? ` &bull; ${input.sqft} sq ft` : ""}</div>
         </div>
 
-        <p><strong>What happens next:</strong></p>
-        <ol style="padding-left: 20px; color: #4A4A4A;">
-          <li style="margin-bottom: 8px;">We'll review your information and follow up within <strong>one business day</strong></li>
-          <li style="margin-bottom: 8px;">You'll receive a <strong>formal service agreement</strong> to review and sign</li>
-          <li style="margin-bottom: 8px;">Once signed, we'll <strong>schedule your first appointment</strong></li>
-        </ol>
+        ${agreementBlock}
 
-        <p>If you have any questions in the meantime, don't hesitate to call us at <a href="tel:+15082589294" style="color: #5FA517; font-weight: 600;">508-258-9294</a> or reply to this email.</p>
+        <p>If you have any questions, don't hesitate to call us at <a href="tel:+15082589294" style="color: #5FA517; font-weight: 600;">508-258-9294</a> or reply to this email.</p>
 
         <p>We look forward to working with you!</p>
 
@@ -702,7 +725,7 @@ export const handler: Handler = async (event) => {
     ok: true,
     customerID,
     subscriptionID: subscriptionID || undefined,
-    contractID,
+    agreementUrl,
     monthlyCharge,
     frequency: freqLabel,
     ...(ticketWarning ? { ticketWarning } : {}),
