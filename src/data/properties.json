@@ -1,0 +1,578 @@
+[
+  {
+    "id": 99787,
+    "name": "65-69 Nightingale Condominium",
+    "slug": "65-69-nightingale-condominium",
+    "address": "65 Nightingale Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02124"
+  },
+  {
+    "id": 100629,
+    "name": "66 Hamilton Street Condominium",
+    "slug": "66-hamilton-street-condominium",
+    "address": "66 Hamilton Street",
+    "city": "Leominster",
+    "state": "MA",
+    "zip": "01453"
+  },
+  {
+    "id": 100603,
+    "name": "73 Dix Street Condominium",
+    "slug": "73-dix-street-condominium",
+    "address": "73 Dix Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02122"
+  },
+  {
+    "id": 112576,
+    "name": "River Village Condominium",
+    "slug": "river-village-condominium",
+    "address": "59 Walpole Street",
+    "city": "Canton",
+    "state": "MA",
+    "zip": "02021"
+  },
+  {
+    "id": 111697,
+    "name": "Rose Stone Village Condominium",
+    "slug": "rose-stone-village-condominium",
+    "address": "128 Parker Street",
+    "city": "Acton",
+    "state": "MA",
+    "zip": "01720"
+  },
+  {
+    "id": 117229,
+    "name": "Geneva Mills Condominium",
+    "slug": "geneva-mills-condominium",
+    "address": "1117 Douglas Ave Unit Dock 12",
+    "city": "North Providence",
+    "state": "RI",
+    "zip": "02904"
+  },
+  {
+    "id": 118305,
+    "name": "Admiral Dewey House Condominium",
+    "slug": "admiral-dewey-house-condominium",
+    "address": "60 East Central Street",
+    "city": "Natick",
+    "state": "MA",
+    "zip": "01760"
+  },
+  {
+    "id": 117875,
+    "name": "Adams House Condominium",
+    "slug": "adams-house-condominium",
+    "address": "59-69 Msgr Patrick J Lydon Way",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02124"
+  },
+  {
+    "id": 95538,
+    "name": "Reservoir Place Condominium",
+    "slug": "reservoir-place-condominium",
+    "address": "39 Reservoir Street",
+    "city": "Brockton",
+    "state": "MA",
+    "zip": "02301"
+  },
+  {
+    "id": 123935,
+    "name": "114 Elm Street Condominium",
+    "slug": "114-elm-street-condominium",
+    "address": "114 Elm Street",
+    "city": "Worcester",
+    "state": "MA",
+    "zip": "01609"
+  },
+  {
+    "id": 125820,
+    "name": "Vecchia Gardens Condominium",
+    "slug": "vecchia-gardens-condominium",
+    "address": "10 Vecchia Street",
+    "city": "Webster",
+    "state": "MA",
+    "zip": "01570"
+  },
+  {
+    "id": 125979,
+    "name": "Fairland Gardens Condominiums",
+    "slug": "fairland-gardens-condominiums",
+    "address": "13 Fairland Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02119"
+  },
+  {
+    "id": 126958,
+    "name": "Hadwen Park Place II Condominiums",
+    "slug": "hadwen-park-place-ii-condominiums",
+    "address": "11 Hulbert Road",
+    "city": "Worcester",
+    "state": "MA",
+    "zip": "01603"
+  },
+  {
+    "id": 127977,
+    "name": "52 Withington St Condominium",
+    "slug": "52-withington-st-condominium",
+    "address": "52 Withington Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02124"
+  },
+  {
+    "id": 128267,
+    "name": "Fallbrook Condominium",
+    "slug": "fallbrook-condominium",
+    "address": "19 Meadow Pond Drive",
+    "city": "Leominster",
+    "state": "MA",
+    "zip": "01453"
+  },
+  {
+    "id": 129584,
+    "name": "81 Summer St Condominium",
+    "slug": "81-summer-st-condominium",
+    "address": "81 Summer Street",
+    "city": "Stoughton",
+    "state": "MA",
+    "zip": "02072"
+  },
+  {
+    "id": 118349,
+    "name": "Alpine Village Condominium",
+    "slug": "alpine-village-condominium",
+    "address": "25 Alpine Street",
+    "city": "Boston (Hyde Park)",
+    "state": "MA",
+    "zip": "02136"
+  },
+  {
+    "id": 130945,
+    "name": "Forge Hill Condominium",
+    "slug": "forge-hill-condominium",
+    "address": "18 Bancroft Common",
+    "city": "Franklin",
+    "state": "MA",
+    "zip": "02038"
+  },
+  {
+    "id": 129669,
+    "name": "7 Oakcrest Condominium",
+    "slug": "7-oakcrest-condominium",
+    "address": "7 Oakcrest Road",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02136"
+  },
+  {
+    "id": 133143,
+    "name": "Sargent Estates Condominiums",
+    "slug": "sargent-estates-condominiums",
+    "address": "22 Chestnut Place",
+    "city": "Brookline",
+    "state": "MA",
+    "zip": "02445"
+  },
+  {
+    "id": 131652,
+    "name": "Sixteen Everett Ave Condominiums",
+    "slug": "sixteen-everett-ave-condominiums",
+    "address": "16 Everett Avenue",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02125"
+  },
+  {
+    "id": 132046,
+    "name": "43 Withington St Condominiums",
+    "slug": "43-withington-st-condominiums",
+    "address": "43 Withington Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02124"
+  },
+  {
+    "id": 133644,
+    "name": "The Villages At Dale Woods Condominiums",
+    "slug": "the-villages-at-dale-woods-condominiums",
+    "address": "17 Dale Avenue",
+    "city": "Auburn",
+    "state": "MA",
+    "zip": "01501"
+  },
+  {
+    "id": 129672,
+    "name": "Oak Knoll Condominium",
+    "slug": "oak-knoll-condominium",
+    "address": "84 Walpole Street",
+    "city": "Canton",
+    "state": "MA",
+    "zip": "02021"
+  },
+  {
+    "id": 135544,
+    "name": "755 Lofts Condominiums",
+    "slug": "755-lofts-condominiums",
+    "address": "755 Westminster Street",
+    "city": "Providence",
+    "state": "RI",
+    "zip": "02903"
+  },
+  {
+    "id": 136574,
+    "name": "Residences at Stedman",
+    "slug": "residences-at-stedman",
+    "address": "140 Stedman Street",
+    "city": "Chelmsford",
+    "state": "MA",
+    "zip": "01824"
+  },
+  {
+    "id": 137136,
+    "name": "High Rock Condominiums",
+    "slug": "high-rock-condominiums",
+    "address": "25 Rockland Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02132"
+  },
+  {
+    "id": 138475,
+    "name": "Trailside Terrace Condominiums",
+    "slug": "trailside-terrace-condominiums",
+    "address": "1-19 Trailside Terrace",
+    "city": "Marlborough",
+    "state": "MA",
+    "zip": "01752"
+  },
+  {
+    "id": 138445,
+    "name": "Cypress Gardens Condominiums",
+    "slug": "cypress-gardens-condominiums",
+    "address": "62-72 Cypress Street",
+    "city": "Brookline",
+    "state": "MA",
+    "zip": "02445"
+  },
+  {
+    "id": 140383,
+    "name": "Ledgewood Estates Condominium Trust",
+    "slug": "ledgewood-estates-condominium-trust",
+    "address": "16 Milford Road",
+    "city": "Grafton",
+    "state": "MA",
+    "zip": "01560"
+  },
+  {
+    "id": 143252,
+    "name": "Eagles View Condominiums",
+    "slug": "eagles-view-condominiums",
+    "address": "2-116 Eagle Drive",
+    "city": "Douglas",
+    "state": "MA",
+    "zip": "01516"
+  },
+  {
+    "id": 141873,
+    "name": "Longley Trace Condominium Trust",
+    "slug": "longley-trace-condominium-trust",
+    "address": "11 Longley Road",
+    "city": "Shirley",
+    "state": "MA",
+    "zip": "01464"
+  },
+  {
+    "id": 144603,
+    "name": "Trail View Condominium",
+    "slug": "trail-view-condominium",
+    "address": "129 Acton Street",
+    "city": "Maynard",
+    "state": "MA",
+    "zip": "01754"
+  },
+  {
+    "id": 144608,
+    "name": "Old Stone Bridge Acres Condominiums",
+    "slug": "old-stone-bridge-acres-condominiums",
+    "address": "Old Bridge Lane",
+    "city": "Bellingham",
+    "state": "MA",
+    "zip": "02019"
+  },
+  {
+    "id": 144601,
+    "name": "Furnace Brook Estates",
+    "slug": "furnace-brook-estates",
+    "address": "459 Willard Street",
+    "city": "Quincy",
+    "state": "MA",
+    "zip": "02169"
+  },
+  {
+    "id": 139149,
+    "name": "Pheasant Hill Condominium Trust",
+    "slug": "pheasant-hill-condominium-trust",
+    "address": "490 Main Street",
+    "city": "Northborough",
+    "state": "MA",
+    "zip": "01532"
+  },
+  {
+    "id": 129673,
+    "name": "Weatherstone at Blithewood Condominium",
+    "slug": "weatherstone-at-blithewood-condominium",
+    "address": "24 Weatherstone Drive",
+    "city": "Worcester",
+    "state": "MA",
+    "zip": "01604"
+  },
+  {
+    "id": 134089,
+    "name": "Independence Village @ VOAT",
+    "slug": "independence-village-voat",
+    "address": "224 America Boulevard",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 134090,
+    "name": "Louisiana Purchase @ VOAT",
+    "slug": "louisiana-purchase-voat",
+    "address": "435 America Boulevard",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 137459,
+    "name": "Freedom Village @ VOAT",
+    "slug": "freedom-village-voat",
+    "address": "9 John Hancock Drive",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 134087,
+    "name": "Mayflower Landing @ VOAT",
+    "slug": "mayflower-landing-voat",
+    "address": "290 Eliot Street",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 134885,
+    "name": "Maple Ridge Town Home Condominium",
+    "slug": "maple-ridge-town-home-condominium",
+    "address": "11 - 33 Sampson Street",
+    "city": "Grafton",
+    "state": "MA",
+    "zip": "01560"
+  },
+  {
+    "id": 136244,
+    "name": "VOAT Infrastructure Trust",
+    "slug": "voat-infrastructure-trust",
+    "address": "290 Eliot Street",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 145905,
+    "name": "Medfield Crossing Condominium Trust",
+    "slug": "medfield-crossing-condominium-trust",
+    "address": "425 - 435 Main Street",
+    "city": "Medfield",
+    "state": "MA",
+    "zip": "02052"
+  },
+  {
+    "id": 131273,
+    "name": "26 Moseley St Condominiums",
+    "slug": "26-moseley-st-condominiums",
+    "address": "26 Moseley Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02125"
+  },
+  {
+    "id": 147259,
+    "name": "One Hundred Captains Row Condominium Trust",
+    "slug": "one-hundred-captains-row-condominium-trust",
+    "address": "100 Captains Row",
+    "city": "Chelsea",
+    "state": "MA",
+    "zip": "02150"
+  },
+  {
+    "id": 145535,
+    "name": "Chestnut Hill Woods",
+    "slug": "chestnut-hill-woods",
+    "address": "1100-1400 Lagrange Street",
+    "city": "Chestnut Hill",
+    "state": "MA",
+    "zip": "02467"
+  },
+  {
+    "id": 146083,
+    "name": "Baiting Brook Farm Condominium",
+    "slug": "baiting-brook-farm-condominium",
+    "address": "11 - 42 Country Farm Road",
+    "city": "Framingham",
+    "state": "MA",
+    "zip": "01701"
+  },
+  {
+    "id": 134080,
+    "name": "Explorers @ VOAT",
+    "slug": "explorers-voat",
+    "address": "1 - 189 America Boulevard",
+    "city": "Ashland",
+    "state": "MA",
+    "zip": "01721"
+  },
+  {
+    "id": 149371,
+    "name": "680 South Ave Condominium Trust",
+    "slug": "680-south-ave-condominium-trust",
+    "address": "680 South Avenue",
+    "city": "Weston",
+    "state": "MA",
+    "zip": "02493"
+  },
+  {
+    "id": 148575,
+    "name": "Mosley Park Condominium Trust",
+    "slug": "mosley-park-condominium-trust",
+    "address": "224 Park Street",
+    "city": "Stoneham",
+    "state": "MA",
+    "zip": "02180"
+  },
+  {
+    "id": 147375,
+    "name": "Northside Meadow Condominium Trust",
+    "slug": "northside-meadow-condominium-trust",
+    "address": "1 Tanglewood Drive",
+    "city": "Framingham",
+    "state": "MA",
+    "zip": "01701"
+  },
+  {
+    "id": 149291,
+    "name": "Custer Estate Condominium Trust",
+    "slug": "custer-estate-condominium-trust",
+    "address": "25 Custer Street",
+    "city": "Boston",
+    "state": "MA",
+    "zip": "02130"
+  },
+  {
+    "id": 144739,
+    "name": "420 Lakeside Office Condominium Trust",
+    "slug": "420-lakeside-office-condominium-trust",
+    "address": "420 Lakeside Avenue",
+    "city": "Marlborough",
+    "state": "MA",
+    "zip": "01752"
+  },
+  {
+    "id": 149357,
+    "name": "Pizzi Farm",
+    "slug": "pizzi-farm",
+    "address": "15 Kings Way",
+    "city": "Waltham",
+    "state": "MA",
+    "zip": "02451"
+  },
+  {
+    "id": 150490,
+    "name": "Chestnut Grove Condominium Trust",
+    "slug": "chestnut-grove-condominium-trust",
+    "address": "1175 Chestnut Street",
+    "city": "Newton",
+    "state": "MA",
+    "zip": "02464"
+  },
+  {
+    "id": 110410,
+    "name": "Uncommon Place Condominium",
+    "slug": "uncommon-place-condominium",
+    "address": "54 Dutcher Street",
+    "city": "Hopedale",
+    "state": "MA",
+    "zip": "01747"
+  },
+  {
+    "id": 146288,
+    "name": "Partridge Berry Hills Condominium Association",
+    "slug": "partridge-berry-hills-condominium-association",
+    "address": "2-15 Strawberry Bank Road",
+    "city": "Nashua",
+    "state": "NH",
+    "zip": "03062"
+  },
+  {
+    "id": 150491,
+    "name": "Baseball Factory",
+    "slug": "baseball-factory",
+    "address": "12 Walnut Street",
+    "city": "Natick",
+    "state": "MA",
+    "zip": "01760"
+  },
+  {
+    "id": 129670,
+    "name": "Craftsman Village Condominium",
+    "slug": "craftsman-village-condominium",
+    "address": "6 Braeburn Court",
+    "city": "Harvard",
+    "state": "MA",
+    "zip": "01451"
+  },
+  {
+    "id": 149477,
+    "name": "Applewood Three Condominium Association",
+    "slug": "applewood-three-condominium-association",
+    "address": "13 Applewood Drive",
+    "city": "Boxborough",
+    "state": "MA",
+    "zip": "01719"
+  },
+  {
+    "id": 153590,
+    "name": "Applewood Two Condominium Association",
+    "slug": "applewood-two-condominium-association",
+    "address": "47 Cortland Lane",
+    "city": "Boxborough",
+    "state": "MA",
+    "zip": "01719"
+  },
+  {
+    "id": 153591,
+    "name": "Webber Village Condominium",
+    "slug": "webber-village-condominium",
+    "address": "1 Patricia Way",
+    "city": "Littleton",
+    "state": "MA",
+    "zip": "01460"
+  },
+  {
+    "id": 150536,
+    "name": "Spruce Hill Condominium Association",
+    "slug": "spruce-hill-condominium-association",
+    "address": "27 Soucy Drive",
+    "city": "Rutland",
+    "state": "MA",
+    "zip": "01543"
+  }
+]
