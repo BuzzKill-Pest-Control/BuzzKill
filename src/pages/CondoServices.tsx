@@ -15,7 +15,7 @@ export default function CondoServices() {
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">For HOA Boards &amp; Property Managers</div>
-          <h1 className="bk-h1-lower">condo services</h1>
+          <h1 className="bk-h1-lower">Condo Services</h1>
           <h2 className="bk-h2" style={{ marginTop: 24 }}>
             HOA &amp; Condo Common-Area Pest Control
           </h2>

@@ -7,6 +7,7 @@ import CondoServices from "./pages/CondoServices";
 import InUnitServices from "./pages/InUnitServices";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import CityPage from "./pages/CityPage";
 import ScrollToTop from "./components/ScrollToTop";
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
           <Route path="/in-unit-services" element={<InUnitServices />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />
+          <Route path="/pest-control/:slug" element={<CityPage />} />
         </Routes>
       </main>
       <Footer />

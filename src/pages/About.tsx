@@ -13,7 +13,7 @@ export default function About() {
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">About BuzzKill</div>
-          <h1 className="bk-h1-lower">about</h1>
+          <h1 className="bk-h1-lower">About</h1>
           <p className="bk-body-lead">
             BuzzKill Pest Control was built to solve a common problem in shared
             living communities: pest issues that keep coming back because common

@@ -13,7 +13,7 @@ export default function InUnitServices() {
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">For Unit Owners</div>
-          <h1 className="bk-h1-lower">in-unit services</h1>
+          <h1 className="bk-h1-lower">In-Unit Services</h1>
           <p className="bk-body-lead">
             {"If BuzzKill is already scheduled to service your community\u2019s common areas, you may be able to book discounted in\u2011unit pest control during the same visit window."}
           </p>
