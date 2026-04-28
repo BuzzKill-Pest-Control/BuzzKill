@@ -90,6 +90,9 @@ export default function Footer() {
             <Link className="bk-footer-link" to="/about">
               About BuzzKill
             </Link>
+            <Link className="bk-footer-link" to="/licensed-insured">
+              Licensed &amp; Insured
+            </Link>
             <Link className="bk-footer-link" to="/#form">
               Start Service
             </Link>

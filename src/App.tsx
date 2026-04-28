@@ -8,6 +8,7 @@ import InUnitServices from "./pages/InUnitServices";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import CityPage from "./pages/CityPage";
+import LicensedInsured from "./pages/LicensedInsured";
 import ScrollToTop from "./components/ScrollToTop";
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
           <Route path="/about" element={<About />} />
           <Route path="/condo-services" element={<CondoServices />} />
           <Route path="/in-unit-services" element={<InUnitServices />} />
+          <Route path="/licensed-insured" element={<LicensedInsured />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />
           <Route path="/pest-control/:slug" element={<CityPage />} />

@@ -61,6 +61,15 @@ export default function Header() {
           >
             In&#8209;Unit Services
           </NavLink>
+          <NavLink
+            to="/licensed-insured"
+            className={({ isActive }) =>
+              `bk-nav-link ${isActive ? "is-active" : ""}`
+            }
+            onClick={close}
+          >
+            Licensed &amp; Insured
+          </NavLink>
           <a
             className="bk-nav-login"
             href="https://buzzkill.fieldportals.com/landing/index"
