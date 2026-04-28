@@ -87,6 +87,110 @@ const FREQUENCY_DAYS: Record<string, number> = {
   "Every 3 Months": 90,
 };
 
+// ── Dynamic pricing ──────────────────────────────────────────────────
+// Base prices (from Product Template for each service type)
+const BASE_PRICE: Record<string, number> = {
+  "Association:Monthly": 110,
+  "Association:Every 2 Months": 90,
+  "Association:Every 3 Months": 70,
+  "Residential:Monthly": 69,
+  "Residential:Every 2 Months": 56,
+  "Residential:Every 3 Months": 45,
+};
+
+// Dynamic pricing tiers (from Admin → Preferences → Service Types → Product Template)
+type PricingTier = { min: number; max: number; per: number; premium: number };
+type PricingConfig = { baseThreshold: number; tiers: PricingTier[] };
+
+const PRICING: Record<string, PricingConfig> = {
+  // HOA — Unit of Measure: CNT (Count), Start Dynamic After: 10
+  "Association:Monthly": {
+    baseThreshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 55 },
+      { min: 26, max: 50, per: 25, premium: 100 },
+      { min: 51, max: 100, per: 50, premium: 140 },
+      { min: 101, max: 0, per: 100, premium: 275 },
+    ],
+  },
+  "Association:Every 2 Months": {
+    baseThreshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 40 },
+      { min: 26, max: 50, per: 25, premium: 80 },
+      { min: 51, max: 100, per: 50, premium: 115 },
+      { min: 101, max: 0, per: 100, premium: 150 },
+    ],
+  },
+  "Association:Every 3 Months": {
+    baseThreshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 35 },
+      { min: 26, max: 50, per: 25, premium: 65 },
+      { min: 51, max: 100, per: 50, premium: 90 },
+      { min: 101, max: 0, per: 100, premium: 180 },
+    ],
+  },
+  // Residential — Unit of Measure: SF (Square Feet), Start Dynamic After: 1000
+  "Residential:Monthly": {
+    baseThreshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 15 },
+      { min: 4001, max: 0, per: 1000, premium: 23 },
+    ],
+  },
+  "Residential:Every 2 Months": {
+    baseThreshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 13 },
+      { min: 4001, max: 0, per: 1000, premium: 19 },
+    ],
+  },
+  "Residential:Every 3 Months": {
+    baseThreshold: 1000,
+    tiers: [
+      { min: 1001, max: 4000, per: 1000, premium: 10 },
+      { min: 4001, max: 0, per: 1000, premium: 15 },
+    ],
+  },
+};
+
+/**
+ * Calculate the total service charge (base + dynamic premium) based on
+ * CNT/SF and the pricing tiers from the service type template.
+ *
+ * FieldRoutes dynamic pricing:
+ *   - At or below baseThreshold: base price only
+ *   - Above baseThreshold: base price + tiered premiums for each step
+ *     of `per` units within each tier bracket
+ *
+ * Returns the total charge (base + all applicable premiums).
+ */
+function calculateTotalCharge(
+  propertyType: string,
+  freq: string,
+  cnt: number,
+): number {
+  const key = `${propertyType}:${freq}`;
+  const base = BASE_PRICE[key] ?? 0;
+  const config = PRICING[key];
+
+  if (!config || cnt <= config.baseThreshold) return base;
+
+  let totalPremium = 0;
+
+  for (const tier of config.tiers) {
+    if (cnt < tier.min) break;
+
+    const tierMax = tier.max === 0 ? Infinity : tier.max;
+    const unitsInTier = Math.min(cnt, tierMax) - tier.min + 1;
+    const steps = Math.ceil(unitsInTier / tier.per);
+    totalPremium += steps * tier.premium;
+  }
+
+  return base + totalPremium;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function jsonResponse(
@@ -184,13 +288,17 @@ function buildSubscriptionPayload(
 ): Record<string, string | number> {
   const isAssociation = input.propertyType === "Association";
   const freq = input.freq ?? "Monthly";
+  const propType = isAssociation ? "Association" : "Residential";
 
-  const typeMap =
-    SERVICE_ID_MAP[isAssociation ? "Association" : "Residential"] ?? {};
+  const typeMap = SERVICE_ID_MAP[propType] ?? {};
   const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
   const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
 
-  return {
+  // Calculate total charge (base + dynamic pricing premium)
+  const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
+  const totalCharge = cnt > 0 ? calculateTotalCharge(propType, freq, cnt) : 0;
+
+  const out: Record<string, string | number> = {
     customerID,
     serviceID,
     active: 1,
@@ -198,6 +306,14 @@ function buildSubscriptionPayload(
     sourceID: SOURCE_WEBSITE,
     convertToLead: 1,
   };
+
+  // Override the template's default charge with our calculated total
+  if (totalCharge > 0) {
+    out.serviceCharge = totalCharge;
+    out.initialCharge = totalCharge;
+  }
+
+  return out;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
