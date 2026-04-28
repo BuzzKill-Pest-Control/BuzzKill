@@ -41,7 +41,7 @@ type APIGatewayLikeResponse = {
 };
 
 type LeadInput = {
-  propertyType?: "Residential" | "Commercial" | string;
+  propertyType?: "Association" | "Residential" | string;
   first?: string;
   last?: string;
   email?: string;
@@ -90,8 +90,26 @@ function digitsOnly(s: string | undefined): string {
   return (s ?? "").replace(/\D+/g, "");
 }
 
+// FieldRoutes customer source IDs (from Admin → Preferences → Customer Sources)
+const SOURCE_WEBSITE = "10001";
+
+// Service-type abbreviations by property type × frequency
+// (from Admin → Preferences → Service Types)
+const SERVICE_TYPE_MAP: Record<string, Record<string, string>> = {
+  Association: {
+    Monthly: "HM",
+    "Every 2 Months": "HB",
+    "Every 3 Months": "HQ",
+  },
+  Residential: {
+    Monthly: "RM",
+    "Every 2 Months": "RB",
+    "Every 3 Months": "RQ",
+  },
+};
+
 function mapToFieldRoutes(input: LeadInput): Record<string, string> {
-  const isCommercial = input.propertyType === "Commercial";
+  const isAssociation = input.propertyType === "Association";
   const out: Record<string, string> = {
     fname: (input.first ?? "").trim(),
     lname: (input.last ?? "").trim(),
@@ -101,29 +119,33 @@ function mapToFieldRoutes(input: LeadInput): Record<string, string> {
     city: (input.city ?? "").trim(),
     state: (input.state ?? "").trim().toUpperCase().slice(0, 2),
     zip: digitsOnly(input.zip).slice(0, 5),
-    // Lead status. FieldRoutes / PestRoutes convention: active = -3 == Lead.
-    active: "-3",
-    // Marketing source — adjust to a real customerSource ID once the
-    // tenant has one configured.
-    customerSource: "Website",
+    // Customer source — numeric ID from FieldRoutes tenant config
+    customerSource: SOURCE_WEBSITE,
   };
 
-  if (isCommercial) {
+  if (isAssociation) {
     out.commercialAccount = "1";
     if (input.company && input.company.trim()) {
       out.companyName = input.company.trim();
     }
   }
 
+  // Map frequency → service type abbreviation
+  const freq = input.freq ?? "Monthly";
+  const typeMap = SERVICE_TYPE_MAP[isAssociation ? "Association" : "Residential"] ?? {};
+  const serviceAbbrev = typeMap[freq];
+  if (serviceAbbrev) {
+    out.serviceType = serviceAbbrev;
+  }
+
   // Optional context — sent through as notes so the front office sees
-  // square footage / unit count / requested frequency without us
-  // guessing the right structured field names.
+  // square footage / unit count / requested frequency.
   const noteParts: string[] = [];
   if (input.sqft) noteParts.push(`Square footage: ${input.sqft}`);
   if (input.units) noteParts.push(`Unit count: ${input.units}`);
   if (input.freq) noteParts.push(`Requested frequency: ${input.freq}`);
   noteParts.push(
-    `Property type: ${isCommercial ? "Commercial" : "Residential"}`,
+    `Property type: ${isAssociation ? "Association / HOA" : "Residential"}`,
   );
   if (noteParts.length > 0) {
     out.specialScheduling = noteParts.join(" | ");

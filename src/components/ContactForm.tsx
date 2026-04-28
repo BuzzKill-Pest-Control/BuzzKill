@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { submitLead } from "../lib/leadIntake";
 
-type PropertyType = "Residential" | "Commercial";
+type PropertyType = "Association" | "Residential";
 
 type ContactFormProps = {
   eyebrow?: string;
@@ -15,7 +15,7 @@ export default function ContactForm({
   title = "Start Service",
   intro = "This form creates a FieldRoutes customer + lead. You'll receive a confirmation email after submission.",
 }: ContactFormProps) {
-  const [type, setType] = useState<PropertyType>("Residential");
+  const [type, setType] = useState<PropertyType>("Association");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -98,9 +98,9 @@ export default function ContactForm({
 
         <form className="bk-form" onSubmit={handleSubmit}>
           <div className="bk-field bk-full">
-            <label>Residential or Commercial?</label>
+            <label>Association or Residential?</label>
             <div className="bk-segmented" role="radiogroup" aria-label="Property type">
-              {(["Residential", "Commercial"] as PropertyType[]).map((opt) => (
+              {(["Association", "Residential"] as PropertyType[]).map((opt) => (
                 <button
                   type="button"
                   key={opt}
@@ -114,39 +114,43 @@ export default function ContactForm({
             </div>
           </div>
 
-          <div className="bk-field">
-            <label htmlFor="sqft">Square Footage</label>
-            <input
-              id="sqft"
-              inputMode="numeric"
-              value={data.sqft}
-              onChange={update("sqft")}
-              placeholder="3200"
-            />
-            <div className="bk-help">Whole numbers only</div>
-          </div>
-          <div className="bk-field">
-            <label htmlFor="units">Unit Count</label>
-            <input
-              id="units"
-              inputMode="numeric"
-              value={data.units}
-              onChange={update("units")}
-              placeholder="48"
-            />
-            <div className="bk-help">Whole numbers only</div>
-          </div>
-
-          {type === "Commercial" && (
+          {type === "Residential" && (
             <div className="bk-field bk-full">
-              <label htmlFor="company">Company Name</label>
+              <label htmlFor="sqft">Square Footage</label>
               <input
-                id="company"
-                value={data.company}
-                onChange={update("company")}
-                placeholder="Brookfield Condominium Trust"
+                id="sqft"
+                inputMode="numeric"
+                value={data.sqft}
+                onChange={update("sqft")}
+                placeholder="3200"
               />
+              <div className="bk-help">Whole numbers only</div>
             </div>
+          )}
+
+          {type === "Association" && (
+            <>
+              <div className="bk-field">
+                <label htmlFor="units">Unit Count</label>
+                <input
+                  id="units"
+                  inputMode="numeric"
+                  value={data.units}
+                  onChange={update("units")}
+                  placeholder="48"
+                />
+                <div className="bk-help">Whole numbers only</div>
+              </div>
+              <div className="bk-field">
+                <label htmlFor="company">Association / Company Name</label>
+                <input
+                  id="company"
+                  value={data.company}
+                  onChange={update("company")}
+                  placeholder="Brookfield Condominium Trust"
+                />
+              </div>
+            </>
           )}
 
           <div className="bk-field">
