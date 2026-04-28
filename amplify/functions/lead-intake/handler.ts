@@ -190,7 +190,10 @@ function buildSubscriptionPayload(
   const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
   const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
 
-  return {
+  // CNT = unit count for associations, square footage for residential
+  const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
+
+  const out: Record<string, string | number> = {
     customerID,
     serviceID,
     active: 1,
@@ -198,6 +201,22 @@ function buildSubscriptionPayload(
     sourceID: SOURCE_WEBSITE,
     convertToLead: 1,
   };
+
+  // Set quantity on both initial and recurring ticket templates via
+  // inline addon objects (see ticket/createAddon params).
+  // The addon uses quantity to populate the CNT column on the ticket.
+  if (cnt > 0) {
+    const addonObj = JSON.stringify([{
+      description: isAssociation ? "Units" : "Square Footage",
+      quantity: cnt,
+      amount: 0,
+      taxable: 0,
+    }]);
+    out.initialAddons = addonObj as unknown as number;
+    out.addons = addonObj as unknown as number;
+  }
+
+  return out;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
