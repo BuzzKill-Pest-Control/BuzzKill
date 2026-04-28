@@ -92,6 +92,18 @@ function calcPrice(type: string, freq: string, cnt: number): number {
   return base + prem;
 }
 
+/**
+ * Convert price to monthly billing equivalent.
+ * Residential pricing tables are already structured per-month.
+ * Association pricing is per-service, so divide by months-per-service.
+ */
+function toMonthly(serviceCharge: number, type: string, freq: string): number {
+  if (type !== "Association") return serviceCharge;
+  if (freq === "Every 2 Months") return serviceCharge / 2;
+  if (freq === "Every 3 Months") return serviceCharge / 3;
+  return serviceCharge;
+}
+
 function fmt(n: number): string {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
@@ -137,9 +149,10 @@ export default function ContactForm({
       setData({ ...data, [k]: e.target.value });
     };
 
-  // Live price preview from current form state
+  // Live monthly price preview from current form state
   const cntNum = parseInt(type === "Association" ? data.units : data.sqft) || 0;
-  const livePrice = cntNum > 0 ? calcPrice(type, data.freq, cntNum) : 0;
+  const livePrice =
+    cntNum > 0 ? toMonthly(calcPrice(type, data.freq, cntNum), type, data.freq) : 0;
 
   function nextStep() {
     setStep((s) => Math.min(s + 1, 3));
@@ -214,7 +227,7 @@ export default function ContactForm({
               <div className="bk-quote-card__label">Your Estimated Quote</div>
               <div className="bk-quote-card__price">
                 {fmtPrice}
-                <span className="bk-quote-card__per"> / service</span>
+                <span className="bk-quote-card__per"> / month</span>
               </div>
               <div className="bk-quote-card__meta">
                 {type === "Association" ? "Association / HOA" : "Residential"}{" "}
@@ -369,7 +382,7 @@ export default function ContactForm({
                     <div className="bk-quote-preview__label">Estimated price</div>
                     <div className="bk-quote-preview__price">
                       {fmt(livePrice)}
-                      <span className="bk-quote-preview__per"> / service</span>
+                      <span className="bk-quote-preview__per"> / month</span>
                     </div>
                   </div>
                 )}
@@ -532,7 +545,7 @@ export default function ContactForm({
                     </div>
                     <div className="bk-quote-preview__price">
                       {fmt(livePrice)}
-                      <span className="bk-quote-preview__per"> / service</span>
+                      <span className="bk-quote-preview__per"> / month</span>
                     </div>
                     <div className="bk-quote-preview__meta">
                       {type === "Association"
