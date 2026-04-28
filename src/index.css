@@ -368,6 +368,20 @@ h6 {
   flex-wrap: wrap;
 }
 
+/* Video hero variant */
+.bk-hero--video {
+  overflow: hidden;
+  background: var(--bk-black);
+}
+.bk-hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
 /* =========================================================================
    BUTTONS
    ========================================================================= */

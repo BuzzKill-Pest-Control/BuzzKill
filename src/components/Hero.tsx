@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 type HeroProps = {
   image: string;
+  video?: string;
   eyebrow?: string;
   headline: ReactNode;
   sub?: ReactNode;
@@ -34,6 +35,7 @@ function CtaButton({
 
 export default function Hero({
   image,
+  video,
   eyebrow,
   headline,
   sub,
@@ -43,9 +45,21 @@ export default function Hero({
 }: HeroProps) {
   return (
     <section
-      className="bk-hero"
-      style={{ backgroundImage: `url(${image})` }}
+      className={`bk-hero${video ? " bk-hero--video" : ""}`}
+      style={video ? undefined : { backgroundImage: `url(${image})` }}
     >
+      {video && (
+        <video
+          className="bk-hero-video"
+          autoPlay
+          muted
+          loop
+          playsInline
+          poster={image}
+        >
+          <source src={video} type="video/mp4" />
+        </video>
+      )}
       <div className="bk-hero-overlay" aria-hidden="true" />
       <div className="bk-hero-inner">
         {eyebrow && <div className="bk-hero-eyebrow">{eyebrow}</div>}

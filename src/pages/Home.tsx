@@ -16,6 +16,7 @@ export default function Home() {
     <>
       <Hero
         image="/images/hero-home-1.jpg"
+        video="/images/hero-video.mp4"
         eyebrow="Massachusetts HOA & Condo Pest Control"
         headline={
           <>
