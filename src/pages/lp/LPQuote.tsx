@@ -49,13 +49,7 @@ function calcPrice(type: string, freq: string, cnt: number): number {
   return base + prem;
 }
 
-/** Convert per-service charge to monthly billing equivalent. */
-function toMonthly(serviceCharge: number, type: string, freq: string): number {
-  if (type !== "Association") return serviceCharge;
-  if (freq === "Every 2 Months") return serviceCharge / 2;
-  if (freq === "Every 3 Months") return serviceCharge / 3;
-  return serviceCharge;
-}
+// Pricing tables are monthly billing rates. Display result as-is.
 
 function fmt(n: number) {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -74,8 +68,7 @@ export default function LPQuote() {
   const [data, setData] = useState({ first: "", last: "", email: "", phone: "", addr: "", city: "", state: "MA", zip: "", company: "" });
 
   const cntNum = parseInt(cnt) || 0;
-  const livePrice =
-    cntNum > 0 ? toMonthly(calcPrice(type, freq, cntNum), type, freq) : 0;
+  const livePrice = cntNum > 0 ? calcPrice(type, freq, cntNum) : 0;
 
   function handleCalc(e: FormEvent) {
     e.preventDefault();
@@ -179,7 +172,7 @@ export default function LPQuote() {
                   </div>
                   <div style={{ fontSize: 44, fontWeight: 800, color: "var(--fg1)", lineHeight: 1.1 }}>
                     {fmt(livePrice)}
-                    <span style={{ fontSize: 16, fontWeight: 400, color: "var(--fg2)" }}> / month</span>
+                    <span style={{ fontSize: 16, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span>
                   </div>
                 </div>
               )}
@@ -200,7 +193,7 @@ export default function LPQuote() {
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ background: "var(--bk-white)", borderLeft: "4px solid var(--bk-green)", borderRadius: "0 8px 8px 0", padding: "20px 24px", display: "inline-block", marginBottom: 20 }}>
                 <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--bk-green-deep)", fontWeight: 700 }}>Your Quote</div>
-                <div style={{ fontSize: 36, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 15, fontWeight: 400, color: "var(--fg2)" }}> / month</span></div>
+                <div style={{ fontSize: 36, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 15, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span></div>
               </div>
               <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 24, fontWeight: 700, textTransform: "uppercase", margin: "0 0 8px" }}>
                 Almost There
@@ -279,7 +272,7 @@ export default function LPQuote() {
             <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 28, fontWeight: 700, textTransform: "uppercase", marginBottom: 12 }}>You&rsquo;re All Set!</h2>
             <div style={{ background: "var(--bk-white)", borderLeft: "4px solid var(--bk-green)", borderRadius: "0 8px 8px 0", padding: "16px 24px", display: "inline-block", marginBottom: 20 }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--bk-green-deep)", fontWeight: 700 }}>Your Estimated Quote</div>
-              <div style={{ fontSize: 32, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 14, fontWeight: 400, color: "var(--fg2)" }}> / month</span></div>
+              <div style={{ fontSize: 32, fontWeight: 800 }}>{fmt(price)}<span style={{ fontSize: 14, fontWeight: 400, color: "var(--fg2)" }}> / month + tax</span></div>
             </div>
             <p style={{ fontSize: 16, color: "var(--fg2)", maxWidth: 420, margin: "0 auto 8px" }}>
               We&rsquo;ve sent a confirmation and quote to <strong>{data.email}</strong>. You&rsquo;ll receive a formal service agreement within one business day.

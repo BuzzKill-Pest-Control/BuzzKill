@@ -361,9 +361,11 @@ function buildSubscriptionPayload(
   const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
   const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
 
-  // Calculate total charge (base + dynamic pricing premium)
+  // Calculate monthly billing rate (base + dynamic pricing premium).
+  // The pricing tables are monthly rates and FieldRoutes is configured
+  // to bill the same monthly amount regardless of service frequency.
   const cnt = Number(digitsOnly(isAssociation ? input.units : input.sqft));
-  const totalCharge = cnt > 0 ? calculateTotalCharge(propType, freq, cnt) : 0;
+  const monthlyRate = cnt > 0 ? calculateTotalCharge(propType, freq, cnt) : 0;
 
   const out: Record<string, string | number> = {
     customerID,
@@ -374,10 +376,9 @@ function buildSubscriptionPayload(
     convertToLead: 1,
   };
 
-  // Override the template's default charge with our calculated total
-  if (totalCharge > 0) {
-    out.serviceCharge = totalCharge;
-    out.initialCharge = totalCharge;
+  if (monthlyRate > 0) {
+    out.serviceCharge = monthlyRate;
+    out.initialCharge = monthlyRate;
   }
 
   return out;
@@ -627,13 +628,9 @@ export const handler: Handler = async (event) => {
   const cntValue = Number(digitsOnly(isAssoc ? input.units : input.sqft));
   const propType = isAssoc ? "Association" : "Residential";
   const freqLabel = input.freq ?? "Monthly";
-  const serviceCharge = calculateTotalCharge(propType, freqLabel, cntValue);
 
-  // Convert to monthly billing equivalent for display purposes.
-  // Residential pricing tables are already monthly; Association is per-service.
-  const monthsPerService =
-    freqLabel === "Every 2 Months" ? 2 : freqLabel === "Every 3 Months" ? 3 : 1;
-  const monthlyCharge = isAssoc ? serviceCharge / monthsPerService : serviceCharge;
+  // Pricing tables are monthly billing rates — display directly.
+  const monthlyCharge = calculateTotalCharge(propType, freqLabel, cntValue);
   const chargeFormatted = formatCurrency(monthlyCharge);
 
   // 5a: Internal notification to BuzzKill team
@@ -650,7 +647,7 @@ export const handler: Handler = async (event) => {
           ${isAssoc && input.company?.trim() ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Company</td><td>${input.company.trim()}</td></tr>` : ""}
           ${isAssoc ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Units</td><td>${input.units || "—"}</td></tr>` : `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Sq Ft</td><td>${input.sqft || "—"}</td></tr>`}
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Frequency</td><td>${freqLabel}</td></tr>
-          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Quoted Price</td><td style="font-weight: 700; font-size: 16px;">${chargeFormatted} / month</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Quoted Price</td><td style="font-weight: 700; font-size: 16px;">${chargeFormatted} / month + tax</td></tr>
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Customer ID</td><td>${customerID}</td></tr>
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Subscription ID</td><td>${subscriptionID || "—"}</td></tr>
         </table>
@@ -700,7 +697,7 @@ export const handler: Handler = async (event) => {
 
         <div style="background: #F7F7F4; border-left: 4px solid #7ED321; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0;">
           <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #5FA517; font-weight: 700; margin-bottom: 8px;">Your Quick Quote</div>
-          <div style="font-size: 28px; font-weight: 800; color: #0A0A0A; margin-bottom: 4px;">${chargeFormatted}<span style="font-size: 15px; font-weight: 400; color: #6E6E6E;"> / month</span></div>
+          <div style="font-size: 28px; font-weight: 800; color: #0A0A0A; margin-bottom: 4px;">${chargeFormatted}<span style="font-size: 15px; font-weight: 400; color: #6E6E6E;"> / month <span style="font-size: 13px; color: #9A9A9A;">+ tax</span></span></div>
           <div style="font-size: 14px; color: #4A4A4A;">${propLabel} &bull; ${freqLabel} service${isAssoc && input.units ? ` &bull; ${input.units} units` : ""}${!isAssoc && input.sqft ? ` &bull; ${input.sqft} sq ft` : ""}</div>
         </div>
 
