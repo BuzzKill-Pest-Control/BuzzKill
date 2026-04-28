@@ -1,25 +1,19 @@
 /**
  * Lead-intake Lambda — proxies the BuzzKill contact form to FieldRoutes.
  *
+ * Two-step flow:
+ *   1. POST /api/customer/create  → creates the customer record
+ *   2. POST /api/subscription/create → creates a subscription on that
+ *      customer with the correct service type, frequency, source, and
+ *      convertToLead=1 so it shows up in the Leads pipeline.
+ *
  * Frontend posts a JSON body like:
  *   {
- *     propertyType: "Residential" | "Commercial",
+ *     propertyType: "Association" | "Residential",
  *     first, last, email, phone,
  *     addr, city, state, zip,
  *     sqft, units, freq, company
  *   }
- *
- * We validate, map to FieldRoutes' `customer/create` field names, and POST
- * to https://{subdomain}.pestroutes.com/api/customer/create with
- * authenticationKey + authenticationToken on the query string.
- *
- * Lead status is set via active = -3 (FieldRoutes / PestRoutes convention).
- *
- * IMPORTANT: the exact set of accepted field names + required fields for
- * customer/create is tenant-Swagger-defined, not publicly documented. The
- * mapping below is a best-effort starting point. After the first real
- * submission, check CloudWatch logs to see what FieldRoutes returned and
- * adjust `mapToFieldRoutes` if it complains about field names.
  */
 
 type Handler = (
@@ -67,11 +61,33 @@ const REQUIRED_FIELDS: (keyof LeadInput)[] = [
   "zip",
 ];
 
-// CORS is configured on the Lambda Function URL itself (see
-// amplify/backend.ts). AWS adds the Access-Control-* headers to every
-// response automatically and handles OPTIONS preflight without invoking
-// the function. Setting CORS headers here too produces duplicate
-// values that browsers reject — see issue from prod 2026-04-27.
+// ── FieldRoutes tenant config ────────────────────────────────────────
+// Source IDs (Admin → Preferences → Customer Sources)
+const SOURCE_WEBSITE = 10001;
+
+// Service-type IDs by property type × frequency
+// (Admin → Preferences → Service Types — the row number is the ID)
+const SERVICE_ID_MAP: Record<string, Record<string, number>> = {
+  Association: {
+    Monthly: 5,       // HOA Monthly (HM)
+    "Every 2 Months": 6, // HOA Bi-Monthly (HB)
+    "Every 3 Months": 7, // HOA Quarterly (HQ)
+  },
+  Residential: {
+    Monthly: 9,       // Residential Monthly (RM)
+    "Every 2 Months": 10, // Residential Bi-Monthly (RB)
+    "Every 3 Months": 11, // Residential Quarterly (RQ)
+  },
+};
+
+// Map form frequency labels → FieldRoutes frequency value (days)
+const FREQUENCY_DAYS: Record<string, number> = {
+  Monthly: 30,
+  "Every 2 Months": 60,
+  "Every 3 Months": 90,
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 function jsonResponse(
   statusCode: number,
@@ -79,9 +95,7 @@ function jsonResponse(
 ): APIGatewayLikeResponse {
   return {
     statusCode,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-    },
+    headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
   };
 }
@@ -90,25 +104,46 @@ function digitsOnly(s: string | undefined): string {
   return (s ?? "").replace(/\D+/g, "");
 }
 
-// FieldRoutes customer source IDs (from Admin → Preferences → Customer Sources)
-const SOURCE_WEBSITE = "10001";
+/** POST to a FieldRoutes endpoint and return parsed JSON. */
+async function frPost(
+  subdomain: string,
+  key: string,
+  token: string,
+  endpoint: string,
+  params: Record<string, string | number>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const url = `https://${subdomain}.pestroutes.com/api/${endpoint}`;
+  const body = new URLSearchParams({
+    authenticationKey: key,
+    authenticationToken: token,
+    ...Object.fromEntries(
+      Object.entries(params).map(([k, v]) => [k, String(v)]),
+    ),
+  });
 
-// Service-type abbreviations by property type × frequency
-// (from Admin → Preferences → Service Types)
-const SERVICE_TYPE_MAP: Record<string, Record<string, string>> = {
-  Association: {
-    Monthly: "HM",
-    "Every 2 Months": "HB",
-    "Every 3 Months": "HQ",
-  },
-  Residential: {
-    Monthly: "RM",
-    "Every 2 Months": "RB",
-    "Every 3 Months": "RQ",
-  },
-};
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: body.toString(),
+  });
 
-function mapToFieldRoutes(input: LeadInput): Record<string, string> {
+  let parsed: Record<string, unknown>;
+  const text = await resp.text();
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    parsed = { _raw: text.slice(0, 1000) };
+  }
+
+  return { status: resp.status, body: parsed };
+}
+
+// ── Field mapping ────────────────────────────────────────────────────
+
+function buildCustomerPayload(input: LeadInput): Record<string, string> {
   const isAssociation = input.propertyType === "Association";
   const out: Record<string, string> = {
     fname: (input.first ?? "").trim(),
@@ -119,27 +154,16 @@ function mapToFieldRoutes(input: LeadInput): Record<string, string> {
     city: (input.city ?? "").trim(),
     state: (input.state ?? "").trim().toUpperCase().slice(0, 2),
     zip: digitsOnly(input.zip).slice(0, 5),
-    // Customer source — numeric ID from FieldRoutes tenant config
-    customerSource: SOURCE_WEBSITE,
   };
 
   if (isAssociation) {
     out.commercialAccount = "1";
-    if (input.company && input.company.trim()) {
+    if (input.company?.trim()) {
       out.companyName = input.company.trim();
     }
   }
 
-  // Map frequency → service type abbreviation
-  const freq = input.freq ?? "Monthly";
-  const typeMap = SERVICE_TYPE_MAP[isAssociation ? "Association" : "Residential"] ?? {};
-  const serviceAbbrev = typeMap[freq];
-  if (serviceAbbrev) {
-    out.serviceType = serviceAbbrev;
-  }
-
-  // Optional context — sent through as notes so the front office sees
-  // square footage / unit count / requested frequency.
+  // Context notes for the front office
   const noteParts: string[] = [];
   if (input.sqft) noteParts.push(`Square footage: ${input.sqft}`);
   if (input.units) noteParts.push(`Unit count: ${input.units}`);
@@ -153,6 +177,30 @@ function mapToFieldRoutes(input: LeadInput): Record<string, string> {
 
   return out;
 }
+
+function buildSubscriptionPayload(
+  input: LeadInput,
+  customerID: number,
+): Record<string, string | number> {
+  const isAssociation = input.propertyType === "Association";
+  const freq = input.freq ?? "Monthly";
+
+  const typeMap =
+    SERVICE_ID_MAP[isAssociation ? "Association" : "Residential"] ?? {};
+  const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
+  const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
+
+  return {
+    customerID,
+    serviceID,
+    active: 1,
+    frequency: frequencyDays,
+    sourceID: SOURCE_WEBSITE,
+    convertToLead: 1,
+  };
+}
+
+// ── Handler ──────────────────────────────────────────────────────────
 
 export const handler: Handler = async (event) => {
   const method =
@@ -191,15 +239,12 @@ export const handler: Handler = async (event) => {
     return jsonResponse(422, { error: "Invalid phone" });
   }
 
+  // Credentials
   const subdomain = process.env.FIELDROUTES_SUBDOMAIN ?? "buzzkill";
   const key = process.env.FIELDROUTES_KEY ?? "";
   const token = process.env.FIELDROUTES_TOKEN ?? "";
   const dryRun = process.env.LEAD_INTAKE_DRY_RUN === "1";
 
-  // Guard against Amplify Gen 2 returning the literal placeholder string
-  // when a secret hasn't been set in the deployed branch's secret store.
-  // Without this, the placeholder gets concatenated into the URL and you
-  // get a cryptic "Invalid URL" error instead of a useful one.
   const isPlaceholder = (s: string) =>
     s.includes("<value will be resolved during runtime>");
   const unresolved: string[] = [];
@@ -219,94 +264,119 @@ export const handler: Handler = async (event) => {
     });
   }
 
-  const payload = mapToFieldRoutes(input);
+  const customerPayload = buildCustomerPayload(input);
 
   if (dryRun) {
-    console.log("[dry-run] would-be FieldRoutes payload:", payload);
-    return jsonResponse(200, { ok: true, dryRun: true, payload });
+    const subPayload = buildSubscriptionPayload(input, 0);
+    console.log("[dry-run] customer payload:", customerPayload);
+    console.log("[dry-run] subscription payload:", subPayload);
+    return jsonResponse(200, {
+      ok: true,
+      dryRun: true,
+      customerPayload,
+      subscriptionPayload: subPayload,
+    });
   }
 
-  const url = `https://${subdomain}.pestroutes.com/api/customer/create`;
-  const body = new URLSearchParams({
-    authenticationKey: key,
-    authenticationToken: token,
-    ...payload,
-  });
-
-  let upstreamStatus = 0;
-  let upstreamText = "";
+  // ── Step 1: Create customer ──────────────────────────────────────
+  let customerResult: { status: number; body: Record<string, unknown> };
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      body: body.toString(),
-    });
-    upstreamStatus = resp.status;
-    upstreamText = await resp.text();
+    customerResult = await frPost(
+      subdomain,
+      key,
+      token,
+      "customer/create",
+      customerPayload,
+    );
   } catch (err) {
-    // Capture the underlying error (DNS, TLS, connect refused, undici
-    // issues with HTTP/2, etc.) so it surfaces in both CloudWatch and the
-    // browser response body. None of this contains credentials — the
-    // body we built is only sent on successful connect.
     const e = err as { name?: string; message?: string; cause?: unknown };
     const cause = e?.cause as { code?: string; message?: string } | undefined;
-    const detail = {
-      name: e?.name ?? "Error",
-      message: e?.message ?? String(err),
+    console.error("customer/create fetch failed", {
+      name: e?.name,
+      message: e?.message,
       causeCode: cause?.code,
-      causeMessage: cause?.message,
-    };
-    console.error("FieldRoutes fetch failed", detail);
+    });
     return jsonResponse(502, {
-      error: "Upstream request failed",
-      detail,
+      error: "Upstream request failed (customer/create)",
+      detail: e?.message ?? String(err),
     });
   }
 
-  // FieldRoutes typically returns JSON like
-  //   { success: true, customerID: 12345 }
-  // or { success: false, errorMessage: "..." }
-  // We log the raw body so CloudWatch shows exactly what came back during
-  // the first few real submissions — that tells us whether our field
-  // mapping is right.
-  let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(upstreamText);
-  } catch {
-    // not JSON — keep upstreamText for the log line below
-  }
+  console.log("customer/create response", customerResult);
 
-  console.log("FieldRoutes response", {
-    upstreamStatus,
-    body: parsed ?? upstreamText.slice(0, 1000),
-  });
-
-  if (upstreamStatus < 200 || upstreamStatus >= 300) {
-    return jsonResponse(502, {
-      error: "FieldRoutes rejected the request",
-      upstreamStatus,
-      upstreamBody: parsed ?? upstreamText.slice(0, 500),
-    });
-  }
-
-  // Success — but FieldRoutes may still report logical failure with HTTP 200.
   if (
-    parsed &&
-    typeof parsed === "object" &&
-    "success" in parsed &&
-    (parsed as { success?: unknown }).success === false
+    customerResult.status < 200 ||
+    customerResult.status >= 300 ||
+    customerResult.body.success === false
   ) {
     return jsonResponse(502, {
-      error: "FieldRoutes reported failure",
-      upstreamBody: parsed,
+      error: "FieldRoutes rejected customer/create",
+      upstreamStatus: customerResult.status,
+      upstreamBody: customerResult.body,
     });
   }
+
+  const customerID = Number(customerResult.body.result);
+  if (!customerID || isNaN(customerID)) {
+    console.error("customer/create returned no customerID", customerResult.body);
+    return jsonResponse(502, {
+      error: "customer/create succeeded but returned no customer ID",
+      upstreamBody: customerResult.body,
+    });
+  }
+
+  // ── Step 2: Create subscription (as lead) ────────────────────────
+  const subPayload = buildSubscriptionPayload(input, customerID);
+
+  let subResult: { status: number; body: Record<string, unknown> };
+  try {
+    subResult = await frPost(
+      subdomain,
+      key,
+      token,
+      "subscription/create",
+      subPayload,
+    );
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    console.error("subscription/create fetch failed", {
+      name: e?.name,
+      message: e?.message,
+    });
+    // Customer was created — report partial success
+    return jsonResponse(200, {
+      ok: true,
+      customerID,
+      warning: "Customer created but subscription/create failed",
+      subscriptionError: e?.message ?? String(err),
+    });
+  }
+
+  console.log("subscription/create response", subResult);
+
+  if (
+    subResult.status < 200 ||
+    subResult.status >= 300 ||
+    subResult.body.success === false
+  ) {
+    // Customer was created — report partial success
+    return jsonResponse(200, {
+      ok: true,
+      customerID,
+      warning: "Customer created but subscription was rejected",
+      upstreamBody: subResult.body,
+    });
+  }
+
+  const subscriptionID = Number(subResult.body.result);
 
   return jsonResponse(200, {
     ok: true,
-    upstream: parsed ?? upstreamText.slice(0, 500),
+    customerID,
+    subscriptionID: subscriptionID || undefined,
+    upstream: {
+      customer: customerResult.body,
+      subscription: subResult.body,
+    },
   });
 };
