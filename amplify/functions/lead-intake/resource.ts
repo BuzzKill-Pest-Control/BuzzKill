@@ -23,11 +23,14 @@ import { defineFunction, secret } from "@aws-amplify/backend";
 export const leadIntake = defineFunction({
   name: "lead-intake",
   entry: "./handler.ts",
-  timeoutSeconds: 15,
+  timeoutSeconds: 30,
   environment: {
     FIELDROUTES_KEY: secret("FIELDROUTES_KEY"),
     FIELDROUTES_TOKEN: secret("FIELDROUTES_TOKEN"),
     FIELDROUTES_SUBDOMAIN: "buzzkill",
+    // SES sender — must be verified in SES
+    SES_FROM_EMAIL: "info@pestbuzzkill.com",
+    SES_NOTIFY_EMAIL: "info@pestbuzzkill.com",
     // Optional: set to "1" to skip the FieldRoutes call and just echo
     // the would-be payload back to the client. Useful when iterating
     // on field mappings.

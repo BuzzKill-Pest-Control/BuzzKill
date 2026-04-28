@@ -191,6 +191,74 @@ function calculateTotalCharge(
   return base + totalPremium;
 }
 
+// ── Email signature (HTML) ────────────────────────────────────────────
+const EMAIL_SIGNATURE = `
+<table cellpadding="0" cellspacing="0" border="0" style="font-family: Arial, Helvetica, sans-serif; color: #1A1A1A; font-size: 14px; line-height: 1.4; border-collapse: collapse;">
+  <tr>
+    <td valign="top" style="padding: 0 20px 0 0; border-right: 3px solid #7ED321;">
+      <a href="https://pestbuzzkill.com/" style="text-decoration: none;">
+        <img src="https://pestbuzzkill.com/images/logo.png" alt="BuzzKill Pest Control" width="184" height="84" style="display: block; border: 0;">
+      </a>
+    </td>
+    <td valign="top" style="padding: 0 0 0 20px;">
+      <div style="font-family: 'Arial Black', 'Helvetica Neue', Impact, sans-serif; font-weight: 900; font-size: 22px; letter-spacing: 0.02em; line-height: 1; color: #0A0A0A; text-transform: uppercase; margin: 0 0 4px;">
+        BUZZKILL <span style="color: #7ED321;">PEST CONTROL</span>
+      </div>
+      <div style="font-family: Arial, Helvetica, sans-serif; font-style: italic; font-weight: 600; font-size: 12px; color: #5FA517; margin: 0 0 12px;">
+        Safe for Families. Tough on Pests.
+      </div>
+      <table cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; font-family: Arial, Helvetica, sans-serif; font-size: 13px; line-height: 1.5; color: #1A1A1A;">
+        <tr>
+          <td style="padding: 1px 8px 1px 0; color: #5FA517; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;">P</td>
+          <td style="padding: 1px 0;"><a href="tel:+15082589294" style="color: #1A1A1A; text-decoration: none;">508-258-9294</a></td>
+        </tr>
+        <tr>
+          <td style="padding: 1px 8px 1px 0; color: #5FA517; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;">E</td>
+          <td style="padding: 1px 0;"><a href="mailto:info@PestBuzzKill.com" style="color: #1A1A1A; text-decoration: none;">info@PestBuzzKill.com</a></td>
+        </tr>
+        <tr>
+          <td style="padding: 1px 8px 1px 0; color: #5FA517; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;">W</td>
+          <td style="padding: 1px 0;"><a href="https://pestbuzzkill.com/" style="color: #1A1A1A; text-decoration: none;">PestBuzzKill.com</a></td>
+        </tr>
+        <tr>
+          <td valign="top" style="padding: 1px 8px 1px 0; color: #5FA517; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;">A</td>
+          <td style="padding: 1px 0;">420 Lakeside Ave, Suite 104<br>Marlborough, MA 01752</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
+// ── SES email helper ─────────────────────────────────────────────────
+async function sendEmail(
+  from: string,
+  to: string,
+  subject: string,
+  htmlBody: string,
+): Promise<void> {
+  // Dynamic import — only loads the SDK if we actually send
+  const { SESClient, SendEmailCommand } = await import(
+    "@aws-sdk/client-ses"
+  );
+  const ses = new SESClient({});
+  await ses.send(
+    new SendEmailCommand({
+      Source: from,
+      Destination: { ToAddresses: [to] },
+      Message: {
+        Subject: { Data: subject, Charset: "UTF-8" },
+        Body: {
+          Html: { Data: htmlBody, Charset: "UTF-8" },
+        },
+      },
+    }),
+  );
+}
+
+function formatCurrency(amount: number): string {
+  return "$" + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function jsonResponse(
@@ -547,16 +615,98 @@ export const handler: Handler = async (event) => {
     }
   }
 
+  // ── Step 5: Send notification + quote emails ─────────────────────
+  const fromEmail = process.env.SES_FROM_EMAIL ?? "info@pestbuzzkill.com";
+  const notifyEmail = process.env.SES_NOTIFY_EMAIL ?? "info@pestbuzzkill.com";
+  const isAssoc = input.propertyType === "Association";
+  const propLabel = isAssoc ? "Association / HOA" : "Residential";
+  const cntValue = Number(digitsOnly(isAssoc ? input.units : input.sqft));
+  const monthlyCharge = calculateTotalCharge(
+    isAssoc ? "Association" : "Residential",
+    input.freq ?? "Monthly",
+    cntValue,
+  );
+  const freqLabel = input.freq ?? "Monthly";
+  const chargeFormatted = formatCurrency(monthlyCharge);
+
+  // 5a: Internal notification to BuzzKill team
+  try {
+    const notifyHtml = `
+      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #1A1A1A; line-height: 1.6;">
+        <h2 style="color: #0A0A0A; margin: 0 0 16px;">New Lead Submitted</h2>
+        <table cellpadding="6" cellspacing="0" border="0" style="border-collapse: collapse; font-size: 14px;">
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Name</td><td>${(input.first ?? "").trim()} ${(input.last ?? "").trim()}</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Email</td><td><a href="mailto:${(input.email ?? "").trim()}">${(input.email ?? "").trim()}</a></td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Phone</td><td><a href="tel:${digitsOnly(input.phone)}">${(input.phone ?? "").trim()}</a></td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Address</td><td>${(input.addr ?? "").trim()}, ${(input.city ?? "").trim()}, ${(input.state ?? "").trim().toUpperCase()} ${digitsOnly(input.zip).slice(0, 5)}</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Type</td><td>${propLabel}</td></tr>
+          ${isAssoc && input.company?.trim() ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Company</td><td>${input.company.trim()}</td></tr>` : ""}
+          ${isAssoc ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Units</td><td>${input.units || "—"}</td></tr>` : `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Sq Ft</td><td>${input.sqft || "—"}</td></tr>`}
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Frequency</td><td>${freqLabel}</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Quoted Price</td><td style="font-weight: 700; font-size: 16px;">${chargeFormatted} / service</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Customer ID</td><td>${customerID}</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Subscription ID</td><td>${subscriptionID || "—"}</td></tr>
+        </table>
+      </div>`;
+    await sendEmail(
+      fromEmail,
+      notifyEmail,
+      `New Lead: ${(input.first ?? "").trim()} ${(input.last ?? "").trim()} — ${propLabel} ${freqLabel}`,
+      notifyHtml,
+    );
+    console.log("Notification email sent to", notifyEmail);
+  } catch (err) {
+    console.error("Failed to send notification email", (err as Error).message);
+  }
+
+  // 5b: Customer quote email
+  try {
+    const firstName = (input.first ?? "").trim();
+    const customerHtml = `
+      <div style="font-family: Arial, sans-serif; font-size: 15px; color: #1A1A1A; line-height: 1.7; max-width: 600px;">
+        <p>Hi ${firstName},</p>
+
+        <p>Thank you for reaching out to <strong>BuzzKill Pest Control</strong>! We appreciate your interest in professional pest management for your ${isAssoc ? "community" : "home"}.</p>
+
+        <div style="background: #F7F7F4; border-left: 4px solid #7ED321; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0;">
+          <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #5FA517; font-weight: 700; margin-bottom: 8px;">Your Quick Quote</div>
+          <div style="font-size: 28px; font-weight: 800; color: #0A0A0A; margin-bottom: 4px;">${chargeFormatted}<span style="font-size: 15px; font-weight: 400; color: #6E6E6E;"> / service</span></div>
+          <div style="font-size: 14px; color: #4A4A4A;">${propLabel} &bull; ${freqLabel} service${isAssoc && input.units ? ` &bull; ${input.units} units` : ""}${!isAssoc && input.sqft ? ` &bull; ${input.sqft} sq ft` : ""}</div>
+        </div>
+
+        <p><strong>What happens next:</strong></p>
+        <ol style="padding-left: 20px; color: #4A4A4A;">
+          <li style="margin-bottom: 8px;">We'll review your information and follow up within <strong>one business day</strong></li>
+          <li style="margin-bottom: 8px;">You'll receive a <strong>formal service agreement</strong> to review and sign</li>
+          <li style="margin-bottom: 8px;">Once signed, we'll <strong>schedule your first appointment</strong></li>
+        </ol>
+
+        <p>If you have any questions in the meantime, don't hesitate to call us at <a href="tel:+15082589294" style="color: #5FA517; font-weight: 600;">508-258-9294</a> or reply to this email.</p>
+
+        <p>We look forward to working with you!</p>
+
+        <br>
+        ${EMAIL_SIGNATURE}
+      </div>`;
+    await sendEmail(
+      fromEmail,
+      (input.email ?? "").trim(),
+      `Your BuzzKill Pest Control Quote — ${chargeFormatted}/service`,
+      customerHtml,
+    );
+    console.log("Customer quote email sent to", (input.email ?? "").trim());
+  } catch (err) {
+    console.error("Failed to send customer email", (err as Error).message);
+  }
+
   return jsonResponse(200, {
     ok: true,
     customerID,
     subscriptionID: subscriptionID || undefined,
     contractID,
+    monthlyCharge,
+    frequency: freqLabel,
     ...(ticketWarning ? { ticketWarning } : {}),
     ...(contractWarning ? { contractWarning } : {}),
-    upstream: {
-      customer: customerResult.body,
-      subscription: subResult.body,
-    },
   });
 };

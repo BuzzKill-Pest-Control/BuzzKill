@@ -19,6 +19,7 @@ export default function ContactForm({
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [quote, setQuote] = useState<{ amount: number; frequency: string } | null>(null);
   const [data, setData] = useState({
     first: "",
     last: "",
@@ -48,6 +49,10 @@ export default function ContactForm({
     try {
       const result = await submitLead({ propertyType: type, ...data });
       if (result.ok) {
+        const body = result.body as { monthlyCharge?: number; frequency?: string };
+        if (body.monthlyCharge) {
+          setQuote({ amount: body.monthlyCharge, frequency: body.frequency ?? data.freq });
+        }
         setSubmitted(true);
       } else {
         const msg =
@@ -67,20 +72,78 @@ export default function ContactForm({
   }
 
   if (submitted) {
+    const fmtPrice = quote
+      ? `$${quote.amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`
+      : null;
+
     return (
       <section className="bk-section bk-section-light" id="form">
         <div className="bk-container bk-narrow bk-confirm">
           <div className="bk-eyebrow">Confirmation</div>
           <h2 className="bk-h2">Request received.</h2>
+
+          {fmtPrice && (
+            <div
+              style={{
+                background: "#F7F7F4",
+                borderLeft: "4px solid #7ED321",
+                padding: "20px 24px",
+                margin: "24px 0",
+                borderRadius: "0 8px 8px 0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 13,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: "#5FA517",
+                  fontWeight: 700,
+                  marginBottom: 8,
+                }}
+              >
+                Your Estimated Quote
+              </div>
+              <div
+                style={{
+                  fontSize: 32,
+                  fontWeight: 800,
+                  color: "#0A0A0A",
+                  lineHeight: 1.1,
+                }}
+              >
+                {fmtPrice}
+                <span
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 400,
+                    color: "#6E6E6E",
+                    marginLeft: 4,
+                  }}
+                >
+                  / service
+                </span>
+              </div>
+              <div style={{ fontSize: 14, color: "#4A4A4A", marginTop: 4 }}>
+                {type === "Association" ? "Association / HOA" : "Residential"}{" "}
+                &bull; {quote?.frequency} service
+              </div>
+            </div>
+          )}
+
           <p className="bk-body-lead">
-            Thanks{data.first ? `, ${data.first}` : ""}—we'll be in touch within
-            one business day. A confirmation has been sent to{" "}
-            {data.email || "your email"}.
+            Thanks{data.first ? `, ${data.first}` : ""}! A confirmation and
+            quote have been sent to {data.email || "your email"}. We'll follow
+            up within one business day to finalize your service agreement and
+            schedule your first appointment.
           </p>
           <button
             type="button"
             className="bk-btn bk-btn-outline"
-            onClick={() => setSubmitted(false)}
+            onClick={() => {
+              setSubmitted(false);
+              setQuote(null);
+            }}
           >
             Submit Another
           </button>

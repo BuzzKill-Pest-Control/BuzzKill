@@ -5,6 +5,7 @@ import {
   HttpMethod,
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { leadIntake } from "./functions/lead-intake/resource";
@@ -14,6 +15,14 @@ const backend = defineBackend({
   data,
   leadIntake,
 });
+
+// Grant SES send permissions to the lead-intake function
+backend.leadIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ses:SendEmail", "ses:SendRawEmail"],
+    resources: ["*"],
+  }),
+);
 
 // Public Function URL for the contact-form proxy. CORS is locked to the
 // production + staging origins (and localhost for dev). Auth is NONE
