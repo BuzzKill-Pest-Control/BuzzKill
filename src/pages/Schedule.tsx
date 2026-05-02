@@ -47,13 +47,11 @@ export default function Schedule() {
 
   if (!property) return <Navigate to="/" replace />;
 
-  const freq = property.frequency ?? "Monthly";
-  const freqLabel =
-    freq === "Every 2 Months"
-      ? "Bi-Monthly"
-      : freq === "Every 3 Months"
-        ? "Quarterly"
-        : "Monthly";
+  // Resident in-unit service is always Quarterly by default.
+  // (The HOA's common-area service may be on a different schedule —
+  // that's tracked separately on the association's subscription.)
+  const freq = "Every 3 Months";
+  const freqLabel = "Quarterly";
   const fullAddr = `${property.address}${unit ? `, Unit ${unit}` : ""}`;
 
   async function handleSubmit(e: FormEvent) {
@@ -96,7 +94,7 @@ export default function Schedule() {
     <div style={{ minHeight: "100vh", background: "var(--bk-cream)" }}>
       <SEO
         title={`Schedule In-Unit Service — ${property.name}`}
-        description={`Sign up for discounted in-unit pest control at ${property.name} in ${property.city}, ${property.state}. BuzzKill is already servicing your community's common areas.`}
+        description={`Sign up for discounted quarterly in-unit pest control at ${property.name} in ${property.city}, ${property.state}. BuzzKill is already servicing your community's common areas.`}
         noindex
       />
 
