@@ -9,10 +9,12 @@
  *
  * Designed for PM announcements — minimal friction, fast signup.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
 import type { FormEvent } from "react";
 import { submitLead } from "../lib/leadIntake";
+
+const AGREEMENT_REDIRECT_DELAY = 4;
 import SEO from "../components/SEO";
 import properties from "../data/properties.json";
 
@@ -44,6 +46,23 @@ export default function Schedule() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+  const [redirectCountdown, setRedirectCountdown] = useState<number>(
+    AGREEMENT_REDIRECT_DELAY,
+  );
+
+  // Auto-redirect to agreement signing page after submission
+  useEffect(() => {
+    if (!submitted || !agreementUrl) return;
+    if (redirectCountdown <= 0) {
+      window.location.href = agreementUrl;
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((n) => n - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [submitted, agreementUrl, redirectCountdown]);
 
   if (!property) return <Navigate to="/" replace />;
 
@@ -75,6 +94,8 @@ export default function Schedule() {
         company: property!.name,
       });
       if (result.ok) {
+        const body = result.body as { agreementUrl?: string };
+        if (body.agreementUrl) setAgreementUrl(body.agreementUrl);
         setSubmitted(true);
       } else {
         setError(
@@ -550,7 +571,7 @@ export default function Schedule() {
               style={{
                 fontSize: 16,
                 color: "var(--fg2)",
-                maxWidth: 380,
+                maxWidth: 420,
                 margin: "0 auto 8px",
                 lineHeight: 1.6,
               }}
@@ -559,11 +580,66 @@ export default function Schedule() {
               <strong>
                 Unit {unit} at {property.name}
               </strong>{" "}
-              on the same <strong>{freqLabel}</strong> schedule as your
-              community&rsquo;s common-area service. A confirmation has been
-              sent to <strong>{email}</strong>.
+              on a <strong>{freqLabel}</strong> schedule.
             </p>
-            <p style={{ fontSize: 14, color: "var(--fg3)", marginTop: 16 }}>
+
+            {agreementUrl ? (
+              <>
+                <p
+                  style={{
+                    fontSize: 15,
+                    color: "var(--fg2)",
+                    maxWidth: 420,
+                    margin: "12px auto 18px",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Your service agreement is ready to sign.
+                  {redirectCountdown > 0 && (
+                    <>
+                      {" "}
+                      Redirecting you in{" "}
+                      <strong>{redirectCountdown}</strong> second
+                      {redirectCountdown === 1 ? "" : "s"}…
+                    </>
+                  )}
+                </p>
+                <a
+                  href={agreementUrl}
+                  className="bk-btn bk-btn-primary"
+                  style={{ display: "inline-block" }}
+                >
+                  Review &amp; Sign Agreement Now &rarr;
+                </a>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--fg3)",
+                    marginTop: 18,
+                    maxWidth: 380,
+                    marginLeft: "auto",
+                    marginRight: "auto",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  A copy was also sent to <strong>{email}</strong>. (Check your
+                  spam folder if you don&rsquo;t see it.)
+                </p>
+              </>
+            ) : (
+              <p
+                style={{
+                  fontSize: 15,
+                  color: "var(--fg2)",
+                  maxWidth: 420,
+                  margin: "0 auto",
+                }}
+              >
+                A confirmation has been sent to <strong>{email}</strong>.
+              </p>
+            )}
+
+            <p style={{ fontSize: 14, color: "var(--fg3)", marginTop: 24 }}>
               Questions? Call{" "}
               <a
                 href="tel:508-258-9294"

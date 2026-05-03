@@ -66,7 +66,17 @@ export type LeadPayload = {
 };
 
 export type LeadResponse =
-  | { ok: true; upstream?: unknown; dryRun?: boolean; payload?: unknown }
+  | {
+      ok: true;
+      upstream?: unknown;
+      dryRun?: boolean;
+      payload?: unknown;
+      customerID?: number;
+      subscriptionID?: number;
+      agreementUrl?: string;
+      monthlyCharge?: number;
+      frequency?: string;
+    }
   | { error: string; missing?: string[]; upstreamStatus?: number; upstreamBody?: unknown };
 
 export async function submitLead(

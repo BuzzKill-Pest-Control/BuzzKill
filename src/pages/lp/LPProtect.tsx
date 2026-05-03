@@ -8,10 +8,12 @@
  * - Urgency: seasonal messaging, limited capacity
  * - Single CTA: Request a free assessment
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { submitLead } from "../../lib/leadIntake";
 import SEO from "../../components/SEO";
+
+const AGREEMENT_REDIRECT_DELAY = 4;
 
 const STATS = [
   {
@@ -57,6 +59,10 @@ export default function LPProtect() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+  const [redirectCountdown, setRedirectCountdown] = useState<number>(
+    AGREEMENT_REDIRECT_DELAY,
+  );
   const [data, setData] = useState({
     first: "",
     last: "",
@@ -74,6 +80,19 @@ export default function LPProtect() {
     (k: keyof typeof data) => (e: React.ChangeEvent<HTMLInputElement>) =>
       setData({ ...data, [k]: e.target.value });
 
+  // Auto-redirect to agreement signing page after submission
+  useEffect(() => {
+    if (!submitted || !agreementUrl) return;
+    if (redirectCountdown <= 0) {
+      window.location.href = agreementUrl;
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((n) => n - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [submitted, agreementUrl, redirectCountdown]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -85,8 +104,11 @@ export default function LPProtect() {
         sqft: "",
         freq: "Monthly",
       });
-      if (result.ok) setSubmitted(true);
-      else
+      if (result.ok) {
+        const body = result.body as { agreementUrl?: string };
+        if (body.agreementUrl) setAgreementUrl(body.agreementUrl);
+        setSubmitted(true);
+      } else
         setError(
           "error" in result.body
             ? String(result.body.error)
@@ -209,15 +231,56 @@ export default function LPProtect() {
                   <path d="M20 6L9 17l-5-5" />
                 </svg>
               </div>
-              <h2 className="bk-lp-h2">We&rsquo;ll Be in Touch</h2>
-              <p
-                className="bk-lp-lead"
-                style={{ maxWidth: 420, margin: "0 auto" }}
-              >
-                A BuzzKill specialist will contact you within one business day
-                to discuss your community&rsquo;s needs and schedule a free
-                assessment.
-              </p>
+              <h2 className="bk-lp-h2">
+                {agreementUrl ? "You're All Set!" : "We'll Be in Touch"}
+              </h2>
+              {agreementUrl ? (
+                <>
+                  <p
+                    className="bk-lp-lead"
+                    style={{ maxWidth: 460, margin: "0 auto 18px" }}
+                  >
+                    Your service agreement is ready to sign.
+                    {redirectCountdown > 0 && (
+                      <>
+                        {" "}
+                        Redirecting you in{" "}
+                        <strong>{redirectCountdown}</strong> second
+                        {redirectCountdown === 1 ? "" : "s"}…
+                      </>
+                    )}
+                  </p>
+                  <a
+                    href={agreementUrl}
+                    className="bk-btn bk-btn-primary bk-lp-cta"
+                    style={{ maxWidth: 360, margin: "0 auto" }}
+                  >
+                    Review &amp; Sign Agreement Now &rarr;
+                  </a>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "rgba(255,255,255,0.5)",
+                      marginTop: 18,
+                      maxWidth: 420,
+                      marginLeft: "auto",
+                      marginRight: "auto",
+                    }}
+                  >
+                    A copy was also sent to <strong>{data.email}</strong>.
+                    (Check your spam folder if you don&rsquo;t see it.)
+                  </p>
+                </>
+              ) : (
+                <p
+                  className="bk-lp-lead"
+                  style={{ maxWidth: 420, margin: "0 auto" }}
+                >
+                  A BuzzKill specialist will contact you within one business
+                  day to discuss your community&rsquo;s needs and schedule a
+                  free assessment.
+                </p>
+              )}
               <div className="bk-lp-trust">
                 <div className="bk-lp-trust__item">
                   <svg

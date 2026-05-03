@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { submitLead } from "../lib/leadIntake";
+
+// Seconds to wait before auto-redirecting to the agreement signing page
+const AGREEMENT_REDIRECT_DELAY = 4;
 
 type PropertyType = "Association" | "Residential";
 
@@ -121,6 +124,10 @@ export default function ContactForm({
     amount: number;
     frequency: string;
   } | null>(null);
+  const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+  const [redirectCountdown, setRedirectCountdown] = useState<number>(
+    AGREEMENT_REDIRECT_DELAY,
+  );
   const [data, setData] = useState({
     first: "",
     last: "",
@@ -141,6 +148,20 @@ export default function ContactForm({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       setData({ ...data, [k]: e.target.value });
     };
+
+  // Auto-redirect to agreement signing page after submission.
+  // Email may go to spam, so we proactively send the user to the link.
+  useEffect(() => {
+    if (!submitted || !agreementUrl) return;
+    if (redirectCountdown <= 0) {
+      window.location.href = agreementUrl;
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((n) => n - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [submitted, agreementUrl, redirectCountdown]);
 
   // Live monthly price preview from current form state
   const cntNum = parseInt(type === "Association" ? data.units : data.sqft) || 0;
@@ -165,12 +186,16 @@ export default function ContactForm({
         const body = result.body as {
           monthlyCharge?: number;
           frequency?: string;
+          agreementUrl?: string;
         };
         if (body.monthlyCharge) {
           setQuote({
             amount: body.monthlyCharge,
             frequency: body.frequency ?? data.freq,
           });
+        }
+        if (body.agreementUrl) {
+          setAgreementUrl(body.agreementUrl);
         }
         setSubmitted(true);
       } else {
@@ -228,23 +253,63 @@ export default function ContactForm({
             </div>
           )}
 
-          <p className="bk-body-lead">
-            Thanks{data.first ? `, ${data.first}` : ""}! A confirmation and
-            agreement have been sent to{" "}
-            <strong>{data.email || "your email"}</strong>. Sign the agreement
-            to schedule your first appointment.
-          </p>
-          <button
-            type="button"
-            className="bk-btn bk-btn-outline"
-            onClick={() => {
-              setSubmitted(false);
-              setQuote(null);
-              setStep(1);
-            }}
-          >
-            Submit Another
-          </button>
+          {agreementUrl ? (
+            <>
+              <p className="bk-body-lead">
+                Thanks{data.first ? `, ${data.first}` : ""}! Your service
+                agreement is ready to sign.
+                {redirectCountdown > 0 && (
+                  <>
+                    {" "}
+                    Redirecting you in{" "}
+                    <strong>{redirectCountdown}</strong> second
+                    {redirectCountdown === 1 ? "" : "s"}…
+                  </>
+                )}
+              </p>
+              <a
+                href={agreementUrl}
+                className="bk-btn bk-btn-primary"
+                style={{ marginRight: 12 }}
+              >
+                Review &amp; Sign Agreement Now &rarr;
+              </a>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--fg2)",
+                  marginTop: 18,
+                  lineHeight: 1.55,
+                }}
+              >
+                A copy was also sent to{" "}
+                <strong>{data.email || "your email"}</strong>. (Check your spam
+                folder if you don&rsquo;t see it.)
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="bk-body-lead">
+                Thanks{data.first ? `, ${data.first}` : ""}! A confirmation and
+                agreement have been sent to{" "}
+                <strong>{data.email || "your email"}</strong>. Sign the
+                agreement to schedule your first appointment.
+              </p>
+              <button
+                type="button"
+                className="bk-btn bk-btn-outline"
+                onClick={() => {
+                  setSubmitted(false);
+                  setQuote(null);
+                  setAgreementUrl(null);
+                  setRedirectCountdown(AGREEMENT_REDIRECT_DELAY);
+                  setStep(1);
+                }}
+              >
+                Submit Another
+              </button>
+            </>
+          )}
         </div>
       </section>
     );

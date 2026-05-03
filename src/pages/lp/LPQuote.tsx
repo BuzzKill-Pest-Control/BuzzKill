@@ -7,10 +7,12 @@
  * - Price reveal creates urgency to "lock it in"
  * - Minimal form after price is shown (progressive disclosure)
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { submitLead } from "../../lib/leadIntake";
 import SEO from "../../components/SEO";
+
+const AGREEMENT_REDIRECT_DELAY = 4;
 
 // Pricing logic mirrors handler.ts; tables are monthly billing rates.
 const BASE: Record<string, number> = {
@@ -105,6 +107,10 @@ export default function LPQuote() {
   const [price, setPrice] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+  const [redirectCountdown, setRedirectCountdown] = useState<number>(
+    AGREEMENT_REDIRECT_DELAY,
+  );
   const [data, setData] = useState({
     first: "",
     last: "",
@@ -119,6 +125,19 @@ export default function LPQuote() {
 
   const cntNum = parseInt(cnt) || 0;
   const livePrice = cntNum > 0 ? calcPrice(type, freq, cntNum) : 0;
+
+  // Auto-redirect to agreement signing page after submission
+  useEffect(() => {
+    if (step !== "done" || !agreementUrl) return;
+    if (redirectCountdown <= 0) {
+      window.location.href = agreementUrl;
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((n) => n - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [step, agreementUrl, redirectCountdown]);
 
   function handleCalc(e: FormEvent) {
     e.preventDefault();
@@ -139,8 +158,11 @@ export default function LPQuote() {
         sqft: type === "Residential" ? cnt : "",
         freq,
       });
-      if (result.ok) setStep("done");
-      else
+      if (result.ok) {
+        const body = result.body as { agreementUrl?: string };
+        if (body.agreementUrl) setAgreementUrl(body.agreementUrl);
+        setStep("done");
+      } else
         setError(
           "error" in result.body
             ? String(result.body.error)
@@ -546,15 +568,55 @@ export default function LPQuote() {
               </div>
             </div>
 
-            <p
-              className="bk-lp-lead"
-              style={{ maxWidth: 420, margin: "0 auto 12px" }}
-            >
-              We&rsquo;ve sent a confirmation and quote to{" "}
-              <strong>{data.email}</strong>. You&rsquo;ll receive a formal
-              service agreement within one business day.
-            </p>
-            <p style={{ fontSize: 14, color: "var(--fg3)" }}>
+            {agreementUrl ? (
+              <>
+                <p
+                  className="bk-lp-lead"
+                  style={{ maxWidth: 460, margin: "0 auto 18px" }}
+                >
+                  Your service agreement is ready to sign.
+                  {redirectCountdown > 0 && (
+                    <>
+                      {" "}
+                      Redirecting you in{" "}
+                      <strong>{redirectCountdown}</strong> second
+                      {redirectCountdown === 1 ? "" : "s"}…
+                    </>
+                  )}
+                </p>
+                <a
+                  href={agreementUrl}
+                  className="bk-btn bk-btn-primary bk-lp-cta"
+                  style={{ maxWidth: 360, margin: "0 auto" }}
+                >
+                  Review &amp; Sign Agreement Now &rarr;
+                </a>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--fg3)",
+                    marginTop: 18,
+                    maxWidth: 420,
+                    marginLeft: "auto",
+                    marginRight: "auto",
+                  }}
+                >
+                  A copy was also sent to <strong>{data.email}</strong>.
+                  (Check your spam folder if you don&rsquo;t see it.)
+                </p>
+              </>
+            ) : (
+              <p
+                className="bk-lp-lead"
+                style={{ maxWidth: 420, margin: "0 auto 12px" }}
+              >
+                We&rsquo;ve sent a confirmation and quote to{" "}
+                <strong>{data.email}</strong>. You&rsquo;ll receive a formal
+                service agreement within one business day.
+              </p>
+            )}
+
+            <p style={{ fontSize: 14, color: "var(--fg3)", marginTop: 16 }}>
               Questions? Call{" "}
               <a
                 href="tel:508-258-9294"
