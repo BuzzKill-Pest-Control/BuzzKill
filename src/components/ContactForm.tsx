@@ -119,6 +119,28 @@ function fmt(n: number): string {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+// ── Input sanitizers ───────────────────────────────────────────────
+// These run on every onChange so the input value can never contain
+// anything other than what we accept. Pasted strings are also filtered.
+
+function onlyDigits(s: string): string {
+  return s.replace(/\D+/g, "");
+}
+
+/** Format a phone-number input as `(XXX) XXX-XXXX` while the user types. */
+function formatPhoneAsTyped(raw: string): string {
+  const d = onlyDigits(raw).slice(0, 10);
+  if (!d) return "";
+  if (d.length <= 3) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6, 10)}`;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (s: string) => EMAIL_RE.test(s.trim());
+const isCompletePhone = (s: string) => onlyDigits(s).length === 10;
+const isCompleteZip = (s: string) => onlyDigits(s).length === 5;
+
 const STEPS = [
   { num: 1, label: "Property" },
   { num: 2, label: "Contact" },
@@ -193,6 +215,31 @@ export default function ContactForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (submitting) return;
+
+    // Client-side validation — covers the cases the digit-only filters
+    // can't catch on their own (e.g. user typed 4 of 5 zip digits).
+    const validationErrors: string[] = [];
+    if (!data.first.trim() || !data.last.trim())
+      validationErrors.push("first and last name");
+    if (!isValidEmail(data.email))
+      validationErrors.push("a valid email address");
+    if (!isCompletePhone(data.phone))
+      validationErrors.push("a 10-digit phone number");
+    if (!data.addr.trim()) validationErrors.push("a service address");
+    if (!data.city.trim()) validationErrors.push("a city");
+    if (data.state.trim().length !== 2)
+      validationErrors.push("a 2-letter state code");
+    if (!isCompleteZip(data.zip))
+      validationErrors.push("a 5-digit zip code");
+    if (type === "Association" && !data.units)
+      validationErrors.push("the number of units");
+    if (type === "Residential" && !data.sqft)
+      validationErrors.push("square footage");
+    if (validationErrors.length > 0) {
+      setErrorMsg(`Please enter ${validationErrors.join(", ")}.`);
+      return;
+    }
+
     setSubmitting(true);
     setErrorMsg(null);
     try {
@@ -426,9 +473,24 @@ export default function ContactForm({
                       <label htmlFor="units">Number of units</label>
                       <input
                         id="units"
+                        type="text"
                         inputMode="numeric"
+                        autoComplete="off"
                         value={data.units}
-                        onChange={update("units")}
+                        onChange={(e) =>
+                          setData({
+                            ...data,
+                            units: onlyDigits(e.target.value),
+                          })
+                        }
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const pasted = e.clipboardData.getData("text");
+                          setData({
+                            ...data,
+                            units: onlyDigits(pasted),
+                          });
+                        }}
                         placeholder="48"
                       />
                     </div>
@@ -438,9 +500,18 @@ export default function ContactForm({
                     <label htmlFor="sqft">Square footage</label>
                     <input
                       id="sqft"
+                      type="text"
                       inputMode="numeric"
+                      autoComplete="off"
                       value={data.sqft}
-                      onChange={update("sqft")}
+                      onChange={(e) =>
+                        setData({ ...data, sqft: onlyDigits(e.target.value) })
+                      }
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const pasted = e.clipboardData.getData("text");
+                        setData({ ...data, sqft: onlyDigits(pasted) });
+                      }}
                       placeholder="2400"
                     />
                   </div>
@@ -532,10 +603,25 @@ export default function ContactForm({
                   <input
                     id="phone"
                     type="tel"
+                    inputMode="tel"
                     value={data.phone}
-                    onChange={update("phone")}
+                    onChange={(e) =>
+                      setData({
+                        ...data,
+                        phone: formatPhoneAsTyped(e.target.value),
+                      })
+                    }
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      const pasted = e.clipboardData.getData("text");
+                      setData({
+                        ...data,
+                        phone: formatPhoneAsTyped(pasted),
+                      });
+                    }}
                     autoComplete="tel"
                     placeholder="(508) 555-0123"
+                    maxLength={14}
                     required
                   />
                 </div>
@@ -553,7 +639,10 @@ export default function ContactForm({
                     className="bk-btn bk-btn-primary"
                     onClick={nextStep}
                     disabled={
-                      !data.first || !data.last || !data.email || !data.phone
+                      !data.first.trim() ||
+                      !data.last.trim() ||
+                      !isValidEmail(data.email) ||
+                      !isCompletePhone(data.phone)
                     }
                   >
                     Continue &rarr;
@@ -611,11 +700,27 @@ export default function ContactForm({
                     <label htmlFor="zip">Zip *</label>
                     <input
                       id="zip"
+                      type="text"
                       inputMode="numeric"
                       value={data.zip}
-                      onChange={update("zip")}
+                      onChange={(e) =>
+                        setData({
+                          ...data,
+                          zip: onlyDigits(e.target.value).slice(0, 5),
+                        })
+                      }
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const pasted = e.clipboardData.getData("text");
+                        setData({
+                          ...data,
+                          zip: onlyDigits(pasted).slice(0, 5),
+                        });
+                      }}
                       autoComplete="postal-code"
                       placeholder="01752"
+                      maxLength={5}
+                      pattern="\d{5}"
                       required
                     />
                   </div>
