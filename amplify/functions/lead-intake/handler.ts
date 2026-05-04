@@ -69,23 +69,33 @@ const SOURCE_WEBSITE = 10001;
 // (Admin → Preferences → Service Types — the row number is the ID)
 const SERVICE_ID_MAP: Record<string, Record<string, number>> = {
   Association: {
-    Monthly: 5,       // HOA Monthly (HM)
-    "Every 2 Months": 6, // HOA Bi-Monthly (HB)
-    "Every 3 Months": 7, // HOA Quarterly (HQ)
+    "One-time treatment": 8, // HOA - Single Visit (H1)
+    Monthly: 5,              // HOA Monthly (HM)
+    "Every 2 Months": 6,     // HOA Bi-Monthly (HB)
+    "Every 3 Months": 7,     // HOA Quarterly (HQ)
   },
   Residential: {
-    Monthly: 9,       // Residential Monthly (RM)
-    "Every 2 Months": 10, // Residential Bi-Monthly (RB)
-    "Every 3 Months": 11, // Residential Quarterly (RQ)
+    "One-time treatment": 12, // Residential - Single Visit (R1)
+    Monthly: 9,               // Residential Monthly (RM)
+    "Every 2 Months": 10,     // Residential Bi-Monthly (RB)
+    "Every 3 Months": 11,     // Residential Quarterly (RQ)
   },
 };
 
-// Map form frequency labels → FieldRoutes frequency value (days)
+// Map form frequency labels → FieldRoutes frequency value (days).
+// `0` is the FieldRoutes convention for a single-visit / non-recurring
+// subscription. If FR rejects 0 we'll see it in CloudWatch and adjust.
 const FREQUENCY_DAYS: Record<string, number> = {
+  "One-time treatment": 0,
   Monthly: 30,
   "Every 2 Months": 60,
   "Every 3 Months": 90,
 };
+
+// Helper — true if `freq` represents a single-visit (non-recurring) plan.
+function isOneTime(freq: string | undefined): boolean {
+  return freq === "One-time treatment";
+}
 
 // ── Dynamic pricing ──────────────────────────────────────────────────
 // Base prices (from Product Template for each service type)
@@ -93,9 +103,11 @@ const BASE_PRICE: Record<string, number> = {
   "Association:Monthly": 110,
   "Association:Every 2 Months": 90,
   "Association:Every 3 Months": 70,
+  "Association:One-time treatment": 312, // HOA - Single Visit Initial Quote
   "Residential:Monthly": 69,
   "Residential:Every 2 Months": 56,
   "Residential:Every 3 Months": 45,
+  "Residential:One-time treatment": 119, // Residential - Single Visit Initial Quote
 };
 
 // Dynamic pricing tiers (from Admin → Preferences → Service Types → Product Template)
@@ -152,6 +164,21 @@ const PRICING: Record<string, PricingConfig> = {
       { min: 1001, max: 4000, per: 1000, premium: 10 },
       { min: 4001, max: 0, per: 1000, premium: 15 },
     ],
+  },
+  // HOA Single Visit (#8) — same tier shape as recurring HOA, larger premiums
+  "Association:One-time treatment": {
+    baseThreshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 156 },
+      { min: 26, max: 50, per: 25, premium: 288 },
+      { min: 51, max: 100, per: 50, premium: 396 },
+      { min: 101, max: 0, per: 100, premium: 792 },
+    ],
+  },
+  // Residential Single Visit (#12) — single open-ended tier from 2,501 sqft
+  "Residential:One-time treatment": {
+    baseThreshold: 2500,
+    tiers: [{ min: 2501, max: 0, per: 1000, premium: 13 }],
   },
 };
 
@@ -629,9 +656,14 @@ export const handler: Handler = async (event) => {
   const propType = isAssoc ? "Association" : "Residential";
   const freqLabel = input.freq ?? "Monthly";
 
-  // Pricing tables are monthly billing rates — display directly.
+  // For recurring plans, this is the monthly billing rate. For one-time
+  // treatments, this is the total flat charge for the single visit.
+  // The display copy forks on `oneTime` to render the suffix correctly
+  // ("/month + tax" vs "one-time + tax").
+  const oneTime = isOneTime(freqLabel);
   const monthlyCharge = calculateTotalCharge(propType, freqLabel, cntValue);
   const chargeFormatted = formatCurrency(monthlyCharge);
+  const chargeSuffix = oneTime ? " one-time + tax" : " / month + tax";
 
   // 5a: Internal notification to BuzzKill team
   try {
@@ -647,7 +679,7 @@ export const handler: Handler = async (event) => {
           ${isAssoc && input.company?.trim() ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Company</td><td>${input.company.trim()}</td></tr>` : ""}
           ${isAssoc ? `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Units</td><td>${input.units || "—"}</td></tr>` : `<tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Sq Ft</td><td>${input.sqft || "—"}</td></tr>`}
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Frequency</td><td>${freqLabel}</td></tr>
-          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Quoted Price</td><td style="font-weight: 700; font-size: 16px;">${chargeFormatted} / month + tax</td></tr>
+          <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Quoted Price</td><td style="font-weight: 700; font-size: 16px;">${chargeFormatted}${chargeSuffix}</td></tr>
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Customer ID</td><td>${customerID}</td></tr>
           <tr><td style="font-weight: 700; color: #5FA517; padding-right: 16px;">Subscription ID</td><td>${subscriptionID || "—"}</td></tr>
         </table>
@@ -655,7 +687,7 @@ export const handler: Handler = async (event) => {
     await sendEmail(
       fromEmail,
       notifyEmail,
-      `New Lead: ${(input.first ?? "").trim()} ${(input.last ?? "").trim()} — ${propLabel} ${freqLabel}`,
+      `New Lead${oneTime ? " (One-Time)" : ""}: ${(input.first ?? "").trim()} ${(input.last ?? "").trim()} — ${propLabel} ${freqLabel}`,
       notifyHtml,
     );
     console.log("Notification email sent to", notifyEmail);
@@ -689,17 +721,24 @@ export const handler: Handler = async (event) => {
           <li style="margin-bottom: 8px;">Once signed, we'll <strong>schedule your first appointment</strong></li>
         </ol>`;
 
+    const priceSuffixHtml = oneTime
+      ? ` one-time <span style="font-size: 13px; color: #9A9A9A;">+ tax</span>`
+      : ` / month <span style="font-size: 13px; color: #9A9A9A;">+ tax</span>`;
+    const metaLabel = oneTime ? "One-time treatment" : `${freqLabel} service`;
+    const quoteCard = `
+        <div style="background: #F7F7F4; border-left: 4px solid #7ED321; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0;">
+          <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #5FA517; font-weight: 700; margin-bottom: 8px;">Your Quick Quote</div>
+          <div style="font-size: 28px; font-weight: 800; color: #0A0A0A; margin-bottom: 4px;">${chargeFormatted}<span style="font-size: 15px; font-weight: 400; color: #6E6E6E;">${priceSuffixHtml}</span></div>
+          <div style="font-size: 14px; color: #4A4A4A;">${propLabel} &bull; ${metaLabel}${isAssoc && input.units ? ` &bull; ${input.units} units` : ""}${!isAssoc && input.sqft ? ` &bull; ${input.sqft} sq ft` : ""}</div>
+        </div>`;
+
     const customerHtml = `
       <div style="font-family: Arial, sans-serif; font-size: 15px; color: #1A1A1A; line-height: 1.7; max-width: 600px;">
         <p>Hi ${firstName},</p>
 
         <p>Thank you for reaching out to <strong>BuzzKill Pest Control</strong>! We appreciate your interest in professional pest management for your ${isAssoc ? "community" : "home"}.</p>
 
-        <div style="background: #F7F7F4; border-left: 4px solid #7ED321; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0;">
-          <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #5FA517; font-weight: 700; margin-bottom: 8px;">Your Quick Quote</div>
-          <div style="font-size: 28px; font-weight: 800; color: #0A0A0A; margin-bottom: 4px;">${chargeFormatted}<span style="font-size: 15px; font-weight: 400; color: #6E6E6E;"> / month <span style="font-size: 13px; color: #9A9A9A;">+ tax</span></span></div>
-          <div style="font-size: 14px; color: #4A4A4A;">${propLabel} &bull; ${freqLabel} service${isAssoc && input.units ? ` &bull; ${input.units} units` : ""}${!isAssoc && input.sqft ? ` &bull; ${input.sqft} sq ft` : ""}</div>
-        </div>
+        ${quoteCard}
 
         ${agreementBlock}
 
@@ -713,7 +752,9 @@ export const handler: Handler = async (event) => {
     await sendEmail(
       fromEmail,
       (input.email ?? "").trim(),
-      `Your BuzzKill Pest Control Quote — ${chargeFormatted}/month`,
+      oneTime
+        ? `Your BuzzKill One-Time Service Quote — ${chargeFormatted}`
+        : `Your BuzzKill Pest Control Quote — ${chargeFormatted}/month`,
       customerHtml,
     );
     console.log("Customer quote email sent to", (input.email ?? "").trim());

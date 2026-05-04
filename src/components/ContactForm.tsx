@@ -18,9 +18,11 @@ const BASE: Record<string, number> = {
   "Association:Monthly": 110,
   "Association:Every 2 Months": 90,
   "Association:Every 3 Months": 70,
+  "Association:One-time treatment": 312,
   "Residential:Monthly": 69,
   "Residential:Every 2 Months": 56,
   "Residential:Every 3 Months": 45,
+  "Residential:One-time treatment": 119,
 };
 
 const TIERS: Record<
@@ -77,6 +79,19 @@ const TIERS: Record<
       { min: 1001, max: 4000, per: 1000, premium: 10 },
       { min: 4001, max: 0, per: 1000, premium: 15 },
     ],
+  },
+  "Association:One-time treatment": {
+    threshold: 10,
+    tiers: [
+      { min: 11, max: 25, per: 15, premium: 156 },
+      { min: 26, max: 50, per: 25, premium: 288 },
+      { min: 51, max: 100, per: 50, premium: 396 },
+      { min: 101, max: 0, per: 100, premium: 792 },
+    ],
+  },
+  "Residential:One-time treatment": {
+    threshold: 2500,
+    tiers: [{ min: 2501, max: 0, per: 1000, premium: 13 }],
   },
 };
 
@@ -244,11 +259,18 @@ export default function ContactForm({
               <div className="bk-quote-card__label">Your Estimated Quote</div>
               <div className="bk-quote-card__price">
                 {fmtPrice}
-                <span className="bk-quote-card__per"> / month + tax</span>
+                <span className="bk-quote-card__per">
+                  {quote?.frequency === "One-time treatment"
+                    ? " one-time + tax"
+                    : " / month + tax"}
+                </span>
               </div>
               <div className="bk-quote-card__meta">
                 {type === "Association" ? "Association / HOA" : "Residential"}{" "}
-                &bull; {quote?.frequency} service
+                &bull;{" "}
+                {quote?.frequency === "One-time treatment"
+                  ? "One-time treatment"
+                  : `${quote?.frequency} service`}
               </div>
             </div>
           )}
@@ -430,6 +452,7 @@ export default function ContactForm({
                     <option>Monthly</option>
                     <option>Every 2 Months</option>
                     <option>Every 3 Months</option>
+                    <option>One-time treatment</option>
                   </select>
                 </div>
 
@@ -439,7 +462,11 @@ export default function ContactForm({
                     <div className="bk-quote-preview__label">Estimated price</div>
                     <div className="bk-quote-preview__price">
                       {fmt(livePrice)}
-                      <span className="bk-quote-preview__per"> / month + tax</span>
+                      <span className="bk-quote-preview__per">
+                        {data.freq === "One-time treatment"
+                          ? " one-time + tax"
+                          : " / month + tax"}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -602,13 +629,20 @@ export default function ContactForm({
                     </div>
                     <div className="bk-quote-preview__price">
                       {fmt(livePrice)}
-                      <span className="bk-quote-preview__per"> / month + tax</span>
+                      <span className="bk-quote-preview__per">
+                        {data.freq === "One-time treatment"
+                          ? " one-time + tax"
+                          : " / month + tax"}
+                      </span>
                     </div>
                     <div className="bk-quote-preview__meta">
                       {type === "Association"
                         ? "Association / HOA"
                         : "Residential"}{" "}
-                      &bull; {data.freq} service
+                      &bull;{" "}
+                      {data.freq === "One-time treatment"
+                        ? "One-time treatment"
+                        : `${data.freq} service`}
                     </div>
                   </div>
                 )}
