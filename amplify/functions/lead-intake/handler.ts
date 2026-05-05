@@ -82,14 +82,30 @@ const SERVICE_ID_MAP: Record<string, Record<string, number>> = {
   },
 };
 
-// Map form frequency labels → FieldRoutes frequency value (days).
-// `0` is the FieldRoutes convention for a single-visit / non-recurring
-// subscription. If FR rejects 0 we'll see it in CloudWatch and adjust.
+// Map form frequency labels → FieldRoutes `frequency` value.
+// Per FieldRoutes docs: -1 = One-Time, 0 = "as needed", >0 = days
+// between services (90 → quarterly, etc.). Previously we were sending
+// 0 for one-time, which means "as needed" rather than single-visit;
+// -1 is the correct code.
 const FREQUENCY_DAYS: Record<string, number> = {
-  "One-time treatment": 0,
+  "One-time treatment": -1,
   Monthly: 30,
   "Every 2 Months": 60,
   "Every 3 Months": 90,
+};
+
+// Map form frequency labels → FieldRoutes `billingFrequency` value.
+// Per FieldRoutes docs: 0 / -1 = bill after each completed service
+// (the API default we want to override for recurring plans). 30 =
+// invoice generated every 30 days. We bill recurring plans monthly
+// regardless of service cadence, matching the service type templates'
+// "Billing Frequency: Monthly" config visible in the FR admin UI.
+// One-time stays at 0 (one invoice when the single service completes).
+const BILLING_FREQUENCY: Record<string, number> = {
+  "One-time treatment": 0,
+  Monthly: 30,
+  "Every 2 Months": 30,
+  "Every 3 Months": 30,
 };
 
 // Helper — true if `freq` represents a single-visit (non-recurring) plan.
@@ -387,6 +403,7 @@ function buildSubscriptionPayload(
   const typeMap = SERVICE_ID_MAP[propType] ?? {};
   const serviceID = typeMap[freq] ?? typeMap["Monthly"] ?? 5;
   const frequencyDays = FREQUENCY_DAYS[freq] ?? 30;
+  const billingFrequencyDays = BILLING_FREQUENCY[freq] ?? 30;
 
   // Calculate monthly billing rate (base + dynamic pricing premium).
   // The pricing tables are monthly rates and FieldRoutes is configured
@@ -399,6 +416,7 @@ function buildSubscriptionPayload(
     serviceID,
     active: 1,
     frequency: frequencyDays,
+    billingFrequency: billingFrequencyDays,
     sourceID: SOURCE_WEBSITE,
     convertToLead: 1,
   };
