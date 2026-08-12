@@ -139,6 +139,13 @@ session replays. `sanitizeAnalyticsPath()` / `sanitizeAnalyticsUrl()` strip them
 from every event's `page_path` and `page_location`, and mask the `/track/`
 segment to `/track/(token)`.
 
+There are **three** ways a URL reaches GA4, not two. `ClickTracker` reports the
+clicked element's raw `href` as `cta_click`'s `destination`, so a link pointing
+at `/quote?lead=…`, `/track/<token>` or a `#request=…&token=…` resume URL would
+publish the token under a field the path/location redaction never sees.
+`sanitizeAnalyticsDestination()` closes that one; `tel:`, `mailto:` and the
+tracker's own `action` / `form_submit` sentinels pass through untouched.
+
 > The funnel does `history.replaceState` to clear `?lead=` from the address bar,
 > but that runs inside a lazily-loaded page's effect and is **not** guaranteed to
 > beat the first `page_view`. Redaction at the analytics layer is the guarantee;

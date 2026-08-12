@@ -152,6 +152,21 @@ describe("lead id stitching onto events", () => {
     expect(eventParams().lead_id).toBe("lead-explicit");
   });
 
+  /**
+   * "Explicit wins" must mean an explicit VALUE. trackGenerateLead passes its
+   * `leadId: string | undefined` straight into params, so a spread alone let a
+   * present-but-undefined key erase the session's real id — on generate_lead,
+   * the one event Google Ads imports as a conversion.
+   */
+  it("does not let an absent lead_id erase the stored one", async () => {
+    const { setLeadId, trackGenerateLead } = await freshModule();
+    setLeadId("lead-stored");
+
+    trackGenerateLead("contact", undefined);
+
+    expect(eventParams().lead_id).toBe("lead-stored");
+  });
+
   it("carries the lead through to the purchase that closes it", async () => {
     const { trackGenerateLead, trackPurchase } = await freshModule();
 
@@ -497,6 +512,54 @@ describe("capability redaction", () => {
     trackPageview("/quote?bk_lid=L-77");
 
     expect(eventParams().page_path).toBe("/quote");
+  });
+
+  /**
+   * ClickTracker reports the clicked element's raw href, so `destination` is a
+   * third route into GA4 that the page_path/page_location redaction never sees.
+   * A capability published here is just as published.
+   */
+  it("drops a capability carried by a clicked link's destination", async () => {
+    const { trackButtonClick } = await freshModule();
+
+    trackButtonClick("resume_quote", "Resume", "/quote?lead=SECRET123&utm_source=email");
+
+    expect(eventParams().destination).toBe("/quote?utm_source=email");
+    expect(JSON.stringify(eventParams())).not.toContain("SECRET123");
+  });
+
+  it("masks a tracking link clicked from anywhere on the site", async () => {
+    const { trackButtonClick } = await freshModule();
+
+    trackButtonClick("track_link", "Track my tech", "/track/SECRET789");
+    trackButtonClick("track_abs", "Track", "https://www.pestbuzzkill.com/track/SECRET789");
+
+    expect(eventParams(0).destination).toBe("/track/(token)");
+    expect(eventParams(1).destination).toBe(
+      "https://www.pestbuzzkill.com/track/(token)"
+    );
+    expect(JSON.stringify(gtagMock.mock.calls)).not.toContain("SECRET789");
+  });
+
+  it("drops a saved-quote resume capability from a destination", async () => {
+    const { trackButtonClick } = await freshModule();
+
+    trackButtonClick("resume", "Resume", "/quote#request=bk-1&token=SECRET456");
+
+    expect(eventParams().destination).toBe("/quote");
+    expect(JSON.stringify(eventParams())).not.toContain("SECRET456");
+  });
+
+  it("leaves ordinary destinations alone — they're the click map", async () => {
+    const { trackButtonClick } = await freshModule();
+
+    trackButtonClick("a", "Call", "tel:+15082589294");
+    trackButtonClick("b", "Submit", "form_submit");
+    trackButtonClick("c", "Services", "/services/termite?utm_source=x");
+
+    expect(eventParams(0).destination).toBe("tel:+15082589294");
+    expect(eventParams(1).destination).toBe("form_submit");
+    expect(eventParams(2).destination).toBe("/services/termite?utm_source=x");
   });
 
   it("leaves ordinary campaign params alone — GA4 needs them", async () => {

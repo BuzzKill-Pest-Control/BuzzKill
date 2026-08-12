@@ -86,6 +86,33 @@ export function sanitizeAnalyticsUrl(href: string): string {
   }
 }
 
+/**
+ * A click's `destination`, redacted.
+ *
+ * ClickTracker reports the raw `href` of whatever was clicked, so this param
+ * is a third way a capability can reach GA4 — one that `page_path` and
+ * `page_location` redaction never touches. A link to `/quote?lead=…`, to
+ * `/track/<token>`, or a saved-quote resume URL would otherwise be published
+ * under `destination` while the same token is being carefully stripped from
+ * every other field.
+ *
+ * Absolute and relative hrefs are both possible. `tel:`, `mailto:` and the
+ * tracker's own `action` / `form_submit` sentinels carry neither a query nor a
+ * maskable path, so they pass through untouched.
+ */
+export function sanitizeAnalyticsDestination(destination: string): string {
+  if (/^https?:\/\//i.test(destination)) {
+    return sanitizeAnalyticsUrl(destination) || "";
+  }
+  // The fragment carries the saved-quote resume capability and nothing we
+  // report on, so it goes in both the path and bare-anchor cases.
+  if (destination.startsWith("/")) {
+    return sanitizeAnalyticsPath(destination.split("#")[0]);
+  }
+  if (destination.startsWith("#")) return "#";
+  return destination;
+}
+
 /** The current path, redacted — the `page_path` on every event below. */
 function currentPath(): string {
   return typeof window === "undefined"
@@ -266,7 +293,18 @@ export function trackEvent(name: GAEventName, params?: Record<string, unknown>) 
   // CRM record isn't limited to the one event that happened to create the lead.
   // An explicit lead_id in params still wins.
   const leadId = readLeadId();
-  gtag("event", name, leadId ? { lead_id: leadId, ...params } : params);
+  if (!leadId) {
+    gtag("event", name, params);
+    return;
+  }
+  const merged = { lead_id: leadId, ...params };
+  // "Explicit wins" has to mean an explicit VALUE. `trackGenerateLead` passes
+  // its `leadId: string | undefined` straight through, so a form that reports
+  // success without an id would spread `lead_id: undefined` over the session's
+  // real one — stripping the lead from generate_lead, the single event Google
+  // Ads imports as a conversion. Present-but-undefined is not an override.
+  if (merged.lead_id === undefined) merged.lead_id = leadId;
+  gtag("event", name, merged);
 }
 
 /** Every button/link click, site-wide. `button_id` must be unique within a page — combined with `page_path` (auto-filled) it's the full site click-map. */
@@ -275,7 +313,7 @@ export function trackButtonClick(buttonId: string, buttonText: string, destinati
     page_path: currentPath(),
     button_id: buttonId,
     button_text: buttonText.slice(0, 120),
-    destination,
+    destination: sanitizeAnalyticsDestination(destination),
   });
 }
 
