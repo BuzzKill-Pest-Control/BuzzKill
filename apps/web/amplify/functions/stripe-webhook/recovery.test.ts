@@ -19,12 +19,14 @@ let disputes: Dispute[] = [];
 const disputesCreated: Dispute[] = [];
 const plans = new Map<string, Plan>();
 let customerEmail: string | null = "dana@example.com";
+// Seeded rows (e.g. MERGED tombstones) win over the default live customer.
+const customers = new Map<string, Record<string, unknown>>();
 
 const fakeDataClient = {
   models: {
     Customer: {
       get: async ({ id }: { id: string }) => ({
-        data: {
+        data: customers.get(id) ?? {
           id,
           displayName: "Dana Whitlock",
           contactName: "Dana",
@@ -140,6 +142,7 @@ beforeEach(() => {
   disputes = [];
   disputesCreated.length = 0;
   plans.clear();
+  customers.clear();
   customerEmail = "dana@example.com";
   sendEmail.mockClear();
   notifyOffice.mockClear();
@@ -332,5 +335,30 @@ describe("invoice.payment_failed arms dunning", () => {
 
     expect(invoicesCreated).toHaveLength(1);
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("a failure on an invoice minted before a merge lands on the survivor", async () => {
+    // The dunning retry settled after the merge retired c_old into cA — the
+    // failed ledger row and its notices must name the survivor.
+    customers.set("c_old", { id: "c_old", status: "MERGED", mergedIntoId: "cA" });
+    plans.set("p1", { id: "p1", customerId: "cA", planName: "Residential monthly", priceCents: 4500, status: "ACTIVE" });
+
+    await invoke("invoice.payment_failed", {
+      ...stripeInvoice,
+      parent: {
+        subscription_details: {
+          subscription: "sub_1",
+          metadata: { crmServicePlanId: "p1", crmCustomerId: "c_old" },
+        },
+      },
+    });
+
+    expect(invoicesCreated).toHaveLength(1);
+    expect(invoicesCreated[0]).toMatchObject({
+      customerId: "cA",
+      status: "FAILED",
+    });
+    expect(invoicesCreated[0].accessGroups).toEqual(["cus-cA"]);
+    expect(plans.get("p1")?.delinquent).toBe(true);
   });
 });

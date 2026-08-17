@@ -67,6 +67,9 @@ export const WORK_SLA_MINUTES: Record<WorkKind, number> = {
   // unmeasurable and sells nothing. Every hour it stands is booking capacity
   // silently withheld — a prompt clock, not a routine one.
   ADDRESS_UNROUTABLE: 60,
+  // Customer merge parked mid-command: both records are frozen against other
+  // lifecycle changes until a human resumes it — a prompt clock.
+  MERGE_RECOVERY: 4 * 60,
   // GL-17: a licence is expiring or expired — advance renewal/reassignment
   // work so customers move before a doorstep failure.
   LICENSE_LAPSE: 24 * 60,

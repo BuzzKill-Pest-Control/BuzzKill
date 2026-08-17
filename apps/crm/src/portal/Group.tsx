@@ -41,7 +41,9 @@ export default function PortalGroup() {
         groups: loaded
           .map((r) => unwrap(r) as unknown as CustomerGroup | null)
           .filter((g): g is CustomerGroup => Boolean(g)),
-        members: memberLists.flat(),
+        // MERGED tombstones are not properties — a merged member's groupId is
+        // blanked, but a row mid-cleanup must not surface in the portfolio.
+        members: memberLists.flat().filter((m) => m.status !== "MERGED"),
       };
     },
     [roles],

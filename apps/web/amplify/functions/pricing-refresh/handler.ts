@@ -16,6 +16,7 @@ import { money } from "../crm-pricing/rateCards";
 import {
   acquireDrain,
   claimDailyDigest,
+  releaseDailyDigest,
   dayKeyFor,
   freshNonce,
   leaseCoverageRow,
@@ -631,7 +632,9 @@ async function readDayCounters(now: Date): Promise<DayCounters> {
  * the atomic budget position and spend estimate, queue depth, exhausted
  * combos, and the next retry. Visibility, not a gate.
  */
-async function sendDailyDigest(now: Date): Promise<boolean> {
+async function sendDailyDigest(
+  now: Date
+): Promise<"SENT" | "IDLE" | "FAILED"> {
   const client = await dataClient();
   const coverage = await listAllRows<CoverageRow>(client.models.RateCoverage);
   const rates = await listAllRows<RateRow>(client.models.MarketRate);
@@ -690,6 +693,22 @@ async function sendDailyDigest(now: Date): Promise<boolean> {
     .sort((a, b) => (a.nextEligibleAt ?? "").localeCompare(b.nextEligibleAt ?? ""));
   const spendEstimate = (counters.attempts * COST_PER_RESEARCH_USD).toFixed(2);
 
+  // Owner rule (2026-08-15): a day on which pricing did NOTHING — no sheets
+  // cached, no attempts, nothing failing, nothing queued, no rollback in
+  // force — sends no digest. An all-empty-sections email is inbox noise.
+  if (
+    !rollback &&
+    cachedToday.length === 0 &&
+    exhausted.length === 0 &&
+    backingOff.length === 0 &&
+    queueDepth === 0 &&
+    counters.attempts === 0 &&
+    counters.demandAttempts === 0
+  ) {
+    console.log("pricing-refresh: idle day — daily digest skipped");
+    return "IDLE";
+  }
+
   const bodyHtml = `<p>Today's AI pricing run, consolidated. Every sheet below is <strong>already live and quoting</strong> — this is visibility, not an approval queue. Override any line on <a href="${process.env.CRM_APP_URL ?? ""}/market-rates">Market Rates</a>; an edit pins the row.</p>
     ${
       rollback
@@ -729,12 +748,13 @@ async function sendDailyDigest(now: Date): Promise<boolean> {
     <h2 style="font-size:15px;margin:20px 0 6px;">Today's budget & queue</h2>
     <p style="margin:0;">${counters.attempts} research attempts (${counters.succeeded} succeeded, ${counters.failed} failed, ${counters.demandAttempts} for waiting leads) · estimated spend ~$${spendEstimate} · daily cap ${RESEARCH_PER_DAY} · ${queueDepth} requested combo${queueDepth === 1 ? "" : "s"} still queued.</p>`;
 
-  return notifyOffice({
+  const sent = await notifyOffice({
     subject: `AI pricing daily digest — ${cachedToday.length} sheet${cachedToday.length === 1 ? "" : "s"} cached, ~$${spendEstimate} spent`,
     heading: "AI pricing — daily digest",
     template: "ops-pricing-daily-digest",
     bodyHtml,
   });
+  return sent ? "SENT" : "FAILED";
 }
 
 /**
@@ -1288,14 +1308,26 @@ export const handler = async (event: PricingRefreshEvent = {}) => {
     }
 
     // The consolidated daily digest — once, however many runs share the hour.
+    // An idle day sends nothing (the claim stays consumed: there is nothing
+    // to say all day). A FAILED send outcome also KEEPS the claim: the send
+    // boundary either stored the body as QUEUED (the daily sweep re-delivers
+    // it) or opened EMAIL_FAILURE work — releasing here would double-send.
+    // Only a crash BEFORE the send (the data reads; notifyOffice itself
+    // never throws) releases the claim, so a pre-send failure cannot
+    // silently cost the whole day.
     let digested = false;
     if (now.getUTCHours() === DIGEST_UTC_HOUR) {
       try {
         if (await claimDailyDigest(now)) {
-          digested = await sendDailyDigest(now);
+          try {
+            digested = (await sendDailyDigest(now)) === "SENT";
+          } catch (err) {
+            console.error("pricing-refresh: daily digest failed", err);
+            await releaseDailyDigest(now);
+          }
         }
       } catch (err) {
-        console.error("pricing-refresh: daily digest failed", err);
+        console.error("pricing-refresh: daily digest claim failed", err);
       }
     }
 

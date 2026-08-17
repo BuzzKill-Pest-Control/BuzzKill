@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { dataClient } from "./dataClient";
 import { casFencedUpdate, casTakeover } from "./atomicLock";
+import { isMidMerge, mergeCounterpartCustomerId } from "./customerMerge";
 import { customerAccessGroups } from "./dynamicGroups";
 import { openOwnedWork } from "./ownedWork";
 import { forEachPage, listAll } from "./pagination";
@@ -163,6 +164,36 @@ export async function claimGroupChange(input: {
       nonce,
       resumedFromStage: String(takeover.prior.stage ?? existing.stage),
     };
+  }
+  // The merge's exclusion is bidirectional (customerMerge.isMidMerge): a
+  // FRESH group change must not start on a customer that is mid-merge, and a
+  // tombstone must never be moved — the open-command branch above keeps an
+  // existing command's right to resume. FAIL CLOSED: an unreadable customer
+  // row refuses the claim.
+  type MergeGateRow = {
+    status?: string | null;
+    mergedIntoId?: string | null;
+    mergeCounterpartId?: string | null;
+  };
+  let mergeRow: MergeGateRow | null;
+  try {
+    mergeRow = (await client.models.Customer.get({ id: input.customerId }))
+      .data as MergeGateRow | null;
+  } catch (err) {
+    console.error("claimGroupChange: merge-state read failed", err);
+    throw new Error(
+      `Could not verify merge state for customer ${input.customerId} — the group change was not started. Try again.`
+    );
+  }
+  if (mergeRow?.status === "MERGED") {
+    throw new Error(
+      `This record was merged into ${mergeRow.mergedIntoId ?? "another record"}; act on that record instead.`
+    );
+  }
+  if (mergeRow && isMidMerge(mergeRow)) {
+    throw new Error(
+      `Customer ${input.customerId} is mid-merge with ${mergeCounterpartCustomerId(mergeRow.mergeCounterpartId)} — finish or resume that merge before its group can change.`
+    );
   }
   const id = `gc-${input.customerId}-${randomUUID()}`;
   const { data: created } = await (

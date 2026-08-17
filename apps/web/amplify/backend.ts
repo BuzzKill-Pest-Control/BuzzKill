@@ -328,8 +328,9 @@ for (const fn of [
   // pricing-refresh emails the office (new-rate heads-ups, the weekly
   // report) and waiting leads ("your exact prices are ready").
   backend.pricingRefresh,
-  // GL-22: ops-alerts emails the office when an alarm turns a background
-  // failure into owned work.
+  // GL-22: ops-alerts emails the owner (INFRA_ALERT_EMAIL, below) when an
+  // alarm turns a background failure into owned work; SES_NOTIFY_EMAIL stays
+  // for the unconfigured-inbox fallback path inside shared/email.
   backend.opsAlerts,
   // Pages the office when a Thumbtack delivery fails or arrives for a thread
   // we have no lead for — those emails are the only copy of the message.
@@ -711,6 +712,31 @@ backend.addOutput({
 // shared-Office work item (INFRA_ALERT) with the common one-business-day
 // clock, and auto-resolves it when the alarm recovers. A background failure
 // pages the QUEUE — never only a log group.
+//
+// Owner rule (2026-08-15): the alert EMAIL goes straight to the owner, and
+// it carries the diagnostics (recent error logs, console links, repo path)
+// — so the function needs read access to the monitored Lambdas' log groups.
+// Same split as OPS_INBOX: staging alarm noise stays filterable behind a
+// +alias and can never blend into the production alert stream.
+backend.opsAlerts.addEnvironment(
+  "INFRA_ALERT_EMAIL",
+  process.env.AWS_BRANCH === "main"
+    ? "jake@pestbuzzkill.com"
+    : "jake+staginginfra@pestbuzzkill.com"
+);
+// Scoped to this account/region and the amplify-* physical-name prefix all
+// deployed functions share — the log-group name in the alert flows from the
+// SNS payload, so the grant must not cover arbitrary Lambdas.
+const opsAlertsStackRef = Stack.of(backend.opsAlerts.resources.lambda);
+backend.opsAlerts.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["logs:FilterLogEvents"],
+    resources: [
+      `arn:aws:logs:${opsAlertsStackRef.region}:${opsAlertsStackRef.account}:log-group:/aws/lambda/amplify-*`,
+      `arn:aws:logs:${opsAlertsStackRef.region}:${opsAlertsStackRef.account}:log-group:/aws/lambda/amplify-*:*`,
+    ],
+  })
+);
 const opsAlarmsStack = backend.opsAlerts.resources.lambda.stack;
 const opsAlarmsTopic = new Topic(opsAlarmsStack, "OpsAlarmsTopic");
 opsAlarmsTopic.addSubscription(
@@ -718,7 +744,8 @@ opsAlarmsTopic.addSubscription(
 );
 const alarmAction = new SnsAction(opsAlarmsTopic);
 // EVERY alarm gets BOTH transitions: ALARM opens the owned item / failure
-// email, OK auto-resolves it / sends the all-clear. The GL-22 staging drill
+// email, OK auto-resolves the item (no all-clear email — the queue shows
+// the recovery). The GL-22 staging drill
 // demonstrated the miss: with only addAlarmAction, CloudWatch never
 // notifies on recovery, so ops-alerts' auto-resolve path was unreachable.
 const wireAlarm = (
@@ -744,11 +771,15 @@ backend.opsAlerts.resources.lambda.configureAsyncInvoke({
   onFailure: new SqsDestination(opsAlertsDlq),
 });
 const bridgeFailureTopic = new Topic(opsAlarmsStack, "OpsBridgeFailureTopic");
-// Owner decision (2026-07-23): only production pages the real inbox — staging
-// alarm noise was flooding info@ alongside the real alerts.
+// Owner decision (2026-07-23): only production pages a real inbox — staging
+// alarm noise was flooding it alongside the real alerts. Owner rule
+// (2026-08-15): infra alerts go to the owner directly, not the office, so
+// the raw watchdog leg follows the branded one to jake@. NOTE: changing the
+// subscription address requires a ONE-TIME confirmation click from the new
+// inbox after deploy, or these emails silently never arrive.
 if (branch === "main") {
   bridgeFailureTopic.addSubscription(
-    new EmailSubscription("info@pestbuzzkill.com")
+    new EmailSubscription("jake@pestbuzzkill.com")
   );
 }
 const bridgeAction = new SnsAction(bridgeFailureTopic);

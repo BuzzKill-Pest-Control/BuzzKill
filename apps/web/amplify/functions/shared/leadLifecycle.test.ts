@@ -119,6 +119,8 @@ vi.mock("./ownedWork", () => ({
   resolveOwnedWork,
   workItemId: (kind: string, key: string) => `${kind}:${key}`,
   defaultWorkOwner: () => "sales@example.com",
+  // Only present because ./customerMerge sits in the import graph.
+  WORK_SUPPRESSED: "suppressed",
 }));
 
 vi.mock("./businessDays", () => ({
@@ -137,6 +139,10 @@ vi.mock("./atomicLock", () => ({
     if (model === "Customer") Object.assign(customers.get(id)!, sets);
     return { ok: true, prior: {} };
   },
+  // Only present because ./customerMerge sits in the import graph; the
+  // lifecycle paths under test never call these.
+  casFencedUpdate: async () => ({ ok: true, prior: {} }),
+  casTakeover: async () => ({ ok: true }),
 }));
 
 const {
@@ -236,6 +242,66 @@ describe("createLead — dedup gate (GL-02 R3)", () => {
     expect(openOwnedWork).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "LEAD_LIFECYCLE_RECOVERY" })
     );
+  });
+});
+
+describe("createLead — merged deterministic id (customer-merge follow rule)", () => {
+  const input = {
+    displayName: "Merged Dana",
+    email: "merged@example.com",
+    idempotencyKey: "sub-merge-1",
+  };
+
+  it("adopts the SURVIVOR when the deterministic lead row was merged away", async () => {
+    const first = await createLead(input, actor);
+    if (first.decision !== "CREATED") throw new Error("unreachable");
+    customers.set("survivor-1", {
+      id: "survivor-1",
+      status: "ACTIVE",
+      displayName: "Dana Kept",
+    });
+    Object.assign(customers.get(first.id)!, {
+      status: "MERGED",
+      mergedIntoId: "survivor-1",
+    });
+
+    const retry = await createLead(input, actor);
+
+    expect(retry).toEqual({ decision: "CREATED", id: "survivor-1" });
+    // The re-submission is answered, not bricked into recovery.
+    expect(workItems.get(`LEAD_LIFECYCLE_RECOVERY:intake:${input.idempotencyKey}`)).toBeUndefined();
+  });
+
+  it("follows a chained pointer (tombstone into tombstone) to the live terminus", async () => {
+    const first = await createLead(input, actor);
+    if (first.decision !== "CREATED") throw new Error("unreachable");
+    customers.set("mid", { id: "mid", status: "MERGED", mergedIntoId: "final", displayName: "Mid" });
+    customers.set("final", { id: "final", status: "ACTIVE", displayName: "Final" });
+    Object.assign(customers.get(first.id)!, { status: "MERGED", mergedIntoId: "mid" });
+
+    await expect(createLead(input, actor)).resolves.toEqual({
+      decision: "CREATED",
+      id: "final",
+    });
+  });
+
+  it("fails closed into recovery when the tombstone's pointer is broken", async () => {
+    const first = await createLead(input, actor);
+    if (first.decision !== "CREATED") throw new Error("unreachable");
+    Object.assign(customers.get(first.id)!, { status: "MERGED", mergedIntoId: "gone" });
+
+    await expect(createLead(input, actor)).rejects.toThrow(/could not be resolved/i);
+    expect(openOwnedWork).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "LEAD_LIFECYCLE_RECOVERY" })
+    );
+  });
+
+  it("refuses to adopt a row an in-flight merge owns", async () => {
+    const first = await createLead(input, actor);
+    if (first.decision !== "CREATED") throw new Error("unreachable");
+    Object.assign(customers.get(first.id)!, { mergeCounterpartId: "other-1" });
+
+    await expect(createLead(input, actor)).rejects.toThrow(/in-flight/i);
   });
 });
 
@@ -599,6 +665,83 @@ describe("setLeadDisposition (GL-02 R5)", () => {
       )
     ).rejects.toThrow(/owner role required/i);
     expect(customers.get("l1")?.doNotContact).toBe(true);
+  });
+});
+
+describe("mid-merge exclusion (customer-merge)", () => {
+  it("refuses a touch while the lead is part of an in-flight merge", async () => {
+    customers.set("l1", {
+      id: "l1",
+      status: "LEAD",
+      displayName: "Dana",
+      contactConsentChannels: ["CALL"],
+      mergeCounterpartId: "other-1",
+    });
+    await expect(
+      logLeadTouch({ customerId: "l1", channel: "CALL", outcome: "NO_ANSWER" }, actor)
+    ).rejects.toThrow(/finish or resume the in-flight merge/i);
+    expect(activities).toHaveLength(0);
+    expect(customers.get("l1")?.lastAttemptedAt).toBeUndefined();
+  });
+
+  it("refuses a disposition while mid-merge", async () => {
+    customers.set("l1", {
+      id: "l1",
+      status: "LEAD",
+      displayName: "Dana",
+      mergeCounterpartId: "other-1",
+    });
+    await expect(
+      setLeadDisposition(
+        { customerId: "l1", disposition: "LOST", reasonCode: "PRICE" },
+        actor
+      )
+    ).rejects.toThrow(/finish or resume the in-flight merge/i);
+    expect(customers.get("l1")?.lostReason).toBeUndefined();
+  });
+
+  it("refuses assign-to-me while mid-merge", async () => {
+    customers.set("l1", {
+      id: "l1",
+      status: "LEAD",
+      displayName: "Dana",
+      mergeCounterpartId: "other-1",
+    });
+    await expect(assignLeadOwner({ customerId: "l1" }, actor)).rejects.toThrow(
+      /finish or resume the in-flight merge/i
+    );
+    expect(customers.get("l1")?.leadOwnerSub).toBeUndefined();
+  });
+
+  it("a finished tombstone is refused on status, not treated as mid-merge", async () => {
+    customers.set("l1", {
+      id: "l1",
+      status: "MERGED",
+      displayName: "Dana",
+      mergeCounterpartId: "other-1",
+      mergedIntoId: "other-1",
+    });
+    await expect(
+      setLeadDisposition({ customerId: "l1", disposition: "DNC" }, actor)
+    ).rejects.toThrow(/open lead not found/i);
+  });
+
+  it("offboarding skips a mid-merge lead instead of racing the merge", async () => {
+    customers.set("l1", {
+      id: "l1",
+      status: "LEAD",
+      displayName: "A",
+      leadOwnerSub: "leaver",
+      mergeCounterpartId: "other-1",
+    });
+    customers.set("l2", { id: "l2", status: "LEAD", displayName: "B", leadOwnerSub: "leaver" });
+
+    const res = await reassignLeadsForSub({ sub: "leaver", actorEmail: "owner@example.com" });
+
+    expect(res).toMatchObject({ reassigned: 1, failed: 1 });
+    // The mid-merge lead's ownership is untouched.
+    expect(customers.get("l1")).toMatchObject({ leadOwnerSub: "leaver" });
+    expect(customers.get("l2")).toMatchObject({ leadOwnerSub: null });
   });
 });
 

@@ -26,6 +26,9 @@ const bookings = new Map<string, Booking>();
 let invoices: Invoice[] = [];
 const invoicesCreated: Invoice[] = [];
 let customerEmail: string | null = "dana@example.com";
+// Seeded rows (e.g. MERGED tombstones) win over the default live customer.
+const customers = new Map<string, Record<string, unknown>>();
+const customerUpdates: { id: string }[] = [];
 
 const fakeDataClient = {
   models: {
@@ -57,7 +60,7 @@ const fakeDataClient = {
     },
     Customer: {
       get: async ({ id }: { id: string }) => ({
-        data: {
+        data: customers.get(id) ?? {
           id,
           displayName: "Dana Whitlock",
           contactName: "Dana",
@@ -65,7 +68,12 @@ const fakeDataClient = {
           groupId: null,
         },
       }),
-      update: async (patch: { id: string }) => ({ data: patch }),
+      update: async (patch: { id: string }) => {
+        customerUpdates.push(patch);
+        const row = customers.get(patch.id);
+        if (row) customers.set(patch.id, { ...row, ...patch });
+        return { data: patch };
+      },
     },
     Job: {
       listJobByServicePlanId: async ({
@@ -237,6 +245,8 @@ beforeEach(() => {
   invoices = [];
   invoicesCreated.length = 0;
   customerEmail = "dana@example.com";
+  customers.clear();
+  customerUpdates.length = 0;
   sendEmail.mockClear();
   notifyOffice.mockClear();
   startPlanBilling.mockClear();
@@ -276,6 +286,59 @@ describe("setup_intent.succeeded starts ACTIVE-not-billing plans", () => {
     await invoke("setup_intent.succeeded", setupIntent);
 
     expect(startPlanBilling).not.toHaveBeenCalled();
+  });
+
+  it("a merged-away metadata id caches the card on the survivor, never the tombstone", async () => {
+    // The SetupIntent froze c_old at creation; the bank verification finished
+    // after a merge retired that row into c1. Follow rule: the label cache and
+    // the ACTIVE-not-billing scan must both target the survivor.
+    customers.set("c_old", { id: "c_old", status: "MERGED", mergedIntoId: "c1" });
+    seedPlan({ id: "p_surv", customerId: "c1", stripeSubscriptionId: undefined });
+
+    await invoke("setup_intent.succeeded", {
+      metadata: { crmCustomerId: "c_old" },
+      payment_method: "pm_1",
+      customer: "cus_1",
+    });
+
+    expect(customerUpdates).toEqual([
+      expect.objectContaining({
+        id: "c1",
+        paymentMethodLabel: "Visa ••4242",
+        paymentMethodKind: "CARD",
+      }),
+    ]);
+    expect(startPlanBilling).toHaveBeenCalledTimes(1);
+    expect(startPlanBilling).toHaveBeenCalledWith(expect.anything(), "p_surv");
+  });
+
+  it("a broken merge chain keeps the frozen id — never an intermediate tombstone", async () => {
+    // c_old points at c_mid, but c_mid is itself MERGED with no onward
+    // pointer: the chain has no live terminus. The card cache and the plan
+    // scan must stay on the frozen id rather than credit a mid-chain
+    // tombstone.
+    customers.set("c_old", {
+      id: "c_old",
+      status: "MERGED",
+      mergedIntoId: "c_mid",
+    });
+    customers.set("c_mid", {
+      id: "c_mid",
+      status: "MERGED",
+      mergedIntoId: null,
+    });
+    seedPlan({ id: "p_mid", customerId: "c_mid", stripeSubscriptionId: undefined });
+    seedPlan({ id: "p_old", customerId: "c_old", stripeSubscriptionId: undefined });
+
+    await invoke("setup_intent.succeeded", {
+      metadata: { crmCustomerId: "c_old" },
+      payment_method: "pm_1",
+      customer: "cus_1",
+    });
+
+    expect(customerUpdates).toEqual([expect.objectContaining({ id: "c_old" })]);
+    expect(startPlanBilling).toHaveBeenCalledTimes(1);
+    expect(startPlanBilling).toHaveBeenCalledWith(expect.anything(), "p_old");
   });
 });
 
@@ -512,6 +575,32 @@ describe("invoice.paid mirrors the monthly settlement and sends the receipt", ()
     expect(invoicesCreated).toHaveLength(1); // the ledger row still lands
     expect(sendEmail).not.toHaveBeenCalled();
     expect(notifyOffice).toHaveBeenCalledOnce();
+  });
+
+  it("an invoice minted before a merge creates the ledger row on the survivor", async () => {
+    // The invoice's metadata snapshot froze c_old at invoice creation; the
+    // debit settled after the merge retired that row into c1. Follow rule:
+    // the Invoice and its accessGroups stamp name the survivor.
+    customers.set("c_old", { id: "c_old", status: "MERGED", mergedIntoId: "c1" });
+    seedPlan();
+
+    await invoke("invoice.paid", {
+      ...stripeInvoice,
+      parent: {
+        subscription_details: {
+          subscription: "sub_1",
+          metadata: { crmServicePlanId: "p1", crmCustomerId: "c_old" },
+        },
+      },
+    });
+
+    expect(invoicesCreated).toHaveLength(1);
+    expect(invoicesCreated[0]).toMatchObject({
+      customerId: "c1",
+      status: "PAID",
+    });
+    expect(invoicesCreated[0].accessGroups).toEqual(["cus-c1"]);
+    expect(sendEmail).toHaveBeenCalledOnce(); // receipt still goes out, to the survivor
   });
 });
 

@@ -18,6 +18,7 @@ import {
   parseLabelRules,
 } from "../shared/compliance";
 import { retryBookingFinalization } from "../shared/bookingFinalize";
+import { resolveMergedCustomer } from "../shared/customerMerge";
 import { depletionsForReport } from "../shared/inventory";
 import { opFieldName } from "../shared/opEvent";
 import {
@@ -1029,6 +1030,22 @@ async function visitMoneySettled(
   return { ok: true };
 }
 
+/** The absorbed-duplicate ids recorded on a merge survivor
+ *  (Customer.mergeState = {absorbed: [...]}) — empty for everyone else. */
+function absorbedCustomerIds(
+  customer: { mergeState?: unknown } | null
+): string[] {
+  const raw = customer?.mergeState;
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const list = (parsed as { absorbed?: unknown } | null)?.absorbed;
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function runWorkVerifier(
   verifier: VerifierId,
   item: {
@@ -1067,26 +1084,34 @@ async function runWorkVerifier(
       }
       if ("EmailLog" in client.models) {
         const since = item.createdAt ?? "";
+        // A case repointed by a customer merge may have its qualifying send
+        // logged under an absorbed (tombstoned) id — those sends still count.
+        const absorbed = absorbedCustomerIds(customer);
+        const logCustomerIds = [id, ...absorbed.filter((a) => a !== id)];
         let sentSince = false;
         let scanned = 0;
-        await forEachPage(
-          (nextToken) =>
-            client.models.EmailLog.list({
-              filter: { customerId: { eq: id } },
-              limit: 200,
-              nextToken,
-            }),
-          (logs) => {
-            sentSince = logs.some(
-              (l) =>
-                (l.deliveryStatus === "SENT" || l.deliveryStatus === "DELIVERED") &&
-                String(l.createdAt ?? "") >= since
-            );
-            scanned += logs.length;
-            if (sentSince || scanned >= 1000) return false;
-          },
-          { pageErrors: "ignore" }
-        );
+        for (const logCustomerId of logCustomerIds) {
+          if (sentSince || scanned >= 1000) break;
+          await forEachPage(
+            (nextToken) =>
+              client.models.EmailLog.list({
+                filter: { customerId: { eq: logCustomerId } },
+                limit: 200,
+                nextToken,
+              }),
+            (logs) => {
+              sentSince = logs.some(
+                (l) =>
+                  (l.deliveryStatus === "SENT" ||
+                    l.deliveryStatus === "DELIVERED") &&
+                  String(l.createdAt ?? "") >= since
+              );
+              scanned += logs.length;
+              if (sentSince || scanned >= 1000) return false;
+            },
+            { pageErrors: "ignore" }
+          );
+        }
         if (!sentSince) {
           return {
             ok: false,
@@ -5823,6 +5848,15 @@ async function getDocumentUrl(
     // means a property removed from a management company loses access to its
     // documents immediately, without a re-issued token.
     let allowed = await canActForCustomer(identity, customerId);
+    if (!allowed) {
+      // The follow rule: a key frozen with a pre-merge customer id stays
+      // readable by whoever is entitled to the SURVIVOR that record merged
+      // into — entitlement follows mergedIntoId, never the tombstone alone.
+      const live = await resolveMergedCustomer(customerId);
+      if (live && live.id !== customerId && live.status !== "MERGED") {
+        allowed = await canActForCustomer(identity, live.id);
+      }
+    }
     if (!allowed && groups.includes("TECH")) {
       allowed = await technicianDocumentAllowed(identity, key);
     }
@@ -5861,8 +5895,15 @@ async function ensureQuotePdfObject(key: string, customerId: string) {
     id: bookingId,
   });
   if (!booking) throw new Error("That quote no longer exists.");
-  if ((booking.leadCustomerId ?? booking.customerId) !== customerId) {
-    throw new Error("Not authorized for this document");
+  const bookingCustomerId = booking.leadCustomerId ?? booking.customerId;
+  if (bookingCustomerId !== customerId) {
+    // A key minted before a merge carries the tombstone's id; it is accepted
+    // only when the follow rule lands exactly on the booking's current
+    // customer — any other id stays refused.
+    const live = await resolveMergedCustomer(customerId);
+    if (!live || live.id !== bookingCustomerId) {
+      throw new Error("Not authorized for this document");
+    }
   }
   const pdf = await renderQuotePdfForBooking(
     booking as unknown as QuotableBooking,

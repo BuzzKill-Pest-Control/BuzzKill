@@ -20,6 +20,12 @@ import {
   executeGroupChange,
 } from "../shared/groupChange";
 import { casGuardedUpdate } from "../shared/atomicLock";
+import {
+  isMidMerge,
+  mergeCustomers,
+  type MergeDeps,
+} from "../shared/customerMerge";
+import { getDefaultPaymentMethod } from "../shared/subscription";
 import { jobScheduleGuards } from "../shared/capacity";
 import { assertTechnicianCanBeSaved } from "../shared/compliance";
 import { opFieldName } from "../shared/opEvent";
@@ -251,36 +257,95 @@ export const handler = async (event: AppSyncResolverEvent<AdminArgs>) => {
       const rArgs = event.arguments as unknown as { commandId?: string };
       return resumeGroupChange(String(rArgs.commandId ?? ""));
     }
-    case "revokePortalAccess": {
-      const { customerId, groupId } = event.arguments as CustomerIdArgs & {
+    case "setPortalAccess": {
+      // Folded revoke/restore pair (AppSync 500-cap: the fold paid for
+      // mergeCustomers). Same internals, one op with an action discriminator.
+      const { action, customerId, groupId } = event.arguments as {
+        action?: string | null;
+        customerId?: string | null;
         groupId?: string | null;
       };
-      // A group login (management company) is revoked by groupId; a single
-      // customer's login by customerId. Exactly one is required.
-      if (groupId && customerId)
-        throw new Error(
-          "Pass either customerId or groupId to revokePortalAccess, not both."
-        );
-      if (groupId) return await revokeGroupPortalAccess(groupId);
-      if (!customerId)
-        throw new Error(
-          "customerId (or groupId, for a group login) is required to revoke portal access."
-        );
-      try {
-        return await revokePortalAccess(customerId);
-      } catch (err) {
-        await recordPortalFailure(customerId, "Portal access revocation failed", err);
-        throw err;
+      if (action === "REVOKE") {
+        // A group login (management company) is revoked by groupId; a single
+        // customer's login by customerId. Exactly one is required.
+        if (groupId && customerId)
+          throw new Error(
+            "Pass either customerId or groupId to setPortalAccess REVOKE, not both."
+          );
+        if (groupId) return await revokeGroupPortalAccess(groupId);
+        if (!customerId)
+          throw new Error(
+            "customerId (or groupId, for a group login) is required to revoke portal access."
+          );
+        try {
+          return await revokePortalAccess(customerId);
+        } catch (err) {
+          await recordPortalFailure(customerId, "Portal access revocation failed", err);
+          throw err;
+        }
       }
+      if (action === "RESTORE") {
+        if (!customerId)
+          throw new Error("customerId is required to restore portal access.");
+        try {
+          return await restorePortalAccess(customerId);
+        } catch (err) {
+          await recordPortalFailure(customerId, "Portal access restoration failed", err);
+          throw err;
+        }
+      }
+      throw new Error(`setPortalAccess action must be REVOKE or RESTORE, got: ${action}`);
     }
-    case "restorePortalAccess": {
-      const customerId = (event.arguments as CustomerIdArgs).customerId;
-      try {
-        return await restorePortalAccess(customerId);
-      } catch (err) {
-        await recordPortalFailure(customerId, "Portal access restoration failed", err);
-        throw err;
+    case "mergeCustomers": {
+      const args = event.arguments as {
+        action?: string | null;
+        survivorId?: string | null;
+        loserId?: string | null;
+        idempotencyKey?: string | null;
+        acknowledgeWarnings?: boolean | null;
+      };
+      const action = args.action;
+      if (action !== "PREVIEW" && action !== "EXECUTE" && action !== "RESUME") {
+        throw new Error(
+          `mergeCustomers action must be PREVIEW, EXECUTE, or RESUME, got: ${action}`
+        );
       }
+      const survivorId = String(args.survivorId ?? "").trim();
+      const loserId = String(args.loserId ?? "").trim();
+      const idempotencyKey = String(args.idempotencyKey ?? "").trim();
+      if (!survivorId || !loserId || !idempotencyKey) {
+        throw new Error(
+          "mergeCustomers requires survivorId, loserId, and idempotencyKey."
+        );
+      }
+      return await mergeCustomers({
+        action,
+        survivorId,
+        loserId,
+        idempotencyKey,
+        acknowledgeWarnings: Boolean(args.acknowledgeWarnings),
+        deps: mergeDeps({
+          sub: callerSub(event.identity) ?? undefined,
+          email: callerEmail(event.identity) ?? undefined,
+        }),
+      });
+    }
+    case "resumeMerge": {
+      // Internal: the daily reconcile re-drives stuck merges through this
+      // handler, which holds the Cognito + Stripe credentials the stages
+      // need. Direct Lambda invoke only — no AppSync operation is spent.
+      const rArgs = event.arguments as unknown as {
+        survivorId?: string;
+        loserId?: string;
+        idempotencyKey?: string;
+      };
+      return await mergeCustomers({
+        action: "RESUME",
+        survivorId: String(rArgs.survivorId ?? ""),
+        loserId: String(rArgs.loserId ?? ""),
+        idempotencyKey: String(rArgs.idempotencyKey ?? ""),
+        deps: mergeDeps({ email: "system" }),
+      });
     }
     case "deactivateCustomer": {
       // The whole offboarding in one action (GL-09): money + schedule + portal +
@@ -667,6 +732,125 @@ async function removeFromGroup(username: string, groupName: string) {
       GroupName: groupName,
     })
   );
+}
+
+/** The credential bundle the customer-merge engine runs its stages with —
+ *  this handler is the only one holding Cognito admin + Stripe together. */
+function mergeDeps(actor: { sub?: string; email?: string }): MergeDeps {
+  let stripe: ReturnType<typeof stripeClient> | null = null;
+  try {
+    stripe = stripeClient();
+  } catch {
+    stripe = null; // No key (some test paths) — billing facts degrade to none.
+  }
+  return {
+    actor,
+    cognito: {
+      ensureGroup: ensureCognitoGroup,
+      addToGroup,
+      removeFromGroup: async (username, groupName) => {
+        try {
+          await removeFromGroup(username, groupName);
+        } catch (err) {
+          // Removing a membership that cannot exist (group or user gone) is
+          // the outcome the revoke wants — not a stage failure.
+          const name = (err as { name?: string }).name;
+          if (
+            name === "ResourceNotFoundException" ||
+            name === "UserNotFoundException"
+          ) {
+            return;
+          }
+          throw err;
+        }
+      },
+      usernamesInGroup: async (groupName) => {
+        const names: string[] = [];
+        let nextToken: string | undefined;
+        do {
+          let res;
+          try {
+            res = await cognito.send(
+              new ListUsersInGroupCommand({
+                UserPoolId: USER_POOL_ID,
+                GroupName: groupName,
+                NextToken: nextToken,
+              })
+            );
+          } catch (err) {
+            // A cus- group that was never created has no members — the
+            // common case for a bare lead that never had a portal login.
+            // Cognito throws ResourceNotFound instead of returning empty.
+            if ((err as { name?: string }).name === "ResourceNotFoundException") {
+              return names;
+            }
+            throw err;
+          }
+          for (const u of res.Users ?? []) {
+            if (u.Username) names.push(u.Username);
+          }
+          nextToken = res.NextToken;
+        } while (nextToken);
+        return names;
+      },
+      groupsForUser: async (username) => {
+        try {
+          const res = await cognito.send(
+            new AdminListGroupsForUserCommand({
+              UserPoolId: USER_POOL_ID,
+              Username: username,
+            })
+          );
+          return (res.Groups ?? [])
+            .map((g) => g.GroupName ?? "")
+            .filter(Boolean);
+        } catch (err) {
+          if ((err as { name?: string }).name === "UserNotFoundException") {
+            return [];
+          }
+          throw err;
+        }
+      },
+      disableUser: async (username) => {
+        await cognito.send(
+          new AdminDisableUserCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: username,
+          })
+        );
+      },
+    },
+    stripe: stripe
+      ? {
+          listActiveSubscriptionIds: async (stripeCustomerId) => {
+            const subs = await stripe.subscriptions.list({
+              customer: stripeCustomerId,
+              limit: 100,
+            });
+            return subs.data
+              .filter(
+                (s) =>
+                  s.status !== "canceled" && s.status !== "incomplete_expired"
+              )
+              .map((s) => s.id);
+          },
+          setSubscriptionCrmCustomer: async (subscriptionId, crmCustomerId) => {
+            await stripe.subscriptions.update(subscriptionId, {
+              metadata: { crmCustomerId },
+            });
+          },
+          defaultPaymentMethodLabel: async (stripeCustomerId) => {
+            const pm = await getDefaultPaymentMethod(stripe, stripeCustomerId);
+            if (!pm) return null;
+            return pm.card
+              ? `${pm.card.brand} •••• ${pm.card.last4}`
+              : pm.us_bank_account
+                ? `bank •••• ${pm.us_bank_account.last4 ?? ""}`
+                : pm.type;
+          },
+        }
+      : null,
+  };
 }
 
 /**
@@ -1642,6 +1826,18 @@ async function updateCustomerContact(args: UpdateCustomerContactArgs) {
     id: args.customerId,
   });
   if (!customer) throw new Error(`Customer ${args.customerId} not found`);
+  // The merge command owns both of its rows until it settles; a contact edit
+  // must not race it, and a tombstone must never be edited.
+  if (customer.status === "MERGED") {
+    throw new Error(
+      `This record was merged into ${customer.mergedIntoId ?? "another record"}; act on that record instead.`
+    );
+  }
+  if (isMidMerge(customer)) {
+    throw new Error(
+      "This record is mid-merge — finish or resume the merge first."
+    );
+  }
 
   const { data: updated, errors } = await client.models.Customer.update({
     id: args.customerId,
@@ -3335,6 +3531,8 @@ async function reportSuspectAddresses() {
     (customers) => {
       for (const c of customers) {
         scanned++;
+        // Merge tombstones are not serviceable addresses — never worth fixing.
+        if (c.status === "MERGED") continue;
         if (!streetLooksLikeItHidesAUnit(c.serviceStreet)) continue;
         suspects.push({
           customerId: c.id,

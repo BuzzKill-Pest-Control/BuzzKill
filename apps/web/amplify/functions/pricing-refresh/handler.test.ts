@@ -162,6 +162,8 @@ type SentEmail = {
 const sentEmails: SentEmail[] = [];
 const emailsThatFail = new Set<string>();
 const officeEmails: { subject: string; template: string; bodyHtml: string }[] = [];
+let officeEmailFails = false;
+let officeEmailThrows = false;
 vi.mock("../shared/email", () => ({
   emailShell: (h: string, b: string) => `${h}${b}`,
   sendEmail: async (o: SentEmail) => {
@@ -169,6 +171,8 @@ vi.mock("../shared/email", () => ({
     return !emailsThatFail.has(o.to);
   },
   notifyOffice: async (o: { subject: string; template: string; bodyHtml: string }) => {
+    if (officeEmailThrows) throw new Error("data layer down");
+    if (officeEmailFails) return false;
     officeEmails.push(o);
     return true;
   },
@@ -372,6 +376,8 @@ beforeEach(() => {
   sentEmails.length = 0;
   emailsThatFail.clear();
   officeEmails.length = 0;
+  officeEmailFails = false;
+  officeEmailThrows = false;
   lambdaInvokeImpl = async () => ({});
   delete process.env.BOOKING_PUBLIC_FUNCTION_NAME;
   _resetBookingPublicNameCacheForTests();
@@ -889,6 +895,60 @@ describe("the daily digest — one consolidated email, never one per rate", () =
     expect(
       officeEmails.filter((e) => e.template === "ops-pricing-daily-digest")
     ).toHaveLength(0);
+  });
+
+  it("an idle day sends NO digest — an all-empty-sections email is inbox noise", async () => {
+    // Owner rule (2026-08-15). No coverage rows, no attempts, no rollback:
+    // nothing happened today, so the 21:00 hour stays silent.
+    await seedOnly();
+    quietAll();
+    vi.setSystemTime(new Date("2026-07-15T21:02:00Z"));
+
+    await handler();
+
+    expect(
+      officeEmails.filter((e) => e.template === "ops-pricing-daily-digest")
+    ).toHaveLength(0);
+  });
+
+  it("a FAILED send KEEPS the claim — the send boundary's QUEUED sweep owns redelivery, so no duplicate digest", async () => {
+    await seedOnly();
+    quietAll();
+    addCov(demandRow()); // real activity — the digest has something to say
+    vi.setSystemTime(new Date("2026-07-15T21:02:00Z"));
+
+    // The boundary reported failure — but it may have stored the body as a
+    // QUEUED outbox row that the daily sweep re-sends. Releasing the claim
+    // here would let a later run send a SECOND copy on top of that.
+    officeEmailFails = true;
+    await handler();
+    officeEmailFails = false;
+    vi.setSystemTime(new Date("2026-07-15T21:12:00Z"));
+    await handler();
+
+    expect(
+      officeEmails.filter((e) => e.template === "ops-pricing-daily-digest")
+    ).toHaveLength(0);
+  });
+
+  it("a crash BEFORE the send releases the claim so a later run retries — the day is not lost", async () => {
+    await seedOnly();
+    quietAll();
+    addCov(demandRow());
+    vi.setSystemTime(new Date("2026-07-15T21:02:00Z"));
+
+    officeEmailThrows = true;
+    await handler();
+    expect(
+      officeEmails.filter((e) => e.template === "ops-pricing-daily-digest")
+    ).toHaveLength(0);
+
+    officeEmailThrows = false;
+    vi.setSystemTime(new Date("2026-07-15T21:12:00Z"));
+    await handler();
+    expect(
+      officeEmails.filter((e) => e.template === "ops-pricing-daily-digest")
+    ).toHaveLength(1);
   });
 });
 

@@ -40,11 +40,17 @@ export async function loadMyCustomers(roles: Roles): Promise<Customer[]> {
   const mine = own
     .map((r) => unwrap(r) as unknown as Customer | null)
     .filter((c): c is Customer => Boolean(c));
-  const members = memberLists.flat();
+  // A MERGED tombstone is not a property: its children and billing moved to
+  // the survivor, and the loser's cus-/grp- visibility lingers until token
+  // cleanup — so it must be dropped here, not trusted to the group query.
+  const members = memberLists.flat().filter((c) => c.status !== "MERGED");
   // A login can be both an individual customer and a group contact — dedupe,
   // and order by name so a 29-property portfolio reads predictably.
   const byId = new Map<string, Customer>();
-  for (const c of [...mine, ...members]) byId.set(c.id, c);
+  for (const c of [...mine, ...members]) {
+    if (c.status === "MERGED") continue;
+    byId.set(c.id, c);
+  }
   return [...byId.values()].sort((a, b) =>
     (a.displayName ?? "").localeCompare(b.displayName ?? "")
   );

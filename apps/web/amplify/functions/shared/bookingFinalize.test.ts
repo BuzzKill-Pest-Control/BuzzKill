@@ -21,7 +21,6 @@ type Row = Record<string, unknown> & { id: string };
 let existingCustomers: Row[] = [];
 let pricingRuns: Row[] = [];
 let customerListError: Error | null = null;
-let customerUpdateFails = false;
 const customersCreated: Row[] = [];
 const customerUpdates: Row[] = [];
 const runUpdates: Row[] = [];
@@ -131,9 +130,6 @@ const fakeDataClient = {
       },
       update: async (patch: Row) => {
         customerUpdates.push(patch);
-        if (customerUpdateFails && patch.status) {
-          return { data: null, errors: [{ message: "update refused" }] };
-        }
         const current = existingCustomers.find((c) => c.id === patch.id);
         if (current) Object.assign(current, patch);
         return { data: { groupId: null, ...current, ...patch } };
@@ -305,6 +301,12 @@ const finalize = () =>
     amountReceived: 31300,
   });
 
+/** The live row (mutated in place by both the fake client and the CAS
+ *  store) — conversion is a guarded write now, so its effects are read off
+ *  the row, not off an update-patch capture. */
+const customerRow = (id: string): Row =>
+  existingCustomers.find((c) => c.id === id)!;
+
 /** A lead the office already has — sparse, the way a Thumbtack paste lands. */
 const seedLead = (over: Partial<Row> = {}): Row => {
   const lead: Row = {
@@ -329,31 +331,33 @@ const seedLead = (over: Partial<Row> = {}): Row => {
   return lead;
 };
 
+// GL-06: the BOOKED flip (and now the guarded lead conversion) is a CAS
+// write — back it with live views over the shared fixtures (mutated in place
+// by the memory store). A test that needs to interpose on the CAS layer
+// rebuilds this and wraps it.
+const buildLockStore = () =>
+  memoryLockStore({
+    BookingRequest: {
+      get: (id: string) =>
+        booking && booking.id === id
+          ? (booking as Record<string, unknown>)
+          : undefined,
+    } as unknown as Map<string, Record<string, unknown>>,
+    Job: store.Job,
+    Invoice: store.Invoice,
+    Customer: {
+      get: (id: string) => existingCustomers.find((row) => row.id === id),
+    } as unknown as Map<string, Record<string, unknown>>,
+    CapacityDay: capacityFixture.maps.capacityDays,
+    CapacityClaim: capacityFixture.maps.capacityClaims,
+    TechDayStops: capacityFixture.maps.techDayStops,
+  });
+
 beforeEach(() => {
-  // GL-06: the BOOKED flip is a guarded CAS write — back it with a live view
-  // over the shared booking object (mutated in place by the memory store).
-  _setLockStoreForTests(
-    memoryLockStore({
-      BookingRequest: {
-        get: (id: string) =>
-          booking && booking.id === id
-            ? (booking as Record<string, unknown>)
-            : undefined,
-      } as unknown as Map<string, Record<string, unknown>>,
-      Job: store.Job,
-      Invoice: store.Invoice,
-      Customer: {
-        get: (id: string) => existingCustomers.find((row) => row.id === id),
-      } as unknown as Map<string, Record<string, unknown>>,
-      CapacityDay: capacityFixture.maps.capacityDays,
-      CapacityClaim: capacityFixture.maps.capacityClaims,
-        TechDayStops: capacityFixture.maps.techDayStops,
-    })
-  );
+  _setLockStoreForTests(buildLockStore());
   existingCustomers = [];
   pricingRuns = [];
   customerListError = null;
-  customerUpdateFails = false;
   customersCreated.length = 0;
   customerUpdates.length = 0;
   runUpdates.length = 0;
@@ -414,9 +418,9 @@ describe("an existing lead converts instead of duplicating", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    const convert = customerUpdates.find((u) => u.status === "ACTIVE");
-    expect(convert).toMatchObject({ id: "lead-1", status: "ACTIVE" });
-    expect(convert!.convertedAt).toBeDefined();
+    const lead = customerRow("lead-1");
+    expect(lead.status).toBe("ACTIVE");
+    expect(lead.convertedAt).toBeDefined();
   });
 
   it("matches the email case-insensitively", async () => {
@@ -425,7 +429,7 @@ describe("an existing lead converts instead of duplicating", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    expect(customerUpdates[0]).toMatchObject({ id: "lead-1", status: "ACTIVE" });
+    expect(customerRow("lead-1").status).toBe("ACTIVE");
   });
 
   it("fills only the fields the office didn't already have", async () => {
@@ -437,10 +441,10 @@ describe("an existing lead converts instead of duplicating", () => {
 
     await finalize();
 
-    const convert = customerUpdates[0];
-    expect(convert.contactName).toBeUndefined();
-    expect(convert.phone).toBeUndefined();
-    expect(convert).toMatchObject({
+    const lead = customerRow("lead-1");
+    expect(lead.contactName).toBe("Dana W.");
+    expect(lead.phone).toBe("+14135550000");
+    expect(lead).toMatchObject({
       serviceStreet: "12 Beacon St",
       serviceCity: "Ware",
       serviceState: "MA",
@@ -454,12 +458,12 @@ describe("an existing lead converts instead of duplicating", () => {
 
     await finalize();
 
-    const convert = customerUpdates[0];
-    expect(convert.leadSource).toBeUndefined(); // Thumbtack stays
-    expect(String(convert.leadNotes)).toContain(
+    const lead = customerRow("lead-1");
+    expect(lead.leadSource).toBe("Thumbtack"); // stays
+    expect(String(lead.leadNotes)).toContain(
       "Pasted lead: mice in the basement"
     );
-    expect(String(convert.leadNotes)).toContain(
+    expect(String(lead.leadNotes)).toContain(
       "Booked online via the website funnel (booking b1)"
     );
   });
@@ -470,8 +474,9 @@ describe("an existing lead converts instead of duplicating", () => {
 
     await finalize();
 
-    expect(customerUpdates[0].leadSource).toBe("Website booking · utm:google");
-    expect(String(customerUpdates[0].leadNotes)).toContain(
+    const lead = customerRow("lead-1");
+    expect(lead.leadSource).toBe("Website booking · utm:google");
+    expect(String(lead.leadNotes)).toContain(
       "Booked online via the website funnel"
     );
   });
@@ -482,8 +487,7 @@ describe("an existing lead converts instead of duplicating", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    expect(customerUpdates[0]).toMatchObject({
-      id: "lead-1",
+    expect(customerRow("lead-1")).toMatchObject({
       status: "ACTIVE",
       convertedAt: "2026-01-01T00:00:00Z",
     });
@@ -532,13 +536,26 @@ describe("matching failure fails closed into paid recovery", () => {
     expect(booking.status).toBe("QUOTED");
   });
 
-  it("does not create beside a lead when conversion is refused", async () => {
+  it("does not create beside a lead when the guarded conversion write loses", async () => {
     seedLead();
-    customerUpdateFails = true;
+    // The merge marker lands between the pre-write read and the guarded
+    // flip — the exact window the CAS conditions exist for.
+    const base = buildLockStore();
+    const racing: typeof base = {
+      ...base,
+      conditionalUpdate: async (model, id, sets, conditions, opts) => {
+        if (model === "Customer" && sets.status === "ACTIVE") {
+          customerRow(id).mergeCounterpartId = "other-1";
+        }
+        return base.conditionalUpdate(model, id, sets, conditions, opts);
+      },
+    };
+    _setLockStoreForTests(racing);
 
-    await expect(finalize()).rejects.toThrow(/could not convert/i);
+    await expect(finalize()).rejects.toThrow(/mid-merge/i);
 
     expect(customersCreated).toHaveLength(0);
+    expect(customerRow("lead-1").status).toBe("LEAD"); // never flipped
     expect(workOpened).toContainEqual(
       expect.objectContaining({ kind: "PAID_NOT_FINALIZED" })
     );
@@ -753,9 +770,7 @@ describe("the booking link's lead identity converts exactly that lead", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    expect(customerUpdates.find((row) => row.status === "ACTIVE")).toMatchObject({
-      id: "lead-1",
-    });
+    expect(customerRow("lead-1").status).toBe("ACTIVE");
   });
 
   it("converts the referenced record even when the checkout email differs", async () => {
@@ -767,9 +782,9 @@ describe("the booking link's lead identity converts exactly that lead", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    const convert = customerUpdates.find((u) => u.status === "ACTIVE");
-    expect(convert).toMatchObject({ id: "lead-2", status: "ACTIVE" });
-    expect(String(convert!.leadNotes)).toContain(
+    const lead = customerRow("lead-2");
+    expect(lead.status).toBe("ACTIVE");
+    expect(String(lead.leadNotes)).toContain(
       "Checkout email dana@example.com differs"
     );
   });
@@ -784,9 +799,8 @@ describe("the booking link's lead identity converts exactly that lead", () => {
     await finalize();
 
     expect(customersCreated).toHaveLength(0);
-    expect(
-      customerUpdates.find((u) => u.status === "ACTIVE")
-    ).toMatchObject({ id: "lead-2" });
+    expect(customerRow("lead-2").status).toBe("ACTIVE");
+    expect(customerRow("lead-1").status).toBe("LEAD");
   });
 
   it("a dangling lead reference creates fresh and hands the mystery to a human", async () => {
@@ -796,7 +810,7 @@ describe("the booking link's lead identity converts exactly that lead", () => {
     await finalize();
 
     // No guessing: the same-email lead is NOT converted.
-    expect(customerUpdates.find((u) => u.status === "ACTIVE")).toBeUndefined();
+    expect(customerRow("lead-1").status).toBe("LEAD");
     expect(customersCreated).toHaveLength(1);
     const work = workOpened.find((w) => w.kind === "DUPLICATE_LEAD");
     expect(work).toBeDefined();
@@ -814,7 +828,8 @@ describe("the booking link's lead identity converts exactly that lead", () => {
 
     await finalize();
 
-    expect(customerUpdates.find((u) => u.status === "ACTIVE")).toBeUndefined();
+    expect(customerRow("lead-1").status).toBe("LEAD");
+    expect(customerRow("lead-9").status).toBe("LEAD");
     expect(customersCreated).toHaveLength(1);
     const work = workOpened.find((w) => w.kind === "DUPLICATE_LEAD");
     expect(work).toBeDefined();
@@ -829,6 +844,127 @@ describe("the booking link's lead identity converts exactly that lead", () => {
             row.nextAction === "Resolve paid booking identity"
         )
     ).toBe(true);
+  });
+});
+
+/**
+ * Customer merge × finalization. The checkpoint and the booking link both
+ * carry STORED customer ids, which a merge can retire at any time — so both
+ * resolve through the tombstone chain and land on the survivor, and a
+ * customer whose merge is IN FLIGHT gains no children: finalization defers
+ * (throws retryably) and the webhook/reconcile machinery re-drives it after
+ * the merge completes.
+ */
+describe("customer merge — finalization follows stored ids and defers mid-merge", () => {
+  it("a checkpoint pointing at a merged tombstone finalizes onto the survivor", async () => {
+    seedLead({
+      id: "old-1",
+      status: "MERGED",
+      mergedIntoId: "surv-1",
+      email: null, // tombstones are blanked
+      phone: null,
+    });
+    seedLead({
+      id: "surv-1",
+      status: "ACTIVE",
+      email: "dana@newhouse.example.com",
+      convertedAt: "2026-01-01T00:00:00Z",
+    });
+    booking.customerId = "old-1";
+
+    await finalize();
+
+    expect(booking.status).toBe("BOOKED");
+    expect(customersCreated).toHaveLength(0); // adopted the survivor, minted nothing
+    expect(booking.customerId).toBe("surv-1"); // the checkpoint moves forward
+    expect(jobsCreated[0]).toMatchObject({ customerId: "surv-1" }); // children on the survivor
+    expect(portalInvites).toEqual([
+      // ...and so does the portal.
+      { customerId: "surv-1", email: "dana@example.com", name: "Dana Whitlock" },
+    ]);
+  });
+
+  it("a mid-merge checkpoint defers, and the retry lands on the survivor once the merge completes", async () => {
+    seedLead({ id: "cust-mid", status: "ACTIVE", mergeCounterpartId: "other-1" });
+    booking.customerId = "cust-mid";
+
+    await expect(finalize()).rejects.toThrow(/mid-merge/i);
+
+    expect(jobsCreated).toHaveLength(0); // no children on a mid-merge customer
+    expect(customersCreated).toHaveLength(0);
+    expect(booking.status).toBe("QUOTED");
+    const exception = workOpened.find((w) => w.kind === "PAID_NOT_FINALIZED");
+    expect(exception).toBeDefined();
+    expect(exception!.detail).toMatch(/mid-merge/i);
+
+    // The merge completes: cust-mid lost, surv-1 survives. The retry follows.
+    const loser = customerRow("cust-mid");
+    loser.status = "MERGED";
+    loser.mergedIntoId = "surv-1";
+    loser.mergeCounterpartId = null;
+    seedLead({ id: "surv-1", status: "ACTIVE", email: "dana@example.com" });
+
+    await finalize();
+
+    expect(booking.status).toBe("BOOKED");
+    expect(booking.customerId).toBe("surv-1");
+    expect(jobsCreated[0]).toMatchObject({ customerId: "surv-1" });
+  });
+
+  it("a mid-merge conversion target defers — the lead is not converted and gains no children", async () => {
+    seedLead({ mergeCounterpartId: "surv-9" });
+
+    await expect(finalize()).rejects.toThrow(/mid-merge/i);
+
+    expect(customerRow("lead-1").status).toBe("LEAD"); // untouched
+    expect(customersCreated).toHaveLength(0); // and nothing minted beside it
+    expect(jobsCreated).toHaveLength(0);
+    expect(store.LeadActivity.size).toBe(0); // not even the audit child
+    expect(workOpened).toContainEqual(
+      expect.objectContaining({ kind: "PAID_NOT_FINALIZED" })
+    );
+  });
+
+  it("a booking-link reference that was merged converts the SURVIVOR", async () => {
+    seedLead({
+      id: "lead-2",
+      status: "MERGED",
+      mergedIntoId: "lead-3",
+      email: null,
+      phone: null,
+    });
+    seedLead({ id: "lead-3", email: "office-records@example.com" });
+    booking.leadCustomerId = "lead-2";
+
+    await finalize();
+
+    expect(customersCreated).toHaveLength(0);
+    expect(customerRow("lead-3").status).toBe("ACTIVE"); // the survivor converted
+    expect(jobsCreated[0]).toMatchObject({ customerId: "lead-3" });
+    expect(workOpened.find((w) => w.kind === "DUPLICATE_LEAD")).toBeUndefined();
+  });
+
+  it("a MERGED row never matches by contact — the one live record converts without ambiguity", async () => {
+    seedLead(); // the live lead, dana@example.com
+    // A tombstone that (belt over the blanking) still carries the email must
+    // not turn the match ambiguous.
+    seedLead({ id: "lead-ghost", status: "MERGED", mergedIntoId: "lead-1" });
+
+    await finalize();
+
+    expect(customersCreated).toHaveLength(0);
+    expect(customerRow("lead-1").status).toBe("ACTIVE");
+    expect(workOpened.find((w) => w.kind === "DUPLICATE_LEAD")).toBeUndefined();
+  });
+
+  it("a tombstone alone never converts — matching sees no record and creates fresh", async () => {
+    seedLead({ status: "MERGED", mergedIntoId: "gone-1" });
+
+    await finalize();
+
+    expect(customerRow("lead-1").status).toBe("MERGED"); // untouched
+    expect(customersCreated).toHaveLength(1);
+    expect(booking.status).toBe("BOOKED");
   });
 });
 

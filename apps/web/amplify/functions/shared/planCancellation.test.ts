@@ -50,7 +50,14 @@ const invoices = new Map<string, Invoice>();
 const claims = new Map<string, Record<string, unknown>>();
 const customers = new Map<
   string,
-  { id: string; displayName: string; email?: string | null }
+  {
+    id: string;
+    displayName: string;
+    email?: string | null;
+    status?: string;
+    mergeCounterpartId?: string | null;
+    mergedIntoId?: string | null;
+  }
 >();
 
 const fakeDataClient = {
@@ -781,5 +788,76 @@ describe("planCancellationSettled (GL-08 R4 verifier / auto-resolve gate)", () =
     } as never);
     const s = await planCancellationSettled("p1", { stripe });
     expect(s.settled).toBe(true);
+  });
+});
+
+describe("cancelPlanForCustomer — merge exclusion", () => {
+  it("refuses a FRESH cancellation while the customer is mid-merge, naming the merge", async () => {
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana Whitlock",
+      email: "dana@example.com",
+      status: "ACTIVE",
+      mergeCounterpartId: "c2",
+    });
+    await expect(cancelPlanForCustomer(stripe, "p1", {})).rejects.toThrow(
+      /mid-merge with c2/
+    );
+    // Nothing was claimed and nothing touched Stripe — the refusal happens
+    // before the durable command is created.
+    expect(claims.size).toBe(0);
+    expect(cancelPlanBilling).not.toHaveBeenCalled();
+    expect(plans.get("p1")!.status).toBe("ACTIVE");
+  });
+
+  it("refuses a merge tombstone with a pointer to the surviving record", async () => {
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana Whitlock",
+      status: "MERGED",
+      mergedIntoId: "c9",
+    });
+    await expect(cancelPlanForCustomer(stripe, "p1", {})).rejects.toThrow(
+      /merged into c9; act on that record instead/
+    );
+    expect(claims.size).toBe(0);
+    expect(cancelPlanBilling).not.toHaveBeenCalled();
+  });
+
+  it("does NOT block reclaim/resume of an EXISTING command while the merge is in flight", async () => {
+    // An orphaned command from a dead prior attempt — old enough to steal.
+    claims.set("p1", {
+      id: "p1",
+      createdAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      attemptCount: 1,
+    });
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana Whitlock",
+      email: "dana@example.com",
+      status: "ACTIVE",
+      mergeCounterpartId: "c2",
+    });
+    const out = await cancelPlanForCustomer(stripe, "p1", {});
+    // The existing command finishes rather than wedging behind the merge.
+    expect(out.status).toBe("CANCELED");
+    expect(cancelPlanBilling).toHaveBeenCalledOnce();
+    expect(claims.get("p1")).toMatchObject({ stage: "COMPLETE" });
+  });
+
+  it("fails CLOSED when the customer row cannot be read", async () => {
+    const orig = fakeDataClient.models.Customer.get;
+    fakeDataClient.models.Customer.get = async () => {
+      throw new Error("dynamo down");
+    };
+    try {
+      await expect(cancelPlanForCustomer(stripe, "p1", {})).rejects.toThrow(
+        /could not verify merge state/i
+      );
+      expect(claims.size).toBe(0);
+      expect(cancelPlanBilling).not.toHaveBeenCalled();
+    } finally {
+      fakeDataClient.models.Customer.get = orig;
+    }
   });
 });

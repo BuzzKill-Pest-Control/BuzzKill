@@ -9,7 +9,8 @@ export type LeadStage =
   | "IDENTITY_REVIEW"
   | "WON"
   | "LOST"
-  | "DNC";
+  | "DNC"
+  | "MERGED";
 
 export type LeadFacts = {
   status?: string | null;
@@ -26,6 +27,9 @@ export type LeadFacts = {
 };
 
 export function deriveLeadStage(c: LeadFacts): LeadStage {
+  // A merge tombstone is terminal no matter what other facts the row kept —
+  // the surviving record owns the live stage.
+  if (c.status === "MERGED") return "MERGED";
   if (c.status === "ACTIVE" || c.convertedAt) return "WON";
   if (c.doNotContact) return "DNC";
   if (c.lostReason) return "LOST";
@@ -39,7 +43,7 @@ export function deriveLeadStage(c: LeadFacts): LeadStage {
 }
 
 export function isLeadOpen(c: LeadFacts): boolean {
-  return !["WON", "LOST", "DNC"].includes(deriveLeadStage(c));
+  return !["WON", "LOST", "DNC", "MERGED"].includes(deriveLeadStage(c));
 }
 
 /** Every safe write persists the calendar-derived obligation. A legacy record

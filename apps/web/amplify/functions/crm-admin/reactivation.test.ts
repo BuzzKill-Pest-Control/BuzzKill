@@ -60,6 +60,11 @@ type Customer = {
   status: string;
   portalUserSub?: string | null;
   groupId?: string | null;
+  serviceStreet?: string | null;
+  serviceUnit?: string | null;
+  serviceCity?: string | null;
+  mergedIntoId?: string | null;
+  mergeCounterpartId?: string | null;
 };
 const customers = new Map<string, Customer>();
 /** The single-winner lifecycle claim store (id = customerId). */
@@ -74,6 +79,7 @@ const fakeDataClient = {
   models: {
     Customer: {
       get: async ({ id }: { id: string }) => ({ data: customers.get(id) ?? null }),
+      list: async () => ({ data: [...customers.values()], nextToken: null }),
       update: async (patch: Partial<Customer> & { id: string }) => {
         lastCustomerPatch = patch;
         customers.set(patch.id, { ...customers.get(patch.id)!, ...patch });
@@ -323,5 +329,60 @@ describe("updateCustomerContact (GL-09)", () => {
     await expect(
       call("updateCustomerContact", { customerId: "c1", displayName: "   " })
     ).rejects.toThrow(/name is required/i);
+  });
+
+  it("refuses a mid-merge customer instead of racing the in-flight merge", async () => {
+    customers.set("c1", {
+      ...customers.get("c1")!,
+      mergeCounterpartId: "dup#fields-done",
+    });
+
+    await expect(
+      call("updateCustomerContact", { customerId: "c1", displayName: "New Name" })
+    ).rejects.toThrow(/mid-merge — finish or resume the merge first/);
+    // Nothing was written.
+    expect(customers.get("c1")!.displayName).toBe("Old Name");
+  });
+
+  it("refuses a merge tombstone and points at the surviving record", async () => {
+    customers.set("c1", {
+      ...customers.get("c1")!,
+      status: "MERGED",
+      mergedIntoId: "c2",
+    });
+
+    await expect(
+      call("updateCustomerContact", { customerId: "c1", displayName: "New Name" })
+    ).rejects.toThrow(/merged into c2/);
+    expect(customers.get("c1")!.displayName).toBe("Old Name");
+  });
+});
+
+describe("reportSuspectAddresses", () => {
+  it("skips merge tombstones — a merged-away row is never a suspect worth fixing", async () => {
+    const suspectStreet = "290 Eliot Street, Unit 289 America blvd";
+    customers.set("c-live", {
+      id: "c-live",
+      displayName: "Live Duplicate Street",
+      status: "ACTIVE",
+      serviceStreet: suspectStreet,
+    });
+    customers.set("c-gone", {
+      id: "c-gone",
+      displayName: "Merged Away",
+      status: "MERGED",
+      serviceStreet: suspectStreet,
+    });
+
+    const res = (await call("reportSuspectAddresses", {})) as {
+      scanned: number;
+      suspectCount: number;
+      suspects: { customerId: string }[];
+    };
+
+    expect(res.suspects.map((s) => s.customerId)).toEqual(["c-live"]);
+    expect(res.suspectCount).toBe(1);
+    // The tombstone was still scanned — it is skipped, not hidden.
+    expect(res.scanned).toBe(2);
   });
 });

@@ -7,6 +7,7 @@ let item: Record<string, unknown>;
 let customer: Record<string, unknown> | null;
 let job: Record<string, unknown> | null;
 let invoices: Record<string, unknown>[];
+let emailLogs: Record<string, unknown>[];
 const history: Record<string, unknown>[] = [];
 
 const finalizeClaims = new Map<string, Record<string, unknown>>();
@@ -46,6 +47,15 @@ const fakeDataClient = {
     Customer: { get: async () => ({ data: customer }) },
     Job: { get: async () => ({ data: job }) },
     Invoice: { list: async () => ({ data: invoices }) },
+    EmailLog: {
+      list: async ({
+        filter,
+      }: {
+        filter?: { customerId?: { eq?: string } };
+      }) => ({
+        data: emailLogs.filter((l) => l.customerId === filter?.customerId?.eq),
+      }),
+    },
   },
 };
 
@@ -72,6 +82,7 @@ beforeEach(() => {
   customer = null;
   job = null;
   invoices = [];
+  emailLogs = [];
   history.length = 0;
 });
 
@@ -206,6 +217,14 @@ describe("owned-work: verified close (GL-18)", () => {
   it("lets a routine user close once the outcome is verified", async () => {
     item.kind = "MISSING_CONTACT";
     customer = { id: "rel-1", email: "dana@example.com" };
+    // GL-18 R2: an address alone is not enough — the missed message must have
+    // actually gone out since the case opened.
+    emailLogs.push({
+      id: "e1",
+      customerId: "rel-1",
+      deliveryStatus: "SENT",
+      createdAt: "2026-08-01T00:00:00Z",
+    });
     await updateOwnedWork({
       workItemId: "work-1",
       action: "RESOLVE",
@@ -219,6 +238,73 @@ describe("owned-work: verified close (GL-18)", () => {
     expect(history).toContainEqual(
       expect.objectContaining({ eventType: "RESOLVED" })
     );
+  });
+
+  it("refuses the close when the address is on file but nothing has been sent since the case opened", async () => {
+    item.kind = "MISSING_CONTACT";
+    customer = { id: "rel-1", email: "dana@example.com" };
+    await expect(
+      updateOwnedWork({
+        workItemId: "work-1",
+        action: "RESOLVE",
+        actorSub: "sub-1",
+        actorEmail: "olga@example.com",
+        actorIsOwner: false,
+        resolutionActionId: "CONTACT_ADDED",
+      })
+    ).rejects.toThrow(/isn't done yet/i);
+    expect(item.status).toBe("OPEN");
+  });
+
+  it("counts a qualifying pre-merge send logged under an absorbed id (the merge follow rule)", async () => {
+    item.kind = "MISSING_CONTACT";
+    item.customerId = "surv-1";
+    customer = {
+      id: "surv-1",
+      email: "dana@example.com",
+      mergeState: JSON.stringify({ absorbed: ["loser-1"] }),
+    };
+    emailLogs.push({
+      id: "e1",
+      customerId: "loser-1",
+      deliveryStatus: "SENT",
+      createdAt: "2026-08-01T00:00:00Z",
+    });
+
+    await updateOwnedWork({
+      workItemId: "work-1",
+      action: "RESOLVE",
+      actorSub: "sub-1",
+      actorEmail: "olga@example.com",
+      actorIsOwner: false,
+      resolutionActionId: "CONTACT_ADDED",
+    });
+
+    expect(item).toMatchObject({ status: "RESOLVED", resolvedManualOverride: false });
+  });
+
+  it("a send logged under an id the customer never absorbed still refuses the close", async () => {
+    item.kind = "MISSING_CONTACT";
+    item.customerId = "surv-1";
+    customer = { id: "surv-1", email: "dana@example.com" };
+    emailLogs.push({
+      id: "e1",
+      customerId: "loser-1",
+      deliveryStatus: "SENT",
+      createdAt: "2026-08-01T00:00:00Z",
+    });
+
+    await expect(
+      updateOwnedWork({
+        workItemId: "work-1",
+        action: "RESOLVE",
+        actorSub: "sub-1",
+        actorEmail: "olga@example.com",
+        actorIsOwner: false,
+        resolutionActionId: "CONTACT_ADDED",
+      })
+    ).rejects.toThrow(/isn't done yet/i);
+    expect(item.status).toBe("OPEN");
   });
 
   it("closes a paid-cancellation only when the money is EXACTLY settled, and only for Finance", async () => {

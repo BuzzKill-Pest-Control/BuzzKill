@@ -45,10 +45,17 @@ export default function GroupDetail() {
       const all = await listAll((t) =>
         api().models.Customer.list({ limit: 1000, nextToken: t })
       );
+      // MERGED tombstones are never members or candidates: a merge blanks the
+      // loser's groupId, but a row mid-cleanup must not surface here.
       return {
         group: g,
-        members: all.filter((c) => c.groupId === id),
-        others: all.filter((c) => c.groupId !== id && c.status !== "INACTIVE"),
+        members: all.filter((c) => c.groupId === id && c.status !== "MERGED"),
+        others: all.filter(
+          (c) =>
+            c.groupId !== id &&
+            c.status !== "INACTIVE" &&
+            c.status !== "MERGED"
+        ),
       };
     },
     [id],
@@ -182,7 +189,12 @@ export default function GroupDetail() {
       // Access half first — disable the group login before the group reads
       // INACTIVE, so an inactive group never implies a live login. No-op when
       // there is no login.
-      unwrap(await api().mutations.revokePortalAccess({ groupId: group.id }));
+      unwrap(
+        await api().mutations.setPortalAccess({
+          action: "REVOKE",
+          groupId: group.id,
+        })
+      );
       unwrap(
         await api().models.CustomerGroup.update({
           id: group.id,

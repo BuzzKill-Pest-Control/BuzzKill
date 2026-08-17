@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { casGuardedUpdate } from "./atomicLock";
 import { oneBusinessDayDueAt } from "./businessDays";
+import { isMidMerge, resolveMergedCustomer } from "./customerMerge";
 import { dataClient } from "./dataClient";
 import {
   findLeadDuplicates,
@@ -64,6 +65,12 @@ const OUTCOMES_BY_CHANNEL: Record<string, readonly string[]> = {
   THUMBTACK: ["REACHED", "DELIVERED", "SENT", "FAILED", "NOTE"],
   NOTE: ["QUALIFIED", "UNQUALIFIED", "NOTE"],
 };
+
+// The merge command owns both of its rows until it settles; every other
+// durable lead mutation must refuse rather than race it (the merge's
+// exclusion is bidirectional — see customerMerge.ts isMidMerge).
+const MID_MERGE_REFUSAL =
+  "This record is part of an in-flight customer merge — finish or resume the in-flight merge first.";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex").slice(0, 32);
@@ -254,6 +261,23 @@ export async function createLead(args: CreateLeadArgs, actor: LeadActor): Promis
   try {
     const client = await dataClient();
     const prior = await client.models.Customer.get({ id: leadId });
+    if (prior.data?.status === "MERGED") {
+      // This identity's deterministic row was merged away. Adopting the
+      // tombstone could never pass the verify tail — every re-submission
+      // would park in LEAD_LIFECYCLE_RECOVERY — so follow the pointer and
+      // answer with the surviving record instead.
+      const survivor = await resolveMergedCustomer(leadId);
+      if (!survivor || survivor.status === "MERGED") {
+        throw new Error(
+          `Lead ${leadId} was merged away but its surviving record could not be resolved.`
+        );
+      }
+      console.log(
+        `createLead: ${leadId} is a merge tombstone; adopting survivor ${survivor.id}`
+      );
+      return { decision: "CREATED", id: survivor.id };
+    }
+    if (prior.data && isMidMerge(prior.data)) throw new Error(MID_MERGE_REFUSAL);
     const candidates = await findLeadDuplicates({
       email,
       phone,
@@ -447,6 +471,7 @@ export async function logLeadTouch(
     const read = await client.models.Customer.get({ id: args.customerId });
     if (read.errors?.length || !read.data) throw new Error("The lead could not be read; outreach is blocked.");
     if (read.data.status !== "LEAD") throw new Error("Only an open lead can be worked here.");
+    if (isMidMerge(read.data)) throw new Error(MID_MERGE_REFUSAL);
     if (read.data.leadMutationId === mutationId) {
       await appendLeadActivity({ ...args, actor, mutationId });
       if (!read.data.nextAction || !read.data.nextActionAt || !read.data.leadOwnerEmail) {
@@ -710,6 +735,7 @@ export async function setLeadDisposition(
     const client = await dataClient();
     const prior = await client.models.Customer.get({ id: args.customerId });
     if (!prior.data || prior.data.status !== "LEAD") throw new Error("Open lead not found.");
+    if (isMidMerge(prior.data)) throw new Error(MID_MERGE_REFUSAL);
     const nowIso = new Date().toISOString();
 
     // DELETE_QUOTE removes ONE quote from the lead's history. Like CONVERT it
@@ -949,6 +975,7 @@ export async function assignLeadOwner(
     const client = await dataClient();
     const prior = await client.models.Customer.get({ id: args.customerId });
     if (!prior.data || prior.data.status !== "LEAD") throw new Error("Open lead not found.");
+    if (isMidMerge(prior.data)) throw new Error(MID_MERGE_REFUSAL);
     await appendLeadActivity({ customerId: args.customerId, channel: "LIFECYCLE", outcome: "NOTE", note: `Assigned to ${actor.email}.`, actor, mutationId });
     const alreadyApplied = prior.data.leadMutationId === mutationId;
     const updated = alreadyApplied
@@ -1012,6 +1039,9 @@ export async function reassignLeadsForSub(input: { sub: string; actorEmail?: str
     async (leads) => {
       for (const lead of leads) {
         if (lead.leadOwnerSub !== input.sub) continue;
+        // An in-flight merge owns this row; counted failed so the offboard
+        // run is re-driven after the merge settles.
+        if (isMidMerge(lead)) { failed++; continue; }
         const mutationId = `offboard:${input.sub}:${lead.id}`;
         const claim = await acquireLeadLifecycleClaim(lead.id, mutationId);
         if (!claim.won) { failed++; continue; }

@@ -8,6 +8,7 @@ import {
   casGuardedDelete,
   casGuardedUpdate,
 } from "./atomicLock";
+import { isMidMerge, mergeCounterpartCustomerId } from "./customerMerge";
 import { emailShell, sendEmail } from "./email";
 import { openOwnedWork, resolveOwnedWork } from "./ownedWork";
 import { listAll } from "./pagination";
@@ -452,6 +453,8 @@ export async function cancelVisit(
 
   const reason = args.reason?.trim();
   if (!reason) throw new Error("A reason is required to cancel a visit.");
+
+  await refuseFreshCommandMidMerge(job.id, job.customerId);
 
   // R1: take the single-winner durable command BEFORE any money/schedule change.
   let nonce: string = randomUUID();
@@ -1089,6 +1092,49 @@ async function priorAcceptedVisitNotice(
 // Visit-change command: reclaim / resume / stored-outcome replay
 // ---------------------------------------------------------------------------
 
+/** The bidirectional merge exclusion at the visit-change ENTRY points
+ *  (customerMerge.isMidMerge): a FRESH command must not start while the job's
+ *  customer is mid-merge, and never on a merge tombstone. An EXISTING command
+ *  keeps its right to resume/reclaim — the merge refuses to start while one
+ *  is open. FAILS CLOSED: an unreadable row refuses the change. */
+async function refuseFreshCommandMidMerge(
+  jobId: string,
+  customerId: string | null | undefined
+): Promise<void> {
+  const client = await dataClient();
+  type MergeGateRow = {
+    status?: string | null;
+    mergedIntoId?: string | null;
+    mergeCounterpartId?: string | null;
+  };
+  let priorCommand: unknown;
+  let customer: MergeGateRow | null = null;
+  try {
+    priorCommand = (await client.models.VisitChangeClaim.get({ id: jobId }))
+      .data;
+    if (!priorCommand && customerId) {
+      customer = (await client.models.Customer.get({ id: customerId }))
+        .data as MergeGateRow | null;
+    }
+  } catch (err) {
+    console.error("visitChange: merge-state check failed", err);
+    throw new Error(
+      "Could not verify merge state for this visit's customer — nothing was changed. Try again."
+    );
+  }
+  if (priorCommand) return;
+  if (customer?.status === "MERGED") {
+    throw new Error(
+      `This record was merged into ${customer.mergedIntoId ?? "another record"}; act on that record instead.`
+    );
+  }
+  if (customer && isMidMerge(customer)) {
+    throw new Error(
+      `Customer ${customerId} is mid-merge with ${mergeCounterpartCustomerId(customer.mergeCounterpartId)} — finish or resume that merge before changing this visit.`
+    );
+  }
+}
+
 /** Steal a stuck visit-change command so this caller can resume it. A command
  *  whose next-attempt time hasn't arrived still belongs to a live/paced attempt;
  *  an old or overdue one is fair game. Returns whether we now hold it. */
@@ -1438,6 +1484,8 @@ export async function rescheduleVisit(args: {
   // R5: reschedule now requires a controlled reason, the same as cancel.
   const reason = args.reason?.trim();
   if (!reason) throw new Error("A reason is required to reschedule a visit.");
+
+  await refuseFreshCommandMidMerge(job.id, job.customerId);
 
   // R1: single-winner command so concurrent reschedules converge on one result.
   let rescheduleNonce: string = randomUUID();

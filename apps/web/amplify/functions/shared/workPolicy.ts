@@ -49,6 +49,7 @@ export type WorkKind =
   | "PREP_MISSING"
   | "DISPATCH_NOT_READY"
   | "ADDRESS_UNROUTABLE"
+  | "MERGE_RECOVERY"
   | "OBLIGATION_RECOVERY"
   | "PRICING_RESEARCH_EXHAUSTED"
   | "PRICING_CHANGE_REVIEW"
@@ -292,6 +293,22 @@ export const WORK_POLICY: Record<WorkKind, WorkPolicy> = {
       { code: "INTENT_CANCELED", label: "Canceled the intent in Stripe" },
       { code: "REFUNDED", label: "Refunded the customer" },
       { code: "RECONCILED", label: "Reconciled the booking to the intent" },
+      OTHER,
+    ],
+  },
+  MERGE_RECOVERY: {
+    // A customer merge parked mid-command after exhausting its automatic
+    // resumes. Both records are frozen against other lifecycle changes while
+    // it stands, so the customer may be un-deactivatable, un-cancelable, and
+    // (mid-portal-stage) missing records in their portal until it finishes.
+    label: "Customer merge needs a resume",
+    severity: "HIGH",
+    customerImpact:
+      "A duplicate-customer merge stopped partway. Until it is resumed, the two records are frozen against other changes and the customer may see incomplete information in their portal.",
+    ownerTeam: "OPS",
+    verified: [],
+    manualReasons: [
+      { code: "RESUMED", label: "Resumed the merge to completion" },
       OTHER,
     ],
   },

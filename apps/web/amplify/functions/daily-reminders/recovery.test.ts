@@ -35,13 +35,6 @@ const fakeDataClient = {
         return { data: plans.get(patch.id) };
       },
     },
-    // Light inventory low-stock digest: no tracked products in these tests.
-    Product: {
-      list: async () => ({ data: [], nextToken: null }),
-    },
-    ProductStockEntry: {
-      listProductStockEntryByProductId: async () => ({ data: [], nextToken: null }),
-    },
     Job: {
       listJobByScheduledDate: async () => ({ data: [], nextToken: null }),
       listJobByServicePlanId: async () => ({ data: [], nextToken: null }),
@@ -234,21 +227,17 @@ describe("dunning retry cadence", () => {
   });
 });
 
-describe("AR aging digest", () => {
-  it("buckets outstanding money and totals it", async () => {
+describe("AR aging digest — retired (owner, 2026-08-15)", () => {
+  it("outstanding invoices no longer produce a daily office email — the Dashboard owns that fact", async () => {
     invoices.push(
-      { id: "a", customerId: "cA", amountCents: 10000, status: "OPEN", dueDate: dateStr(5) }, // current
-      { id: "b", customerId: "cB", amountCents: 20000, status: "OPEN", dueDate: dateStr(-15) }, // 1-30
-      { id: "c", customerId: "cC", amountCents: 30000, status: "FAILED", dueDate: dateStr(-95), nextDunningAt: iso(5) } // 90+
+      { id: "a", customerId: "cA", amountCents: 10000, status: "OPEN", dueDate: dateStr(5) },
+      { id: "b", customerId: "cB", amountCents: 20000, status: "OPEN", dueDate: dateStr(-15) },
+      { id: "c", customerId: "cC", amountCents: 30000, status: "FAILED", dueDate: dateStr(-95), nextDunningAt: iso(5) }
     );
 
     await run();
 
-    const [digest] = office("AR aging");
-    expect(digest).toBeTruthy();
-    expect(digest.subject).toContain("$600.00"); // 100 + 200 + 300
-    expect(digest.bodyHtml).toContain("Current");
-    expect(digest.bodyHtml).toContain("90+ days");
+    expect(office("AR aging")).toHaveLength(0);
   });
 });
 

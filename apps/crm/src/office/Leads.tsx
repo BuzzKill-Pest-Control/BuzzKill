@@ -7,7 +7,7 @@ import {
   opResult,
   type Customer,
 } from "../lib/api";
-import { useAsync } from "../lib/useAsync";
+import { useAsync, useKeyedAction } from "../lib/useAsync";
 import { fmtDateTime } from "../lib/format";
 import { useRoles } from "../lib/auth";
 import {
@@ -74,6 +74,9 @@ export default function Leads() {
     candidates: DupeCandidate[];
     values: Parameters<typeof createLead>[0];
   } | null>(null);
+  // The Merge… arm, keyed by candidate so one merge start in flight cannot
+  // swallow a press on another candidate's button.
+  const mergeStart = useKeyedAction("Could not start the merge");
 
   // The inbox is not a sales pipeline. It contains only inquiries that still
   // need a human outcome, ordered by business risk: overdue first, then due.
@@ -292,9 +295,11 @@ export default function Leads() {
           <div className="form-grid">
             <p className="muted small">
               A lead matching <strong>{dupe.values.displayName}</strong> may
-              already exist. Open the existing record, or create a separate one
-              if they are genuinely different people.
+              already exist. Open the existing record, create a separate one if
+              they are genuinely different people, or merge this inquiry into
+              the match it duplicates.
             </p>
+            <ErrorNote error={mergeStart.error} />
             {dupe.candidates.map((c) => (
               <ListRow
                 key={c.id}
@@ -302,7 +307,44 @@ export default function Leads() {
                 subtitle={[c.email, c.phone, c.serviceCity]
                   .filter(Boolean)
                   .join(" · ")}
-                meta={<Badge tone="info">matched {c.matchedOn}</Badge>}
+                meta={
+                  <span className="inline-actions">
+                    <Badge tone="info">matched {c.matchedOn}</Badge>
+                    {roles.owner ? (
+                      <Button
+                        small
+                        variant="subtle"
+                        loading={mergeStart.busyKey === c.id}
+                        onClick={(e) => {
+                          // The row's own click navigates without the merge
+                          // hint — this press must not bubble into it.
+                          e.stopPropagation();
+                          const values = dupe.values;
+                          void mergeStart.run(c.id, async () => {
+                            // Same person: the inquiry is still recorded as a
+                            // lead (force), so nothing typed on the form is
+                            // lost — then the existing record's merge sheet
+                            // opens with the fresh lead as the record to
+                            // absorb, gated on the full server preview.
+                            const res = opResult<{
+                              decision: string;
+                              id?: string;
+                            }>(await createLead({ ...values, force: true }));
+                            if (res?.decision !== "CREATED" || !res.id) {
+                              throw new Error("The lead could not be created");
+                            }
+                            setDupe(null);
+                            navigate(`/customers/${c.id}`, {
+                              state: { mergeLoserId: res.id },
+                            });
+                          });
+                        }}
+                      >
+                        Merge…
+                      </Button>
+                    ) : null}
+                  </span>
+                }
                 onClick={() => {
                   setDupe(null);
                   navigate(`/customers/${c.id}`);

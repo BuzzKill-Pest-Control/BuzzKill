@@ -10,7 +10,6 @@ import {
   sendEmail,
 } from "../shared/email";
 import { licenseFactsFor } from "../shared/licenses";
-import { isLowStock, onHandFromEntries } from "../shared/inventory";
 import { ensureObligation, markObligation } from "../shared/obligations";
 import { isWeekday, reconcileCapacityDay } from "../shared/capacity";
 import { isServiceMonth, monthKeyOf } from "../shared/season";
@@ -23,10 +22,6 @@ import {
   sendPaymentFailedNotice,
 } from "../shared/receipts";
 import {
-  AGING_BUCKET_LABEL,
-  AGING_BUCKET_ORDER,
-  type AgingBucket,
-  agingBucket,
   daysPastDue,
   MAX_DUNNING_ATTEMPTS,
   nextDunningAtIso,
@@ -39,6 +34,7 @@ import {
   resolveOwnedWork,
   workItemId,
 } from "../shared/ownedWork";
+import { cleanupDualStamps, listStuckMerges } from "../shared/customerMerge";
 import {
   danglingChildRecords,
   reconcileBookings,
@@ -70,7 +66,7 @@ import {
   type StateInvoiceRow,
   type StateJobRow,
 } from "../shared/leadershipRecon";
-import { formatMoney, formatMonthly, formatYearly } from "../shared/money";
+import { formatMoney } from "../shared/money";
 
 type OwedInvoice = {
   id: string;
@@ -143,6 +139,12 @@ export const handler = async () => {
   // Do this first: an unrelated reminder failure must not stop an already
   // overdue obligation from reaching its escalation path.
   const overdueWork = await run("escalateOverdueOwnedWork", escalateOverdueOwnedWork);
+  // Owner trim (2026-08-15): the recurring info digests that used to stack up
+  // here every morning — AR aging, low stock, serviced-without-billing,
+  // completed-never-charged, plan-with-no-next-visit — are gone; the Dashboard
+  // owns those facts. What still demands a human TODAY contributes a section
+  // to ONE consolidated morning email instead of its own send.
+  const morningSections: MorningSection[] = [];
   // T-1 and T-7 reminders — the cron runs once a day, so each fires once.
   // Only T-1 gets the staffing gate: a week out, most visits legitimately
   // aren't routed yet, but by the day before every dated job must be on an
@@ -151,23 +153,24 @@ export const handler = async () => {
     [1, "tomorrow"],
     [7, "in one week"],
   ] as const) {
+    // The section is collected via callback the moment the gaps are found —
+    // a crash later in the customer-reminder loop fails the subtask but
+    // cannot lose tomorrow's "nobody is coming" alert.
     const r = await run(`remind:${phrasing}`, () =>
-      remind(easternPlusDays(daysOut), phrasing, daysOut === 1)
+      remind(easternPlusDays(daysOut), phrasing, daysOut === 1, (s) =>
+        morningSections.push(s)
+      )
     );
     if (r) totals.push(r);
   }
-  const notBilling = await run("reportPlansNotBilling", reportPlansNotBilling);
-  const uncharged = await run("reportUnchargedOneTimeJobs", reportUnchargedOneTimeJobs);
-  // Light inventory: nudge the office to reorder any tracked product at or
-  // below its reorder point. Informational digest (not owned work), repeats
-  // daily until a restock lifts it back above the line.
-  const lowStock = await run("reportLowStock", reportLowStock);
-  const noNextVisit = await run("reportPlansWithoutNextVisit", reportPlansWithoutNextVisit);
   // Money-out recovery lifecycle.
   const dunning = await run("runDunningRetries", runDunningRetries);
   const invoiceReminders = await run("remindOpenInvoices", remindOpenInvoices);
-  const aging = await run("reportArAging", reportArAging);
   const disputes = await run("reportDisputeDeadlines", reportDisputeDeadlines);
+  if (disputes?.section) morningSections.push(disputes.section);
+  const morningDigest = await run("sendMorningOpsDigest", () =>
+    sendMorningOpsDigest(morningSections)
+  );
   // GL-05: prove, against the real tables and Stripe, that every succeeded
   // booking payment has exactly one complete booking and vice versa.
   const reconciliation = await run("reconcilePaidBookings", reconcilePaidBookings);
@@ -228,20 +231,19 @@ export const handler = async () => {
   // re-driven to a VERIFIED completion through crm-admin, and one that
   // keeps failing becomes visible owned work.
   const groupChanges = await run("reconcileGroupChanges", reconcileGroupChanges);
+  // Customer merges: re-drive stuck ones through crm-admin, strip aged
+  // dual-stamps from completed ones (design 2026-08-17).
+  const merges = await run("reconcileMerges", reconcileMerges);
   // GL-03: QUEUED means retried — throttled sends are re-sent from their
   // stored bodies; stuck/expired/unresendable ones become owned work.
   const emailRetries = await run("retryQueuedEmails", retryQueuedEmails);
   console.log("Reminder totals:", JSON.stringify(totals));
   const results = [
     ...totals,
-    notBilling,
-    uncharged,
-    lowStock,
-    noNextVisit,
     dunning,
     invoiceReminders,
-    aging,
-    disputes,
+    disputes ? { disputesDueSoon: disputes.disputesDueSoon } : null,
+    morningDigest,
     overdueWork,
     reconciliation,
     moneyRecon,
@@ -259,6 +261,7 @@ export const handler = async () => {
     lifecycle,
     requestOwnership,
     groupChanges,
+    merges,
     emailRetries,
   ];
   if (failures.length) {
@@ -852,341 +855,6 @@ async function reportStaleLeads() {
   return { staleLeadsScanned: scanned, staleLeadsOpened: opened };
 }
 
-/**
- * Serviced-but-not-billing digest.
- *
- * Job completion already emails the office the moment a plan fails to start
- * billing, and the Dashboard lists them. Both can be missed: the email gets
- * triaged away, and the Dashboard only exists for whoever opens it. This is the
- * backstop that keeps announcing a plan being serviced for free until somebody
- * actually fixes it — each row is roughly $1,188/yr.
- */
-/**
- * Low-stock reorder digest. Sums the append-only ProductStockEntry ledger per
- * tracked product and emails the office the ones at or below their reorder
- * point. Repeats daily until restocked — the office adds a PURCHASE entry on
- * More → Inventory, which lifts on-hand back above the line and clears it.
- */
-async function reportLowStock() {
-  const client = await dataClient();
-  const products = await listAll(
-    (nextToken) => client.models.Product.list({ limit: 1000, nextToken }),
-    { pageErrors: "ignore" }
-  );
-  // Only an active, tracked product with a reorder point can be "low".
-  const tracked = products.filter(
-    (p) => p.active && p.trackInventory && typeof p.reorderPoint === "number"
-  );
-  if (tracked.length === 0) return { lowStock: 0, notified: false };
-
-  const fmtQty = (n: number) =>
-    (Math.round(n * 100) / 100).toString();
-  const low: {
-    name: string;
-    onHand: number;
-    reorderPoint: number;
-    unit: string;
-  }[] = [];
-  for (const p of tracked) {
-    const entries: { deltaBaseUnits?: number | null }[] = await listAll(
-      (nextToken) =>
-        client.models.ProductStockEntry.listProductStockEntryByProductId(
-          { productId: p.id },
-          { nextToken, limit: 500 }
-        ),
-      { pageErrors: "ignore" }
-    );
-    const onHand = onHandFromEntries(entries);
-    if (isLowStock(p, onHand)) {
-      low.push({
-        name: p.name,
-        onHand,
-        reorderPoint: p.reorderPoint as number,
-        unit: p.stockUnit ?? "",
-      });
-    }
-  }
-  if (low.length === 0) {
-    console.log("Low-stock digest: none");
-    return { lowStock: 0, notified: false };
-  }
-
-  const rows = low
-    .sort((a, b) => a.onHand - b.onHand)
-    .map(
-      (l) =>
-        `<li><strong>${l.name}</strong> — ${fmtQty(l.onHand)} ${l.unit} on hand (reorder at ${fmtQty(l.reorderPoint)} ${l.unit})</li>`
-    );
-  const notified = await notifyOffice({
-    subject: `${low.length} product${low.length === 1 ? " is" : "s are"} low on stock`,
-    heading: "Low on stock — time to reorder",
-    template: "ops-low-stock-digest",
-    bodyHtml: `<p>These products are at or below their reorder point:</p>
-       <ul>${rows.join("")}</ul>
-       <p>Once the order arrives, record it on <strong>More &rsaquo; Inventory</strong> to clear this.</p>`,
-  });
-  console.log(`Low-stock digest: ${low.length} low, notified=${notified}`);
-  return { lowStock: low.length, notified };
-}
-
-async function reportPlansNotBilling() {
-  const client = await dataClient();
-
-  const plans: {
-    id: string;
-    customerId: string;
-    planName: string;
-    priceCents: number;
-    status: string | null;
-    stripeSubscriptionId?: string | null;
-  }[] = await listAll(
-    (nextToken) =>
-      client.models.ServicePlan.list({
-        filter: { status: { eq: "ACTIVE" } },
-        nextToken,
-        limit: 200,
-      }),
-    { pageErrors: "ignore" }
-  );
-
-  const unbilled = plans.filter((p) => !p.stripeSubscriptionId);
-  if (unbilled.length === 0) {
-    console.log("Not-billing digest: none");
-    return { notBilling: 0, notified: false };
-  }
-
-  // Only plans whose first visit has actually happened are owed money. One that
-  // hasn't been serviced yet is *supposed* to be unbilled; listing it would
-  // train the office to ignore this email.
-  const serviced: typeof unbilled = [];
-  for (const plan of unbilled) {
-    let hasCompleted = false;
-    await forEachPage(
-      (nextToken) =>
-        client.models.Job.listJobByServicePlanId(
-          { servicePlanId: plan.id },
-          { limit: 50, nextToken }
-        ),
-      (jobs) => {
-        if (jobs.some((j) => j.status === "COMPLETED")) {
-          hasCompleted = true;
-          return false;
-        }
-      },
-      { pageErrors: "ignore" }
-    );
-    if (hasCompleted) serviced.push(plan);
-  }
-  if (serviced.length === 0) {
-    console.log(
-      `Not-billing digest: ${unbilled.length} unbilled plans, none serviced yet`
-    );
-    return { notBilling: 0, notified: false };
-  }
-
-  const rows = await Promise.all(
-    serviced.map(async (p) => {
-      const { data: customer } = await client.models.Customer.get({
-        id: p.customerId,
-      });
-      return `<li><strong>${customer?.displayName ?? p.customerId}</strong> — ${p.planName}, ${formatMonthly(p.priceCents)}</li>`;
-    })
-  );
-  const annual = serviced.reduce((s, p) => s + p.priceCents * 12, 0);
-
-  const notified = await notifyOffice({
-    subject: `${serviced.length} plan${serviced.length === 1 ? " is" : "s are"} being serviced without billing`,
-    heading: "Serviced but not billing",
-    template: "ops-not-billing-digest",
-    bodyHtml: `<p>These plans have had their first visit but no subscription is running, so they are being serviced for free. Together that is about <strong>${formatYearly(annual)}</strong>.</p>
-       <ul>${rows.join("")}</ul>
-       <p>Usually this means no payment method on file. Collect one on the customer record, then use <strong>Start billing</strong> on the plan.</p>`,
-  });
-
-  console.log(
-    `Not-billing digest: ${serviced.length} serviced plans not billing, notified=${notified}`
-  );
-  return { notBilling: serviced.length, notified };
-}
-
-/**
- * Completed-but-never-charged digest — the one-time side of the money.
- *
- * Completion auto-starts billing for recurring plans; a one-time job's money
- * moves only when someone presses Charge on the customer record, and nothing
- * used to feed that button. The Dashboard lists these too, but the Dashboard
- * only exists for whoever opens it — this repeats daily until every job is
- * charged, invoiced, or paid.
- */
-async function reportUnchargedOneTimeJobs() {
-  const client = await dataClient();
-
-  const jobs: {
-    id: string;
-    customerId: string;
-    serviceType: string;
-    priceCents?: number | null;
-    paidAt?: string | null;
-    completedAt?: string | null;
-    scheduledDate?: string | null;
-  }[] = await listAll(
-    (nextToken) =>
-      client.models.Job.listJobByStatusAndScheduledDate(
-        { status: "COMPLETED" },
-        { filter: { type: { eq: "ONE_TIME" } }, nextToken, limit: 200 }
-      ),
-    { pageErrors: "ignore" }
-  );
-
-  // paidAt means paid up front at online booking. Zero-priced jobs are left
-  // out: there is nothing for the Charge button to take, and a row nobody can
-  // clear trains the office to ignore the list.
-  const candidates = jobs.filter((j) => !j.paidAt && (j.priceCents ?? 0) > 0);
-  if (candidates.length === 0) {
-    console.log("Uncharged-jobs digest: none");
-    return { unchargedJobs: 0, notified: false };
-  }
-
-  // One pass over the ledger. FAILED may be retried and VOID was withdrawn as
-  // wrong — neither answers the job's money question. OPEN, PAID and REFUNDED
-  // all do. chargeOneTimeJob enforces the same rule server-side.
-  const covered = new Set<string>();
-  await forEachPage(
-    (nextToken) =>
-      client.models.Invoice.list({
-        nextToken,
-        limit: 200,
-      }),
-    (invs) => {
-      for (const inv of invs) {
-        if (inv.jobId && inv.status !== "FAILED" && inv.status !== "VOID") {
-          covered.add(inv.jobId);
-        }
-      }
-    },
-    { pageErrors: "ignore" }
-  );
-
-  const uncharged = candidates.filter((j) => !covered.has(j.id));
-  if (uncharged.length === 0) {
-    console.log(
-      `Uncharged-jobs digest: ${candidates.length} completed one-time jobs, all covered`
-    );
-    return { unchargedJobs: 0, notified: false };
-  }
-
-  const rows = await Promise.all(
-    uncharged.map(async (j) => {
-      const { data: customer } = await client.models.Customer.get({
-        id: j.customerId,
-      });
-      const when = (j.completedAt ?? j.scheduledDate ?? "").slice(0, 10);
-      return `<li><strong>${customer?.displayName ?? j.customerId}</strong> — ${j.serviceType}${when ? `, completed ${when}` : ""}: ${formatMoney(j.priceCents ?? 0)}</li>`;
-    })
-  );
-  const total = uncharged.reduce((s, j) => s + (j.priceCents ?? 0), 0);
-
-  const notified = await notifyOffice({
-    subject: `${uncharged.length} completed job${uncharged.length === 1 ? " has" : "s have"} never been charged`,
-    heading: "Completed but never charged",
-    template: "ops-uncharged-jobs-digest",
-    bodyHtml: `<p>The work is done and no charge or invoice exists for ${uncharged.length === 1 ? "this job" : "these jobs"} — together <strong>${formatMoney(total)}</strong> nobody is collecting.</p>
-       <ul>${rows.join("")}</ul>
-       <p>Open each customer and use <strong>Charge</strong> on the job, or record an offline payment if the money arrived another way. They also appear under <strong>Completed but never charged</strong> on the Dashboard until cleared.</p>`,
-  });
-
-  console.log(
-    `Uncharged-jobs digest: ${uncharged.length} jobs uncharged, notified=${notified}`
-  );
-  return { unchargedJobs: uncharged.length, notified };
-}
-
-/**
- * Billing-with-no-visit digest — the service direction of "not billing".
- *
- * The recurring engine queues the next visit when one completes, but a
- * NO_ACCESS exit deliberately queues nothing, a canceled visit leaves nothing
- * behind, and a plan created without its first job starts life here. A
- * customer paying monthly with no visit on the calendar is the highest-harm
- * state in the system, and until this digest existed it appeared nowhere.
- */
-async function reportPlansWithoutNextVisit() {
-  const client = await dataClient();
-  const today = todayEastern();
-
-  const plans: {
-    id: string;
-    customerId: string;
-    planName: string;
-    priceCents: number;
-    status: string | null;
-    stripeSubscriptionId?: string | null;
-  }[] = await listAll(
-    (nextToken) =>
-      client.models.ServicePlan.list({
-        filter: { status: { eq: "ACTIVE" } },
-        nextToken,
-        limit: 200,
-      }),
-    { pageErrors: "ignore" }
-  );
-
-  // A plan has a next visit if anything is queued (UNSCHEDULED), on the
-  // calendar today or later (SCHEDULED), or being worked right now
-  // (IN_PROGRESS). A visit dated in the past that never happened does not
-  // count — nobody is coming.
-  const missing: typeof plans = [];
-  for (const plan of plans) {
-    let hasVisit = false;
-    await forEachPage(
-      (nextToken) =>
-        client.models.Job.listJobByServicePlanId(
-          { servicePlanId: plan.id },
-          { nextToken, limit: 200 }
-        ),
-      (jobsPage) => {
-        hasVisit = jobsPage.some(
-          (j) =>
-            j.status === "UNSCHEDULED" ||
-            j.status === "IN_PROGRESS" ||
-            (j.status === "SCHEDULED" && (j.scheduledDate ?? "") >= today)
-        );
-        if (hasVisit) return false;
-      },
-      { pageErrors: "ignore" }
-    );
-    if (!hasVisit) missing.push(plan);
-  }
-
-  if (missing.length === 0) {
-    console.log("Plan-no-visit digest: none");
-    return { plansWithoutVisit: 0, notified: false };
-  }
-
-  const rows = await Promise.all(
-    missing.map(async (p) => {
-      const { data: customer } = await client.models.Customer.get({
-        id: p.customerId,
-      });
-      return `<li><strong>${customer?.displayName ?? p.customerId}</strong> — ${p.planName}, ${formatMonthly(p.priceCents)}${p.stripeSubscriptionId ? " — <strong>billing is running</strong>" : ""}</li>`;
-    })
-  );
-
-  const notified = await notifyOffice({
-    subject: `${missing.length} active plan${missing.length === 1 ? " has" : "s have"} no next visit`,
-    heading: "Billing with no visit on the calendar",
-    template: "ops-plan-no-visit-digest",
-    bodyHtml: `<p>${missing.length === 1 ? "This plan is" : "These plans are"} active — any with a subscription are still charging the customer — and no visit is scheduled or queued for them. A paying customer nobody is coming back to is a cancellation or a chargeback in the making; a no-access exit or a canceled visit leaves a plan in exactly this state.</p>
-       <ul>${rows.join("")}</ul>
-       <p><strong>Book the next visit</strong> from each customer's record — or pause or cancel the plan if service really should stop. They also appear under <strong>Active plans with no next visit</strong> on the Dashboard until cleared.</p>`,
-  });
-
-  console.log(
-    `Plan-no-visit digest: ${missing.length} plans without a next visit, notified=${notified}`
-  );
-  return { plansWithoutVisit: missing.length, notified };
-}
-
 type DatedJob = {
   customerId: string;
   serviceType: string;
@@ -1287,10 +955,43 @@ async function splitByStaffing(date: string, jobs: DatedJob[]) {
  * reminded — a reminder for a visit nobody is staffed to make books the
  * no-show in writing — so the office has today to staff the visit or move it.
  */
+/** One block of the consolidated morning office email. */
+type MorningSection = {
+  /** Short phrase for the subject line, e.g. "3 unstaffed visits tomorrow". */
+  summary: string;
+  heading: string;
+  html: string;
+};
+
+/**
+ * Owner rule (2026-08-15): the morning cron sends the office ONE email, not a
+ * stack of parallel digests. Each pass that finds something a human must act
+ * on TODAY contributes a section; a morning with nothing to say sends nothing.
+ */
+async function sendMorningOpsDigest(sections: MorningSection[]) {
+  if (sections.length === 0) {
+    console.log("Morning ops digest: nothing to report — no email sent");
+    return { morningDigestSections: 0, notified: false };
+  }
+  const bodyHtml = sections
+    .map(
+      (s) =>
+        `<h2 style="font-size:16px;margin:22px 0 8px;">${s.heading}</h2>${s.html}`
+    )
+    .join("");
+  const notified = await notifyOffice({
+    subject: `Morning ops: ${sections.map((s) => s.summary).join(" · ")}`,
+    heading: "What needs a human today",
+    template: "ops-morning-digest",
+    bodyHtml,
+  });
+  return { morningDigestSections: sections.length, notified };
+}
+
 async function reportUnstaffedJobs(
   date: string,
   gaps: { job: DatedJob; why: string }[]
-) {
+): Promise<MorningSection> {
   const client = await dataClient();
   const names = new Map<string, string>();
   const rows: string[] = [];
@@ -1302,7 +1003,7 @@ async function reportUnstaffedJobs(
       names.set(job.customerId, customer?.displayName ?? job.customerId);
     }
     rows.push(
-      `<li><strong>${names.get(job.customerId)}</strong> — ${job.serviceType}: ${why}</li>`
+      `<li><strong>${names.get(job.customerId)}</strong> — ${job.serviceType}: ${why} <span style="color:#888;font-size:12px;">(job ${job.id})</span></li>`
     );
     await openOwnedWork({
       kind: "UNSTAFFED_VISIT",
@@ -1318,17 +1019,21 @@ async function reportUnstaffedJobs(
     });
   }
 
-  return notifyOffice({
-    subject: `${gaps.length} visit${gaps.length === 1 ? "" : "s"} tomorrow ${gaps.length === 1 ? "has" : "have"} nobody coming (${prettyDate(date)})`,
+  return {
+    summary: `${gaps.length} unstaffed visit${gaps.length === 1 ? "" : "s"} tomorrow`,
     heading: "Tomorrow has visits nobody is staffed to make",
-    template: "ops-unstaffed-visits",
-    bodyHtml: `<p>These visits are dated <strong>${prettyDate(date)}</strong> but are not on an active technician's route, so as things stand nobody will show up. <strong>No reminder was sent to these customers.</strong></p>
+    html: `<p>These visits are dated <strong>${prettyDate(date)}</strong> but are not on an active technician's route, so as things stand nobody will show up. <strong>No reminder was sent to these customers.</strong></p>
        <ul>${rows.join("")}</ul>
-       <p>Put each one on an active technician's route on the Schedule, or move it to a day that works and tell the customer.</p>`,
-  });
+       <p>Put each one on an active technician's route on the <strong>Schedule</strong>, or move it to a day that works and tell the customer.</p>`,
+  };
 }
 
-async function remind(date: string, phrasing: string, staffingGate: boolean) {
+async function remind(
+  date: string,
+  phrasing: string,
+  staffingGate: boolean,
+  onMorningSection?: (section: MorningSection) => void
+) {
   const client = await dataClient();
   const jobs: DatedJob[] = await listAll(
     (nextToken) =>
@@ -1360,7 +1065,9 @@ async function remind(date: string, phrasing: string, staffingGate: boolean) {
     ];
     remindable = staffed;
     unstaffedCount = gaps.length;
-    if (gaps.length > 0) await reportUnstaffedJobs(date, gaps);
+    if (gaps.length > 0) {
+      onMorningSection?.(await reportUnstaffedJobs(date, gaps));
+    }
   }
 
   // One email per customer even if they have multiple visits tomorrow.
@@ -1615,60 +1322,6 @@ export function reminderKind(
 }
 
 /**
- * AR-aging digest for the office (R52): every outstanding invoice — OPEN plus
- * FAILED (in dunning) — bucketed current / 1-30 / 31-60 / 61-90 / 90+ by how
- * overdue it is, with the dollar total in each bucket.
- */
-async function reportArAging() {
-  const now = new Date();
-  const outstanding = [
-    ...(await allInvoicesByStatus("OPEN")),
-    ...(await allInvoicesByStatus("FAILED")),
-    // GL-06: an in-flight bank debit is not receivable-late — it is money in
-    // transit, tracked by the processing-payments reconcile, not AR aging.
-  ].filter(
-    (inv) =>
-      !(inv as { pendingDebitIntentId?: string | null }).pendingDebitIntentId
-  );
-  if (outstanding.length === 0) {
-    console.log("AR aging: nothing outstanding");
-    return { arOutstanding: 0, notified: false };
-  }
-
-  const totals = new Map<AgingBucket, { cents: number; count: number }>();
-  for (const b of AGING_BUCKET_ORDER) totals.set(b, { cents: 0, count: 0 });
-  let grand = 0;
-  for (const inv of outstanding) {
-    const bucket = agingBucket(
-      daysPastDue({ dueDate: inv.dueDate, issuedAt: inv.issuedAt, now })
-    );
-    const t = totals.get(bucket)!;
-    t.cents += inv.amountCents;
-    t.count += 1;
-    grand += inv.amountCents;
-  }
-
-  const rows = AGING_BUCKET_ORDER.map((b) => {
-    const t = totals.get(b)!;
-    return `<tr><td style="padding:4px 12px 4px 0;">${AGING_BUCKET_LABEL[b]}</td><td style="padding:4px 0;text-align:right;">${formatMoney(t.cents)}</td><td style="padding:4px 0 4px 12px;text-align:right;color:#888;">${t.count}</td></tr>`;
-  }).join("");
-
-  const notified = await notifyOffice({
-    subject: `AR aging: ${formatMoney(grand)} outstanding across ${outstanding.length} invoice${outstanding.length === 1 ? "" : "s"}`,
-    heading: "Accounts receivable — aging",
-    template: "ops-ar-aging",
-    bodyHtml: `<p>Money owed to BuzzKill right now, by how overdue it is:</p>
-       <table style="border-collapse:collapse;font-size:14px;"><tbody>${rows}</tbody></table>
-       <p style="margin-top:12px;"><strong>Total outstanding: ${formatMoney(grand)}</strong></p>
-       <p style="color:#666;font-size:13px;">The oldest buckets are the ones to work first — the longer money sits, the less of it comes back.</p>`,
-  });
-  console.log(
-    `AR aging: ${outstanding.length} invoices, ${formatMoney(grand)} outstanding, notified=${notified}`
-  );
-  return { arOutstanding: outstanding.length, arTotalCents: grand, notified };
-}
-
-/**
  * Dispute-deadline alerts (R52/R02): any open dispute whose evidence deadline
  * is within DISPUTE_ALERT_LEAD_DAYS. Missing an evidence deadline loses the
  * dispute by default, so this is the last-chance nudge — with the owner named.
@@ -1699,7 +1352,7 @@ async function reportDisputeDeadlines() {
   });
   if (soon.length === 0) {
     console.log("Dispute deadlines: none near");
-    return { disputesDueSoon: 0, notified: false };
+    return { disputesDueSoon: 0 };
   }
 
   const rows = await Promise.all(
@@ -1716,21 +1369,24 @@ async function reportDisputeDeadlines() {
             timeZone: "UTC",
           })
         : "unknown";
-      return `<li><strong>${escapeHtmlLite(String(name))}</strong> — ${formatMoney(d.amountCents)}, evidence due <strong>${due}</strong>. Owner: ${d.ownerEmail ? escapeHtmlLite(d.ownerEmail) : "<strong>unassigned</strong>"}</li>`;
+      // The dispute id IS the context: it deep-links straight to the Stripe
+      // response form instead of making the reader search by customer name.
+      // Off-main runs on test keys, whose dp_ ids only resolve under /test/.
+      const disputeUrl = `https://dashboard.stripe.com/${process.env.PRODUCTION_EMAIL ? "" : "test/"}disputes/${encodeURIComponent(d.stripeDisputeId)}`;
+      return `<li><strong>${escapeHtmlLite(String(name))}</strong> — ${formatMoney(d.amountCents)}, evidence due <strong>${due}</strong>. Owner: ${d.ownerEmail ? escapeHtmlLite(d.ownerEmail) : "<strong>unassigned</strong>"} — <a href="${disputeUrl}">${escapeHtmlLite(d.stripeDisputeId)}</a></li>`;
     })
   );
 
-  const notified = await notifyOffice({
-    subject: `${soon.length} card dispute${soon.length === 1 ? "" : "s"} need${soon.length === 1 ? "s" : ""} evidence soon`,
-    heading: "Card disputes with a near deadline",
-    template: "ops-dispute-deadline",
-    bodyHtml: `<p>These open disputes have an evidence deadline within ${DISPUTE_ALERT_LEAD_DAYS} days. Miss it and the dispute is lost by default and the money is gone. Respond in the Stripe dashboard.</p>
+  console.log(`Dispute deadlines: ${soon.length} near`);
+  return {
+    disputesDueSoon: soon.length,
+    section: {
+      summary: `${soon.length} dispute${soon.length === 1 ? "" : "s"} need${soon.length === 1 ? "s" : ""} evidence`,
+      heading: "Card disputes with a near deadline",
+      html: `<p>These open disputes have an evidence deadline within ${DISPUTE_ALERT_LEAD_DAYS} days. Miss it and the dispute is lost by default and the money is gone. Respond in the Stripe dashboard.</p>
        <ul>${rows.join("")}</ul>`,
-  });
-  console.log(
-    `Dispute deadlines: ${soon.length} near, notified=${notified}`
-  );
-  return { disputesDueSoon: soon.length, notified };
+    },
+  };
 }
 
 /**
@@ -2394,6 +2050,80 @@ export async function reconcileGroupChanges() {
 }
 
 /**
+ * Customer merges cannot remain silently split (design 2026-08-17). Any
+ * in-flight merge whose lease has expired and whose auto-attempt budget
+ * remains is re-driven through crm-admin's resumeMerge (that handler owns
+ * the Cognito + Stripe credentials the stages need). Merges past the cap
+ * stay parked on the MERGE_RECOVERY item the engine already opened — the
+ * queue is the pager, not the inbox. The second pass strips the cus-loser
+ * dual-stamps from completed merges once pre-merge portal tokens have aged
+ * out, closing the read-grace window the merge deliberately left open.
+ */
+export async function reconcileMerges() {
+  const client = await dataClient();
+  // Capability guard (the reconcileGroupChanges pattern): test fakes wire
+  // only the models their scenarios read; absent wiring is a no-op sweep,
+  // while real scan failures still fail the subtask loudly.
+  const customerModel = client.models.Customer as unknown as {
+    list?: unknown;
+    listCustomerByStatusAndDisplayName?: unknown;
+  };
+  if (
+    typeof customerModel.list !== "function" ||
+    typeof customerModel.listCustomerByStatusAndDisplayName !== "function"
+  ) {
+    return { task: "reconcileMerges", resumed: 0, stampsCleaned: 0 };
+  }
+  let fnName = process.env.CRM_ADMIN_FUNCTION_NAME;
+  if (!fnName && process.env.CRM_ADMIN_FUNCTION_PARAM) {
+    try {
+      const { SSMClient, GetParameterCommand } = await import(
+        "@aws-sdk/client-ssm"
+      );
+      const out = await new SSMClient({}).send(
+        new GetParameterCommand({ Name: process.env.CRM_ADMIN_FUNCTION_PARAM })
+      );
+      fnName = out.Parameter?.Value ?? undefined;
+    } catch (err) {
+      console.error("reconcileMerges: function-name param unreadable", err);
+    }
+  }
+  let resumed = 0;
+  const stuck = await listStuckMerges();
+  if (stuck.length > 0 && !fnName) {
+    console.error(
+      "reconcileMerges: CRM_ADMIN_FUNCTION_NAME unset — cannot resume",
+      stuck.map((s) => s.loserId)
+    );
+  } else if (stuck.length > 0) {
+    const lambdaClient = new LambdaClient({});
+    for (const { loserId, state } of stuck) {
+      await lambdaClient.send(
+        new InvokeCommand({
+          FunctionName: fnName,
+          InvocationType: "Event",
+          Payload: Buffer.from(
+            JSON.stringify({
+              info: { fieldName: "resumeMerge" },
+              arguments: {
+                loserId,
+                survivorId: state.survivorId,
+                idempotencyKey: state.idempotencyKey,
+              },
+              identity: null,
+              source: "daily-reminders-resumer",
+            })
+          ),
+        })
+      );
+      resumed++;
+    }
+  }
+  const stampsCleaned = await cleanupDualStamps();
+  return { task: "reconcileMerges", resumed, stampsCleaned };
+}
+
+/**
  * GL-03 — every outbox row reaches a truthful terminal outcome:
  *  - QUEUED (provider throttle) rows are RE-SENT from their stored body,
  *    exactly once (guarded claim); still-throttled rows stay QUEUED for the
@@ -2611,6 +2341,38 @@ export async function reconcilePaidBookings() {
 
   // Dangling / missing child records on BOOKED bookings — the load-bearing
   // "nonblank ID is not proof" check.
+  //
+  // A customerId disagreement a completed merge explains is NOT a cross-link:
+  // the merge repointed the children while the booking checkpoint kept the
+  // pre-merge id (or vice versa mid-repoint). One tombstone map per run.
+  const mergedInto: Record<string, string> = {};
+  try {
+    const tombstoneModel = (
+      client.models as unknown as {
+        Customer: {
+          listCustomerByStatusAndDisplayName?: (
+            key: { status: string },
+            opts: { limit: number; nextToken?: string | null }
+          ) => Promise<{ data: unknown[]; nextToken?: string | null }>;
+        };
+      }
+    ).Customer;
+    if (typeof tombstoneModel.listCustomerByStatusAndDisplayName === "function") {
+      const tombstones = (await listAll(
+        (nextToken) =>
+          tombstoneModel.listCustomerByStatusAndDisplayName!(
+            { status: "MERGED" },
+            { nextToken, limit: 200 }
+          ),
+        { pageErrors: "ignore" }
+      )) as { id: string; mergedIntoId?: string | null }[];
+      for (const t of tombstones) {
+        if (t.mergedIntoId) mergedInto[t.id] = t.mergedIntoId;
+      }
+    }
+  } catch (err) {
+    console.error("reconcilePaidBookings: tombstone map unreadable", err);
+  }
   const healthyBooked: string[] = [];
   for (const b of bookings) {
     if (b.status !== "BOOKED") continue;
@@ -2623,7 +2385,8 @@ export async function reconcilePaidBookings() {
     // missing one — a cross-link. Relationships are validated, not existence.
     const crossLinked = mismatchedChildRelationships(
       b as Parameters<typeof mismatchedChildRelationships>[0],
-      rows
+      rows,
+      mergedInto
     );
     if (crossLinked.length) {
       addIssue(b.id, `BOOKED but cross-linked: ${crossLinked.join("; ")}`);

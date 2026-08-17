@@ -185,6 +185,20 @@ export async function claimDailyDigest(now: Date): Promise<boolean> {
 }
 
 /**
+ * Give a won digest claim back after a FAILED send, so a later run in the
+ * digest hour retries instead of the day's digest being silently lost.
+ * Guarded on our own stamp — a release can never clear another run's claim.
+ */
+export async function releaseDailyDigest(now: Date): Promise<void> {
+  await casGuardedUpdate(
+    PRICING_CONTROL_MODEL,
+    dayKeyFor(now),
+    { digestSentAt: null },
+    [{ kind: "fieldEquals", field: "digestSentAt", value: now.toISOString() }]
+  ).catch(() => undefined);
+}
+
+/**
  * Lease one coverage row for research/delivery. Refuses while any live
  * lease exists — a stale drain takeover cannot re-research a combo the
  * expired worker is still mid-flight on. UNSUPPORTED refuses the lease

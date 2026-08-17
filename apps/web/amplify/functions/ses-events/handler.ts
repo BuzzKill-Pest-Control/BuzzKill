@@ -1,4 +1,5 @@
 import type { SNSEvent } from "aws-lambda";
+import { resolveMergedCustomer } from "../shared/customerMerge";
 import { dataClient } from "../shared/dataClient";
 import { openOwnedWork } from "../shared/ownedWork";
 import { listAll } from "../shared/pagination";
@@ -82,6 +83,35 @@ async function markLogDelivery(
       deliveryStatus,
       ...(error ? { error } : {}),
     });
+  }
+  return meta;
+}
+
+/**
+ * The follow rule: an EmailLog's customerId is frozen at send time, so a
+ * post-merge event about a pre-merge send must resolve through the merge
+ * pointer before any work item or suppression case names the customer — a
+ * tombstone must never be what the office is sent to fix. Only the
+ * bounce/complaint paths pay for this read; delivery events fire on every
+ * send and must stay cheap.
+ */
+async function resolveLiveMeta(
+  meta: {
+    customerId?: string | null;
+    template?: string | null;
+    relatedId?: string | null;
+  } | null
+): Promise<typeof meta> {
+  if (!meta?.customerId) return meta;
+  try {
+    const live = await resolveMergedCustomer(String(meta.customerId));
+    if (live && live.id !== meta.customerId && live.status !== "MERGED") {
+      return { ...meta, customerId: live.id };
+    }
+  } catch (err) {
+    // Best-effort: an unreadable pointer keeps the frozen id — opening work
+    // against the stored id still beats dropping the event.
+    console.error("ses-events: merge resolution failed", meta.customerId, err);
   }
   return meta;
 }
@@ -319,7 +349,9 @@ export async function handleSesNotification(
     // mailbox, a momentary defer) are retryable and must not suppress.
     if ((bounce?.bounceType ?? "").toLowerCase() !== "permanent") return;
     const detail = `Bounce: ${bounce?.bounceType ?? ""}/${bounce?.bounceSubType ?? ""}`.trim();
-    const meta = await markLogDelivery(messageId, "BOUNCED", detail);
+    const meta = await resolveLiveMeta(
+      await markLogDelivery(messageId, "BOUNCED", detail)
+    );
     await correctOriginRecord(meta, "BOUNCED", detail);
     for (const r of bounce?.bouncedRecipients ?? []) {
       if (!r.emailAddress) continue;
@@ -336,7 +368,9 @@ export async function handleSesNotification(
 
   if (type === "complaint") {
     const detail = `Complaint: ${message.complaint?.complaintFeedbackType ?? "spam"}`;
-    const meta = await markLogDelivery(messageId, "COMPLAINED", detail);
+    const meta = await resolveLiveMeta(
+      await markLogDelivery(messageId, "COMPLAINED", detail)
+    );
     await correctOriginRecord(meta, "COMPLAINED", detail);
     for (const r of message.complaint?.complainedRecipients ?? []) {
       if (!r.emailAddress) continue;

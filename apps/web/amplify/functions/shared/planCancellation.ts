@@ -6,6 +6,7 @@ import {
   casFencedUpdate,
   casGuardedUpdate,
 } from "./atomicLock";
+import { isMidMerge, mergeCounterpartCustomerId } from "./customerMerge";
 import { emailShell, notifyOffice, sendEmail } from "./email";
 import { openOwnedWork, resolveOwnedWork } from "./ownedWork";
 import {
@@ -877,6 +878,50 @@ async function writeCancellationCommand(
     .catch(() => undefined);
 }
 
+/** The bidirectional merge exclusion at the cancellation ENTRY point
+ *  (customerMerge.isMidMerge): a FRESH command must not start while the
+ *  plan's customer is mid-merge, and never on a merge tombstone. An EXISTING
+ *  command keeps its right to resume/reclaim — the merge refuses to start
+ *  while one is open. FAILS CLOSED: an unreadable row refuses the cancel. */
+async function refuseFreshCancellationMidMerge(
+  servicePlanId: string,
+  customerId: string | null | undefined
+): Promise<void> {
+  const client = await dataClient();
+  type MergeGateRow = {
+    status?: string | null;
+    mergedIntoId?: string | null;
+    mergeCounterpartId?: string | null;
+  };
+  let priorCommand: unknown;
+  let customer: MergeGateRow | null = null;
+  try {
+    priorCommand = (
+      await client.models.PlanCancellationClaim.get({ id: servicePlanId })
+    ).data;
+    if (!priorCommand && customerId) {
+      customer = (await client.models.Customer.get({ id: customerId }))
+        .data as MergeGateRow | null;
+    }
+  } catch (err) {
+    console.error("cancelPlanForCustomer: merge-state check failed", err);
+    throw new Error(
+      "Could not verify merge state for this plan's customer — the cancellation was not started. Try again."
+    );
+  }
+  if (priorCommand) return;
+  if (customer?.status === "MERGED") {
+    throw new Error(
+      `This record was merged into ${customer.mergedIntoId ?? "another record"}; act on that record instead.`
+    );
+  }
+  if (customer && isMidMerge(customer)) {
+    throw new Error(
+      `Customer ${customerId} is mid-merge with ${mergeCounterpartCustomerId(customer.mergeCounterpartId)} — finish or resume that merge before this plan can be canceled.`
+    );
+  }
+}
+
 export async function cancelPlanForCustomer(
   stripe: Stripe,
   servicePlanId: string,
@@ -898,6 +943,8 @@ export async function cancelPlanForCustomer(
     const settled = await planCancellationSettled(servicePlanId, { stripe });
     if (settled.settled) return alreadyCanceledOutcome(true);
   }
+
+  await refuseFreshCancellationMidMerge(servicePlanId, plan.customerId);
 
   const requestedAt = new Date().toISOString();
 

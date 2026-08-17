@@ -30,6 +30,7 @@
     "@anthropic-ai/sdk": "^0.111.0",
     "@aws-amplify/backend": "~1.19.0",
     "@aws-amplify/backend-cli": "~1.8.1",
+    "@aws-sdk/client-cloudwatch-logs": "^3.969.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1087.0",
     "@aws-sdk/client-lambda": "^3.1089.0",
     "@aws-sdk/client-s3": "^3.1087.0",
