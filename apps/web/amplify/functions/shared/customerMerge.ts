@@ -90,6 +90,14 @@ type SurvivorMergeMarker = { absorbed?: string[] };
 
 type CustomerRow = Record<string, unknown> & { id: string };
 
+/**
+ * CONTRACT (staging drill 2026-08-17 caught this): absent state is EMPTY,
+ * never a throw. A cus- group that was never created (a bare lead with no
+ * portal login — the COMMON loser) has no members; removing a membership
+ * from a nonexistent group/user is already the desired outcome. Cognito
+ * itself throws ResourceNotFound/UserNotFound for these — the deps builder
+ * translates. Only real faults may throw (they park the merge).
+ */
 export type MergeCognitoOps = {
   ensureGroup(groupName: string): Promise<void>;
   addToGroup(username: string, groupName: string): Promise<void>;

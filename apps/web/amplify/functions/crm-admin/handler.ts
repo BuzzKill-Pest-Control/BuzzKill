@@ -748,18 +748,44 @@ function mergeDeps(actor: { sub?: string; email?: string }): MergeDeps {
     cognito: {
       ensureGroup: ensureCognitoGroup,
       addToGroup,
-      removeFromGroup,
+      removeFromGroup: async (username, groupName) => {
+        try {
+          await removeFromGroup(username, groupName);
+        } catch (err) {
+          // Removing a membership that cannot exist (group or user gone) is
+          // the outcome the revoke wants — not a stage failure.
+          const name = (err as { name?: string }).name;
+          if (
+            name === "ResourceNotFoundException" ||
+            name === "UserNotFoundException"
+          ) {
+            return;
+          }
+          throw err;
+        }
+      },
       usernamesInGroup: async (groupName) => {
         const names: string[] = [];
         let nextToken: string | undefined;
         do {
-          const res = await cognito.send(
-            new ListUsersInGroupCommand({
-              UserPoolId: USER_POOL_ID,
-              GroupName: groupName,
-              NextToken: nextToken,
-            })
-          );
+          let res;
+          try {
+            res = await cognito.send(
+              new ListUsersInGroupCommand({
+                UserPoolId: USER_POOL_ID,
+                GroupName: groupName,
+                NextToken: nextToken,
+              })
+            );
+          } catch (err) {
+            // A cus- group that was never created has no members — the
+            // common case for a bare lead that never had a portal login.
+            // Cognito throws ResourceNotFound instead of returning empty.
+            if ((err as { name?: string }).name === "ResourceNotFoundException") {
+              return names;
+            }
+            throw err;
+          }
           for (const u of res.Users ?? []) {
             if (u.Username) names.push(u.Username);
           }
@@ -768,15 +794,22 @@ function mergeDeps(actor: { sub?: string; email?: string }): MergeDeps {
         return names;
       },
       groupsForUser: async (username) => {
-        const res = await cognito.send(
-          new AdminListGroupsForUserCommand({
-            UserPoolId: USER_POOL_ID,
-            Username: username,
-          })
-        );
-        return (res.Groups ?? [])
-          .map((g) => g.GroupName ?? "")
-          .filter(Boolean);
+        try {
+          const res = await cognito.send(
+            new AdminListGroupsForUserCommand({
+              UserPoolId: USER_POOL_ID,
+              Username: username,
+            })
+          );
+          return (res.Groups ?? [])
+            .map((g) => g.GroupName ?? "")
+            .filter(Boolean);
+        } catch (err) {
+          if ((err as { name?: string }).name === "UserNotFoundException") {
+            return [];
+          }
+          throw err;
+        }
       },
       disableUser: async (username) => {
         await cognito.send(
