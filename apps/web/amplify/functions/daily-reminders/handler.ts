@@ -34,6 +34,7 @@ import {
   resolveOwnedWork,
   workItemId,
 } from "../shared/ownedWork";
+import { cleanupDualStamps, listStuckMerges } from "../shared/customerMerge";
 import {
   danglingChildRecords,
   reconcileBookings,
@@ -230,6 +231,9 @@ export const handler = async () => {
   // re-driven to a VERIFIED completion through crm-admin, and one that
   // keeps failing becomes visible owned work.
   const groupChanges = await run("reconcileGroupChanges", reconcileGroupChanges);
+  // Customer merges: re-drive stuck ones through crm-admin, strip aged
+  // dual-stamps from completed ones (design 2026-08-17).
+  const merges = await run("reconcileMerges", reconcileMerges);
   // GL-03: QUEUED means retried — throttled sends are re-sent from their
   // stored bodies; stuck/expired/unresendable ones become owned work.
   const emailRetries = await run("retryQueuedEmails", retryQueuedEmails);
@@ -257,6 +261,7 @@ export const handler = async () => {
     lifecycle,
     requestOwnership,
     groupChanges,
+    merges,
     emailRetries,
   ];
   if (failures.length) {
@@ -2045,6 +2050,80 @@ export async function reconcileGroupChanges() {
 }
 
 /**
+ * Customer merges cannot remain silently split (design 2026-08-17). Any
+ * in-flight merge whose lease has expired and whose auto-attempt budget
+ * remains is re-driven through crm-admin's resumeMerge (that handler owns
+ * the Cognito + Stripe credentials the stages need). Merges past the cap
+ * stay parked on the MERGE_RECOVERY item the engine already opened — the
+ * queue is the pager, not the inbox. The second pass strips the cus-loser
+ * dual-stamps from completed merges once pre-merge portal tokens have aged
+ * out, closing the read-grace window the merge deliberately left open.
+ */
+export async function reconcileMerges() {
+  const client = await dataClient();
+  // Capability guard (the reconcileGroupChanges pattern): test fakes wire
+  // only the models their scenarios read; absent wiring is a no-op sweep,
+  // while real scan failures still fail the subtask loudly.
+  const customerModel = client.models.Customer as unknown as {
+    list?: unknown;
+    listCustomerByStatusAndDisplayName?: unknown;
+  };
+  if (
+    typeof customerModel.list !== "function" ||
+    typeof customerModel.listCustomerByStatusAndDisplayName !== "function"
+  ) {
+    return { task: "reconcileMerges", resumed: 0, stampsCleaned: 0 };
+  }
+  let fnName = process.env.CRM_ADMIN_FUNCTION_NAME;
+  if (!fnName && process.env.CRM_ADMIN_FUNCTION_PARAM) {
+    try {
+      const { SSMClient, GetParameterCommand } = await import(
+        "@aws-sdk/client-ssm"
+      );
+      const out = await new SSMClient({}).send(
+        new GetParameterCommand({ Name: process.env.CRM_ADMIN_FUNCTION_PARAM })
+      );
+      fnName = out.Parameter?.Value ?? undefined;
+    } catch (err) {
+      console.error("reconcileMerges: function-name param unreadable", err);
+    }
+  }
+  let resumed = 0;
+  const stuck = await listStuckMerges();
+  if (stuck.length > 0 && !fnName) {
+    console.error(
+      "reconcileMerges: CRM_ADMIN_FUNCTION_NAME unset — cannot resume",
+      stuck.map((s) => s.loserId)
+    );
+  } else if (stuck.length > 0) {
+    const lambdaClient = new LambdaClient({});
+    for (const { loserId, state } of stuck) {
+      await lambdaClient.send(
+        new InvokeCommand({
+          FunctionName: fnName,
+          InvocationType: "Event",
+          Payload: Buffer.from(
+            JSON.stringify({
+              info: { fieldName: "resumeMerge" },
+              arguments: {
+                loserId,
+                survivorId: state.survivorId,
+                idempotencyKey: state.idempotencyKey,
+              },
+              identity: null,
+              source: "daily-reminders-resumer",
+            })
+          ),
+        })
+      );
+      resumed++;
+    }
+  }
+  const stampsCleaned = await cleanupDualStamps();
+  return { task: "reconcileMerges", resumed, stampsCleaned };
+}
+
+/**
  * GL-03 — every outbox row reaches a truthful terminal outcome:
  *  - QUEUED (provider throttle) rows are RE-SENT from their stored body,
  *    exactly once (guarded claim); still-throttled rows stay QUEUED for the
@@ -2262,6 +2341,38 @@ export async function reconcilePaidBookings() {
 
   // Dangling / missing child records on BOOKED bookings — the load-bearing
   // "nonblank ID is not proof" check.
+  //
+  // A customerId disagreement a completed merge explains is NOT a cross-link:
+  // the merge repointed the children while the booking checkpoint kept the
+  // pre-merge id (or vice versa mid-repoint). One tombstone map per run.
+  const mergedInto: Record<string, string> = {};
+  try {
+    const tombstoneModel = (
+      client.models as unknown as {
+        Customer: {
+          listCustomerByStatusAndDisplayName?: (
+            key: { status: string },
+            opts: { limit: number; nextToken?: string | null }
+          ) => Promise<{ data: unknown[]; nextToken?: string | null }>;
+        };
+      }
+    ).Customer;
+    if (typeof tombstoneModel.listCustomerByStatusAndDisplayName === "function") {
+      const tombstones = (await listAll(
+        (nextToken) =>
+          tombstoneModel.listCustomerByStatusAndDisplayName!(
+            { status: "MERGED" },
+            { nextToken, limit: 200 }
+          ),
+        { pageErrors: "ignore" }
+      )) as { id: string; mergedIntoId?: string | null }[];
+      for (const t of tombstones) {
+        if (t.mergedIntoId) mergedInto[t.id] = t.mergedIntoId;
+      }
+    }
+  } catch (err) {
+    console.error("reconcilePaidBookings: tombstone map unreadable", err);
+  }
   const healthyBooked: string[] = [];
   for (const b of bookings) {
     if (b.status !== "BOOKED") continue;
@@ -2274,7 +2385,8 @@ export async function reconcilePaidBookings() {
     // missing one — a cross-link. Relationships are validated, not existence.
     const crossLinked = mismatchedChildRelationships(
       b as Parameters<typeof mismatchedChildRelationships>[0],
-      rows
+      rows,
+      mergedInto
     );
     if (crossLinked.length) {
       addIssue(b.id, `BOOKED but cross-linked: ${crossLinked.join("; ")}`);

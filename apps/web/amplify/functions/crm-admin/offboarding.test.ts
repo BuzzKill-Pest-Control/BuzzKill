@@ -1301,7 +1301,7 @@ describe("staffRoster (GL-14)", () => {
   });
 });
 
-describe("revokePortalAccess", () => {
+describe("setPortalAccess REVOKE (folded from revokePortalAccess)", () => {
   it("disables the account, kills its sessions, and drops its groups", async () => {
     customers.set("c1", {
       id: "c1",
@@ -1312,7 +1312,7 @@ describe("revokePortalAccess", () => {
     });
     userGroups = ["CUSTOMER", "cus-c1", "grp-g1", "OWNER-should-not-touch"];
 
-    const res = (await call("revokePortalAccess", { customerId: "c1" })) as {
+    const res = (await call("setPortalAccess", { action: "REVOKE", customerId: "c1" })) as {
       revoked: boolean;
       groupsRemoved: string[];
     };
@@ -1343,7 +1343,7 @@ describe("revokePortalAccess", () => {
       portalUserSub: null,
     });
 
-    const res = (await call("revokePortalAccess", { customerId: "c1" })) as {
+    const res = (await call("setPortalAccess", { action: "REVOKE", customerId: "c1" })) as {
       revoked: boolean;
     };
 
@@ -1365,7 +1365,7 @@ describe("revokePortalAccess", () => {
     });
     userGroups = ["OWNER", "CUSTOMER", "cus-c1"];
 
-    const res = (await call("revokePortalAccess", { customerId: "c1" })) as {
+    const res = (await call("setPortalAccess", { action: "REVOKE", customerId: "c1" })) as {
       revoked: boolean;
       groupsRemoved: string[];
     };
@@ -1392,7 +1392,7 @@ describe("revokePortalAccess", () => {
     });
     userGroups = ["CUSTOMER", "cus-c1"];
 
-    await call("revokePortalAccess", { customerId: "c1" });
+    await call("setPortalAccess", { action: "REVOKE", customerId: "c1" });
 
     expect(sentTypes()).toContain("Disable");
   });
@@ -1410,7 +1410,7 @@ describe("revokePortalAccess", () => {
     userGroups = ["OWNER", "CUSTOMER", "cus-c1"];
 
     // revokePortalAccess spares it; the offboard path removes OWNER too.
-    await call("revokePortalAccess", { customerId: "c1" });
+    await call("setPortalAccess", { action: "REVOKE", customerId: "c1" });
     expect(sentTypes()).not.toContain("Disable");
   });
 
@@ -1425,7 +1425,7 @@ describe("revokePortalAccess", () => {
     // A group login is bound to CUSTOMER + its grp- group only — never a cus-.
     userGroups = ["CUSTOMER", "grp-g1", "cus-should-not-touch"];
 
-    const res = (await call("revokePortalAccess", { groupId: "g1" })) as {
+    const res = (await call("setPortalAccess", { action: "REVOKE", groupId: "g1" })) as {
       revoked: boolean;
       groupsRemoved: string[];
     };
@@ -1456,7 +1456,7 @@ describe("revokePortalAccess", () => {
       portalUserSub: null,
     });
 
-    const res = (await call("revokePortalAccess", { groupId: "g1" })) as {
+    const res = (await call("setPortalAccess", { action: "REVOKE", groupId: "g1" })) as {
       revoked: boolean;
     };
 
@@ -1466,12 +1466,12 @@ describe("revokePortalAccess", () => {
 
   it("refuses when both customerId and groupId are given", async () => {
     await expect(
-      call("revokePortalAccess", { customerId: "c1", groupId: "g1" })
+      call("setPortalAccess", { action: "REVOKE", customerId: "c1", groupId: "g1" })
     ).rejects.toThrow(/not both/i);
   });
 });
 
-describe("restorePortalAccess", () => {
+describe("setPortalAccess RESTORE (folded from restorePortalAccess)", () => {
   it("re-enables the account and restores its groups", async () => {
     customers.set("c1", {
       id: "c1",
@@ -1482,7 +1482,7 @@ describe("restorePortalAccess", () => {
       groupId: "g1",
     });
 
-    const res = (await call("restorePortalAccess", { customerId: "c1" })) as {
+    const res = (await call("setPortalAccess", { action: "RESTORE", customerId: "c1" })) as {
       restored: boolean;
       groupsAdded: string[];
     };

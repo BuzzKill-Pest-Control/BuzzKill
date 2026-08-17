@@ -63,7 +63,11 @@ const fieldOfficeOnly = (allow: FieldAllow) => [
 // Exported for resource.test.ts, which checks that no custom operation
 // redeclares a mutation/query the model transformer generates.
 export const schema = a.schema({
-  CustomerStatus: a.enum(["LEAD", "ACTIVE", "INACTIVE"]),
+  // MERGED is terminal: a duplicate absorbed into another record (its
+  // mergedIntoId). Tombstones are never listed by any status-GSI surface and
+  // every negative-status gate (`!== "INACTIVE"`) must treat MERGED as
+  // not-live too — a tombstone can neither be serviced nor billed.
+  CustomerStatus: a.enum(["LEAD", "ACTIVE", "INACTIVE", "MERGED"]),
   ServicePlanStatus: a.enum(["ACTIVE", "PAUSED", "CANCELED"]),
   // ESCALATE remains readable for historical rows, but new pricing runs never
   // produce it: missing prices are RESEARCHING, provider faults are ERROR.
@@ -263,6 +267,9 @@ export const schema = a.schema({
     // technician's whole day is unmeasurable and (failing closed) stops selling
     // capacity — it reads as "fully booked" while nearly empty.
     "ADDRESS_UNROUTABLE",
+    // A customer merge parked past its automatic resumes; both records are
+    // frozen against other lifecycle changes until a human resumes it.
+    "MERGE_RECOVERY",
     "OBLIGATION_RECOVERY",
     // GL-16: a combo exhausted its AI-research attempts and is parked.
     "PRICING_RESEARCH_EXHAUSTED",
@@ -464,6 +471,28 @@ export const schema = a.schema({
       bookingLinkToken: a.string().authorization(fieldNoTech),
       bookingLinkTokenExpiresAt: a.datetime().authorization(fieldNoTech),
       accessGroups: a.string().array().authorization(fieldNoTech),
+      /**
+       * Customer-merge machinery (design 2026-08-17). A merge absorbs a
+       * duplicate (loser) into a survivor under a durable, resumable command.
+       * mergedIntoId — terminal pointer on the tombstone; every consumer of a
+       *   stored customer id follows it via shared/customerMerge
+       *   resolveMergedCustomer.
+       * mergeCounterpartId — set on BOTH rows while a merge is in flight (the
+       *   other record's id); its presence is the mid-merge marker every other
+       *   command family refuses on. Cleared on the survivor at completion; on
+       *   the loser it is superseded by mergedIntoId.
+       * mergeLeaseNonce / mergeLeaseUntil — the merge's own lease, TOP-LEVEL on
+       *   purpose: the CAS layer conditions on top-level attributes, and the
+       *   5-minute lifecycle claim cannot guard a merge parked for days.
+       * mergeState — the command blob on the loser (stage, cursors, decisions,
+       *   blanked-field snapshot); on the survivor a small marker object whose
+       *   `absorbed` array permanently lists every id merged into it.
+       */
+      mergedIntoId: a.string().authorization(fieldNoTech),
+      mergeCounterpartId: a.string().authorization(fieldNoTech),
+      mergeLeaseNonce: a.string().authorization(fieldNoTech),
+      mergeLeaseUntil: a.datetime().authorization(fieldNoTech),
+      mergeState: a.json().authorization(fieldNoTech),
       // Office-uploaded documents — most often an agreement signed OUTSIDE the
       // software, plus letters, inspections, insurance. A JSON array of
       // { id, title, kind, fileKey, contentType, sizeBytes, uploadedByEmail,
@@ -2671,25 +2700,41 @@ export const schema = a.schema({
    * FINANCE/OWNER, matching deactivateCustomer so the same person can do both
    * halves of the same offboarding.
    */
-  revokePortalAccess: a
+  // Folded from the former revokePortalAccess/restorePortalAccess pair
+  // (AppSync 500-cap: the fold freed the 6 resources mergeCustomers spends).
+  // action REVOKE with exactly one of customerId/groupId (groupId disables a
+  // management-company GROUP login); action RESTORE with customerId. The
+  // handler validates the combination; both directions stay idempotent.
+  setPortalAccess: a
     .mutation()
-    // Exactly one of customerId / groupId. groupId disables a management-company
-    // GROUP login (the inactivate half); customerId disables a single customer's
-    // login (the customer-offboarding half). Validated in the handler.
-    .arguments({ customerId: a.string(), groupId: a.string() })
+    .arguments({
+      action: a.string().required(),
+      customerId: a.string(),
+      groupId: a.string(),
+    })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
 
   /**
-   * Re-enable a reactivated customer's portal login: enable the Cognito account
-   * and restore its CUSTOMER + dynamic group memberships. Access only — the
-   * canceled plans stay canceled (a reactivated customer re-subscribes through
-   * a new booking). Idempotent; a no-op when there is no portal user.
+   * Customer merge (design 2026-08-17) — the back-half of createLead's dedup
+   * doctrine: the office absorbs a duplicate (loser) into the record being
+   * kept (survivor). action PREVIEW returns the server-computed consequence
+   * envelope (child counts, billing plan, portal outcome, warnings) without
+   * touching anything; EXECUTE runs the durable staged command (refused while
+   * unacknowledged warnings exist); RESUME re-drives a parked merge under the
+   * same idempotencyKey. One action-multiplexed op on purpose — the cap has
+   * no room for three.
    */
-  restorePortalAccess: a
+  mergeCustomers: a
     .mutation()
-    .arguments({ customerId: a.string().required() })
+    .arguments({
+      action: a.string().required(),
+      survivorId: a.string().required(),
+      loserId: a.string().required(),
+      idempotencyKey: a.string().required(),
+      acknowledgeWarnings: a.boolean(),
+    })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
