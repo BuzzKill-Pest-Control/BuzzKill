@@ -1027,17 +1027,20 @@ export function mergeCustomers(input: {
   return api().mutations.mergeCustomers(input);
 }
 
-/** Parse an AWSJSON field that may arrive as a string. */
+/** Parse an AWSJSON field. Round-trips are shape-shifty: depending on the
+ *  write path the value arrives as the object, the JSON string, or a doubly
+ *  encoded string (the merge tombstone snapshot proved it) — parse until it
+ *  stops being a string, bounded. */
 export function jsonField<T>(raw: unknown): T | null {
-  if (raw == null) return null;
-  if (typeof raw === "string") {
+  let value: unknown = raw;
+  for (let i = 0; i < 3 && typeof value === "string"; i++) {
     try {
-      return JSON.parse(raw) as T;
+      value = JSON.parse(value);
     } catch {
       return null;
     }
   }
-  return raw as T;
+  return (value ?? null) as T | null;
 }
 
 /**
