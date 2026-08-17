@@ -315,6 +315,11 @@ export default function Leads() {
                         small
                         variant="subtle"
                         loading={mergeStart.busyKey === c.id}
+                        // The row underneath handles Enter/Space itself (with
+                        // preventDefault), which would swallow a keyboard press
+                        // on this button and navigate WITHOUT the merge hint.
+                        // Keep the key event here so the button activates.
+                        onKeyDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           // The row's own click navigates without the merge
                           // hint — this press must not bubble into it.
@@ -334,8 +339,15 @@ export default function Leads() {
                               throw new Error("The lead could not be created");
                             }
                             setDupe(null);
+                            // mergeHintAt lets the customer page ignore this
+                            // hint when it arrives via a stale reload instead
+                            // of this fresh press — history state survives
+                            // refreshes, the merge intent should not.
                             navigate(`/customers/${c.id}`, {
-                              state: { mergeLoserId: res.id },
+                              state: {
+                                mergeLoserId: res.id,
+                                mergeHintAt: Date.now(),
+                              },
                             });
                           });
                         }}

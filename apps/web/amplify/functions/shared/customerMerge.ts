@@ -296,6 +296,7 @@ export type MergeWarning = {
     | "BOTH_EXTERNAL_REFS"
     | "UNEXPIRED_BOOKING_LINK"
     | "INACTIVE_SURVIVOR"
+    | "LEAD_SURVIVOR"
     | "OPEN_WORK_ITEMS"
     | "TOKEN_STALENESS";
   detail: string;
@@ -379,6 +380,10 @@ async function findBlockingCommands(
 ): Promise<MergeBlocker[]> {
   const client = await dataClient();
   const blockers: MergeBlocker[] = [];
+  // Office copy names people, not ids: one cheap get buys every detail below
+  // a real name (the id rides in parentheses for support).
+  const row = await loadCustomer(customerId);
+  const who = `${String(row?.displayName ?? customerId)} (${customerId})`;
 
   // Lifecycle commands (deactivate/reactivate) — any non-settled one blocks.
   const lifecycle = await listAllLifecycleCommands(
@@ -388,9 +393,16 @@ async function findBlockingCommands(
   for (const cmd of lifecycle) {
     const stage = (cmd as { stage?: string | null }).stage ?? "";
     if (stage !== "COMPLETE" && stage !== "FAILED") {
+      const action = (cmd as { action?: string }).action;
+      const label =
+        action === "DEACTIVATE"
+          ? "a deactivation"
+          : action === "REACTIVATE"
+            ? "a reactivation"
+            : "an account change";
       blockers.push({
         code: "OPEN_LIFECYCLE_COMMAND",
-        detail: `A ${(cmd as { action?: string }).action ?? "lifecycle"} command is not settled for ${customerId}. Finish or resume it first.`,
+        detail: `${who} has ${label} that hasn't finished. Finish or resume it on their customer page, then merge.`,
       });
     }
   }
@@ -420,7 +432,7 @@ async function findBlockingCommands(
     if (stage !== "COMPLETE" && stage !== "FAILED") {
       blockers.push({
         code: "OPEN_GROUP_CHANGE",
-        detail: `A group change is not settled for ${customerId}.`,
+        detail: `${who} has a group change that hasn't finished. Finish or resume it on their customer page, then merge.`,
       });
     }
   }
@@ -435,16 +447,19 @@ async function findBlockingCommands(
         nextToken,
       }),
     { pageErrors: "throw" }
-  )) as { id: string }[];
+  )) as { id: string; planName?: string | null }[];
   for (const plan of plans) {
     const { data: claim } = await client.models.PlanCancellationClaim.get({
       id: plan.id,
     });
     const stage = (claim as { stage?: string | null } | null)?.stage ?? null;
     if (claim && stage !== "COMPLETE") {
+      const planLabel = plan.planName
+        ? `their ${String(plan.planName)} plan`
+        : "one of their service plans";
       blockers.push({
         code: "OPEN_PLAN_CANCELLATION",
-        detail: `Plan ${plan.id} has an unsettled cancellation command.`,
+        detail: `${who} has a cancellation still in progress on ${planLabel}. Finish or resume the cancellation on the Service plans card first.`,
       });
     }
   }
@@ -456,7 +471,7 @@ async function findBlockingCommands(
         nextToken,
       }),
     { pageErrors: "throw" }
-  )) as { id: string }[];
+  )) as { id: string; serviceType?: string | null; scheduledDate?: string | null }[];
   for (const job of jobs) {
     const { data: claim } = await client.models.VisitChangeClaim.get({
       id: job.id,
@@ -464,9 +479,12 @@ async function findBlockingCommands(
     // VisitChangeClaim rows are deleted on clean COMPLETE, so existence means
     // a command is live or parked.
     if (claim) {
+      const visitLabel = job.scheduledDate
+        ? `their ${String(job.serviceType ?? "service")} visit on ${String(job.scheduledDate)}`
+        : `one of their ${String(job.serviceType ?? "service")} visits`;
       blockers.push({
         code: "OPEN_VISIT_CHANGE",
-        detail: `Job ${job.id} has an unsettled visit-change command.`,
+        detail: `${who} has a reschedule or visit change still in progress on ${visitLabel}. Finish or resume it on their customer page first.`,
       });
     }
   }
@@ -483,13 +501,15 @@ async function findBlockingCommands(
     if (leadClaim && until && Date.parse(until) > Date.now()) {
       blockers.push({
         code: "OPEN_LEAD_CLAIM",
-        detail: `A lead-lifecycle operation is in flight for ${customerId}.`,
+        detail: `${who} has a lead update still running. Give it a minute, then try the merge again.`,
       });
     }
   } catch {
+    // Fails closed on purpose: an unverifiable scan refuses the merge —
+    // blocked is the safe outcome.
     blockers.push({
       code: "UNREADABLE_SCAN",
-      detail: "Lead-claim state could not be read; refusing (blocked is safe).",
+      detail: `We couldn't check ${who} for in-progress lead work, so the merge didn't start. Try again in a minute.`,
     });
   }
 
@@ -502,26 +522,49 @@ async function computePreview(
   deps: MergeDeps
 ): Promise<MergePreview> {
   if (survivorId === loserId) {
-    throw new Error("survivorId and loserId must differ.");
+    throw new Error(
+      "Those are the same record — pick two different customers to merge."
+    );
   }
   const survivor = await loadCustomer(survivorId);
   const loser = await loadCustomer(loserId);
-  if (!survivor) throw new Error(`Survivor ${survivorId} not found.`);
-  if (!loser) throw new Error(`Loser ${loserId} not found.`);
+  if (!survivor) {
+    throw new Error(
+      `The record you chose to keep (${survivorId}) could not be found. Refresh and try again.`
+    );
+  }
+  if (!loser) {
+    throw new Error(
+      `The duplicate record (${loserId}) could not be found. Refresh and try again.`
+    );
+  }
 
   const blockers: MergeBlocker[] = [];
   const warnings: MergeWarning[] = [];
+  const survivorWho = `${String(survivor.displayName ?? survivorId)} (${survivorId})`;
+  const loserWho = `${String(loser.displayName ?? loserId)} (${loserId})`;
+  // Names a merge pointer's target for office copy (one cheap get, only on
+  // the already-merged blockers).
+  const mergedIntoWho = async (row: CustomerRow): Promise<string> => {
+    const intoId =
+      typeof row.mergedIntoId === "string" && row.mergedIntoId
+        ? row.mergedIntoId
+        : null;
+    if (!intoId) return "another record";
+    const into = await loadCustomer(intoId);
+    return `${String(into?.displayName ?? intoId)} (${intoId})`;
+  };
 
   if (loser.status === "MERGED") {
     blockers.push({
       code: "LOSER_ALREADY_MERGED",
-      detail: `${loserId} was already merged into ${String(loser.mergedIntoId ?? "another record")}.`,
+      detail: `${loserWho} was already merged into ${await mergedIntoWho(loser)}. Open that record if anything still needs attention.`,
     });
   }
   if (survivor.status === "MERGED") {
     blockers.push({
       code: "SURVIVOR_IS_TOMBSTONE",
-      detail: `${survivorId} was merged into ${String(survivor.mergedIntoId ?? "another record")} — merge into that record instead.`,
+      detail: `${survivorWho} was itself merged into ${await mergedIntoWho(survivor)}. Keep that record instead and merge into it.`,
     });
   }
   // Mid-merge markers block — UNLESS they name exactly THIS pair, which is a
@@ -536,16 +579,23 @@ async function computePreview(
   const survivorForeign =
     Boolean(survivorMarker) && survivorMarker !== loserId;
   const loserForeign = Boolean(loserMarker) && loserMarker !== survivorId;
+  const busy: string[] = [];
   if (
-    (isMidMerge(survivor as { mergeCounterpartId?: string | null; status?: string | null }) &&
-      survivorForeign) ||
-    (isMidMerge(loser as { mergeCounterpartId?: string | null; status?: string | null }) &&
-      loserForeign)
+    isMidMerge(survivor as { mergeCounterpartId?: string | null; status?: string | null }) &&
+    survivorForeign
   ) {
+    busy.push(survivorWho);
+  }
+  if (
+    isMidMerge(loser as { mergeCounterpartId?: string | null; status?: string | null }) &&
+    loserForeign
+  ) {
+    busy.push(loserWho);
+  }
+  if (busy.length > 0) {
     blockers.push({
       code: "MERGE_IN_FLIGHT",
-      detail:
-        "One of these records is already part of a DIFFERENT in-flight merge. Resume or finish it first.",
+      detail: `${busy.join(" and ")} ${busy.length > 1 ? "are" : "is"} already in the middle of a different merge. Finish or resume that merge first, then come back to this one.`,
     });
   }
   // Group conflict: refused in v1 — the GroupChangeCommand owns that surface.
@@ -553,7 +603,7 @@ async function computePreview(
     blockers.push({
       code: "GROUP_CONFLICT",
       detail:
-        "The duplicate belongs to a customer group the survivor doesn't. Move or clear its group first, then merge.",
+        "The duplicate belongs to a customer group the kept record doesn't. Move or clear its group first, then merge.",
     });
   }
 
@@ -605,21 +655,33 @@ async function computePreview(
     warnings.push({
       code: "UNEXPIRED_BOOKING_LINK",
       detail: survivor.bookingLinkToken
-        ? "The duplicate has an unexpired emailed booking link; it will be expired (the survivor already has one)."
-        : "The duplicate has an unexpired emailed booking link; it will be moved to the survivor so the emailed link keeps working.",
+        ? "The duplicate has an unexpired emailed booking link; it will be expired (the kept record already has one)."
+        : "The duplicate has an unexpired emailed booking link; it will be moved to the kept record so the emailed link keeps working.",
     });
   }
   if (survivor.status === "INACTIVE") {
     warnings.push({
       code: "INACTIVE_SURVIVOR",
-      detail: "The record being kept is INACTIVE — the merged customer stays inactive.",
+      detail: "The record being kept is inactive — the merged customer stays inactive.",
     });
   }
-  warnings.push({
-    code: "TOKEN_STALENESS",
-    detail:
-      "If this customer is signed into the portal right now, actions may fail for up to an hour until their session refreshes. Reading their records keeps working throughout.",
-  });
+  if (survivor.status === "LEAD" && loser.status === "ACTIVE") {
+    warnings.push({
+      code: "LEAD_SURVIVOR",
+      detail:
+        "You are keeping the newer lead and absorbing the established customer — double-check which record should survive.",
+    });
+  }
+  // Only worth saying when someone can actually be signed in — an
+  // unconditional version trained warning-blindness and contradicted the
+  // preview's own "no portal login" line.
+  if (survivor.portalUserSub || loser.portalUserSub) {
+    warnings.push({
+      code: "TOKEN_STALENESS",
+      detail:
+        "If this customer is signed into the portal right now, actions may fail for up to an hour until their session refreshes. Reading their records keeps working throughout.",
+    });
+  }
 
   // Open work items naming the loser (informational count).
   const client = await dataClient();
@@ -640,7 +702,7 @@ async function computePreview(
   if (openWork > 0) {
     warnings.push({
       code: "OPEN_WORK_ITEMS",
-      detail: `${openWork} open work item${openWork === 1 ? "" : "s"} name the duplicate; they will be repointed to the survivor.`,
+      detail: `${openWork} open work item${openWork === 1 ? " names" : "s name"} the duplicate; ${openWork === 1 ? "it" : "they"} will move to the kept record.`,
     });
   }
 
@@ -779,7 +841,12 @@ export async function mergeCustomers(input: {
   let blob: MergeStateBlob | null = null;
 
   const loserNow = await loadCustomer(loserId);
-  if (!loserNow) throw new Error(`Loser ${loserId} not found.`);
+  if (!loserNow) {
+    throw new Error(
+      `The duplicate record (${loserId}) could not be found. Refresh and try again.`
+    );
+  }
+  const loserName = String(loserNow.displayName ?? loserId);
   const existing = parseMergeState(loserNow.mergeState);
 
   if (existing && existing.survivorId === survivorId) {
@@ -801,7 +868,7 @@ export async function mergeCustomers(input: {
           {
             code: "MERGE_IN_FLIGHT",
             detail:
-              "This merge is already in flight under a different request. Resume it instead of starting again.",
+              "This merge is already underway from an earlier request. Use Resume to pick it up instead of starting it again.",
           },
         ],
       };
@@ -817,7 +884,8 @@ export async function mergeCustomers(input: {
       return {
         decision: "PARTIAL",
         stage: existing.stage,
-        error: "Another worker holds this merge's lease right now.",
+        error:
+          "This merge is already being worked on right now. Give it a minute, then check the customer page.",
         idempotencyKey: existing.idempotencyKey,
       };
     }
@@ -841,23 +909,25 @@ export async function mergeCustomers(input: {
         );
         if (!reassert.ok) {
           throw new Error(
-            "merge: survivor marker could not be re-asserted on resume"
+            "The record being kept changed just as this merge was resuming, so nothing was done. Try Resume again in a moment."
           );
         }
       } else if (mergeCounterpartCustomerId(marker) !== loserId) {
         throw new Error(
-          `merge: survivor ${survivorId} is marked for a different merge (${marker})`
+          `The record being kept is already tied to a different merge, so this one can't continue. Finish or resume that merge first. (marker: ${marker})`
         );
       }
       blob.childVerifyLoops = 0;
     }
   } else if (existing) {
+    const otherId = existing.survivorId;
+    const other = await loadCustomer(otherId);
     return {
       decision: "REFUSED",
       blockers: [
         {
           code: "MERGE_IN_FLIGHT",
-          detail: `${loserId} is mid-merge with ${existing.survivorId}, not ${survivorId}.`,
+          detail: `${loserName} (${loserId}) is already mid-merge into ${String(other?.displayName ?? otherId)} (${otherId}). Finish or resume that merge first.`,
         },
       ],
     };
@@ -966,7 +1036,7 @@ export async function mergeCustomers(input: {
         blockers: [
           {
             code: "UNREADABLE_MERGE_STATE",
-            detail: `${loserId} carries merge state this build cannot read — refusing to overwrite it. Escalate to engineering.`,
+            detail: `${loserName} (${loserId}) has saved merge details this system can't read, so nothing was changed. Ask engineering to take a look before trying again.`,
           },
         ],
       };
@@ -991,7 +1061,8 @@ export async function mergeCustomers(input: {
         blockers: [
           {
             code: "MERGE_IN_FLIGHT",
-            detail: "Another merge claimed one of these records first.",
+            detail:
+              "Another merge grabbed one of these records first, so nothing was changed. Refresh and check both records before trying again.",
           },
         ],
       };
@@ -1039,7 +1110,8 @@ export async function mergeCustomers(input: {
         blockers: [
           {
             code: "MERGE_IN_FLIGHT",
-            detail: "Another merge claimed one of these records first.",
+            detail:
+              "Another merge grabbed one of these records first, so nothing was changed. Refresh and check both records before trying again.",
           },
         ],
       };
@@ -1087,18 +1159,24 @@ export async function mergeCustomers(input: {
       ...blob,
       attemptCount: (blob.attemptCount ?? 0) + 1,
       nextAttemptAt: new Date(Date.now() + MERGE_RETRY_DELAY_MS).toISOString(),
+      // The raw engine message, verbatim — engineering reads this one.
       lastError: message,
     };
+    // What the office reads leads with a plain sentence; the raw message
+    // rides behind it as a technical tail.
+    const survivorRow = await loadCustomer(survivorId).catch(() => null);
+    const survivorName = String(survivorRow?.displayName ?? survivorId);
+    const plain = `The merge of ${loserName} (${loserId}) into ${survivorName} (${survivorId}) stopped partway. Its progress is saved — resume it from ${survivorName}'s customer page, or the daily auto-retry will pick it up.`;
     const work = await openOwnedWork({
       kind: "MERGE_RECOVERY",
       dedupeKey: `merge:${loserId}`,
-      title: `Customer merge needs a resume: ${String(loserNow.displayName ?? loserId)}`,
-      detail: `Merging ${loserId} into ${survivorId} stopped at stage ${failed.stage} (attempt ${failed.attemptCount}): ${message}. Both records are frozen against other lifecycle changes until this finishes.`,
+      title: `Customer merge needs a resume: ${loserName}`,
+      detail: `${plain} Both records are locked against other changes until it finishes. (Attempt ${failed.attemptCount}, stopped at ${failed.stage}: ${message})`,
       customerId: survivorId,
       relatedId: loserId,
       sourceUrl: `/customers/${survivorId}`,
       resolutionAction:
-        "Resume the merge from the survivor's customer screen (or wait for the daily auto-resume) and verify it completes.",
+        "Resume the merge from the kept record's customer page (or wait for the daily auto-resume) and verify it completes.",
       ownerTeam: "OPS",
     });
     if (work && work !== WORK_SUPPRESSED) failed.recoveryWorkItemId = work;
@@ -1112,7 +1190,7 @@ export async function mergeCustomers(input: {
     return {
       decision: "PARTIAL",
       stage: failed.stage,
-      error: message,
+      error: `${plain} (${message})`,
       idempotencyKey: blob.idempotencyKey,
     };
   }
