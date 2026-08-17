@@ -681,6 +681,67 @@ describe("resume and repair (the adversarial-review class)", () => {
   });
 });
 
+describe("the staging-drill cascade class", () => {
+  it("parseMergeState survives every AWSJSON round-trip shape", () => {
+    const blob = { survivorId: "s", idempotencyKey: "k", stage: "BILLING", requestedAt: "t" };
+    expect(parseMergeState(blob)?.stage).toBe("BILLING");
+    expect(parseMergeState(JSON.stringify(blob))?.stage).toBe("BILLING");
+    expect(parseMergeState(JSON.stringify(JSON.stringify(blob)))?.stage).toBe("BILLING");
+    expect(parseMergeState("not json {{")).toBeNull();
+    expect(parseMergeState(JSON.stringify({ absorbed: ["x"] }))).toBeNull();
+  });
+
+  it("RESUME with no readable saved state refuses and touches NOTHING", async () => {
+    seedCustomer("surv", { mergeCounterpartId: "dup#fields-done" });
+    seedCustomer("dup");
+    const out = await mergeCustomers({
+      action: "RESUME",
+      survivorId: "surv",
+      loserId: "dup",
+      idempotencyKey: "mk-x",
+      deps: deps(),
+    });
+    expect(out.decision).toBe("REFUSED");
+    if (out.decision === "REFUSED") {
+      expect(out.blockers[0].code).toBe("NOTHING_TO_RESUME");
+    }
+    // The stale marker was not cleared and no claim landed.
+    expect(table("Customer").get("surv")!.mergeCounterpartId).toBe("dup#fields-done");
+    expect(table("Customer").get("dup")!.mergeCounterpartId ?? null).toBeNull();
+  });
+
+  it("a fresh EXECUTE self-repairs a stale suffixed survivor marker and completes", async () => {
+    // The drill's end state: blob destroyed, loser clean, survivor stuck
+    // with the FIELDS-era marker.
+    seedCustomer("surv", { mergeCounterpartId: "dup#fields-done" });
+    seedCustomer("dup", { phone: "+15085552222" });
+    const out = await run("EXECUTE", "surv", "dup", { idempotencyKey: "mk-repair2" });
+    expect(out.decision).toBe("MERGED");
+    expect(table("Customer").get("dup")!.status).toBe("MERGED");
+    expect(table("Customer").get("surv")!.mergeCounterpartId ?? null).toBeNull();
+  });
+
+  it("a fresh EXECUTE refuses to overwrite unreadable merge state on the loser", async () => {
+    seedCustomer("surv");
+    seedCustomer("dup", { mergeState: "corrupted {{ not json" });
+    const out = await run("EXECUTE", "surv", "dup", { idempotencyKey: "mk-c" });
+    expect(out.decision).toBe("REFUSED");
+    if (out.decision === "REFUSED") {
+      expect(out.blockers[0].code).toBe("UNREADABLE_MERGE_STATE");
+    }
+    expect(table("Customer").get("dup")!.mergeState).toBe("corrupted {{ not json");
+  });
+
+  it("a former survivor's absorbed genealogy rides into the new survivor's list", async () => {
+    seedCustomer("c");
+    seedCustomer("b", { mergeState: JSON.stringify({ absorbed: ["a"] }) });
+    const out = await run("EXECUTE", "c", "b", { idempotencyKey: "mk-chain" });
+    expect(out.decision).toBe("MERGED");
+    const absorbed = JSON.parse(String(table("Customer").get("c")!.mergeState)).absorbed;
+    expect(absorbed.sort()).toEqual(["a", "b"]);
+  });
+});
+
 describe("the follow rule", () => {
   it("resolveMergedCustomer follows a chain to its terminus, bounded", async () => {
     seedCustomer("a", { status: "MERGED", mergedIntoId: "b" });

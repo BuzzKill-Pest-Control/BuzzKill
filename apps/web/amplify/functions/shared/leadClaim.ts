@@ -6,9 +6,12 @@ const LEASE_MS = 60_000;
 type ClaimModel = "LeadIntakeClaim" | "LeadLifecycleClaim";
 export type LeadClaim = { won: true; holder: string } | { won: false };
 
-function claimId(value: string): string {
+/** Exported for the merge engine's blocking scan — a live lead claim is
+ *  findable only under this derived id, never the raw customer id. */
+export function leadClaimId(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 48);
 }
+const claimId = leadClaimId;
 
 async function acquire(
   modelName: ClaimModel,

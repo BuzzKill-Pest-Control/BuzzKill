@@ -8,6 +8,7 @@ import {
 } from "./atomicLock";
 import { openOwnedWork, resolveOwnedWork, WORK_SUPPRESSED } from "./ownedWork";
 import { cusGroup } from "./dynamicGroups";
+import { leadClaimId } from "./leadClaim";
 import { listAllLifecycleCommands } from "./lifecycleCommand";
 
 /**
@@ -191,27 +192,35 @@ export function mergeCounterpartCustomerId(
   return hash === -1 ? marker : marker.slice(0, hash);
 }
 
+/** AWSJSON round-trips are shape-shifty: depending on the read path the blob
+ *  arrives as the object, the JSON string, or a doubly-encoded string. Parse
+ *  until it stops being a string (bounded) — the staging drill proved a
+ *  single-parse assumption here degrades RESUME into a destructive re-claim. */
+function parseJsonish(raw: unknown): unknown {
+  let value = raw;
+  for (let i = 0; i < 3 && typeof value === "string"; i++) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
 export function parseMergeState(raw: unknown): MergeStateBlob | null {
   if (!raw) return null;
-  try {
-    const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (obj && typeof obj === "object" && "stage" in obj) {
-      return obj as MergeStateBlob;
-    }
-    return null;
-  } catch {
-    return null;
+  const obj = parseJsonish(raw);
+  if (obj && typeof obj === "object" && "stage" in obj) {
+    return obj as MergeStateBlob;
   }
+  return null;
 }
 
 function parseSurvivorMarker(raw: unknown): SurvivorMergeMarker {
   if (!raw) return {};
-  try {
-    const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
-    return obj && typeof obj === "object" ? (obj as SurvivorMergeMarker) : {};
-  } catch {
-    return {};
-  }
+  const obj = parseJsonish(raw);
+  return obj && typeof obj === "object" ? (obj as SurvivorMergeMarker) : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -462,10 +471,12 @@ async function findBlockingCommands(
     }
   }
 
-  // A live lead-lifecycle claim (createLead / disposition in flight).
+  // A live lead-lifecycle claim (createLead / disposition in flight). Real
+  // claims are keyed by the DERIVED hash, never the raw customer id — a raw
+  // get here was dead code (review finding).
   try {
     const { data: leadClaim } = await client.models.LeadLifecycleClaim.get({
-      id: customerId,
+      id: leadClaimId(customerId),
     });
     const until = (leadClaim as { leaseUntil?: string | null } | null)
       ?.leaseUntil;
@@ -850,6 +861,21 @@ export async function mergeCustomers(input: {
         },
       ],
     };
+  } else if (input.action === "RESUME") {
+    // RESUME may NEVER fall through to a fresh claim: with no readable blob
+    // there is nothing to resume, and a fresh claim here would overwrite
+    // whatever state actually exists (the staging drill's cascade). Refuse
+    // without touching anything.
+    return {
+      decision: "REFUSED",
+      blockers: [
+        {
+          code: "NOTHING_TO_RESUME",
+          detail:
+            "No resumable merge was found for this pair — its saved state is missing or unreadable. Start the merge again; it is safe to re-run.",
+        },
+      ],
+    };
   } else {
     // Fresh EXECUTE: full preview gate first.
     const preview = await computePreview(survivorId, loserId, deps);
@@ -898,10 +924,53 @@ export async function mergeCustomers(input: {
         mergeState: stateJson(blob),
       },
     };
+    // Self-repair for the stale-suffixed-survivor state (a destroyed blob
+    // left the survivor marked `<loserId>#fields-done` with nothing to
+    // resume): a fresh EXECUTE of the SAME pair clears the stale marker
+    // (guarded on its exact value) so the claim below can land.
+    const survivorNow = await loadCustomer(survivorId);
+    const survivorMarkerNow = String(survivorNow?.mergeCounterpartId ?? "");
+    if (
+      survivorMarkerNow &&
+      survivorMarkerNow !== loserId &&
+      mergeCounterpartCustomerId(survivorMarkerNow) === loserId &&
+      !loserNow.mergeCounterpartId &&
+      !existing
+    ) {
+      await casGuardedUpdate(
+        "Customer",
+        survivorId,
+        { mergeCounterpartId: null },
+        [
+          {
+            kind: "fieldEquals",
+            field: "mergeCounterpartId",
+            value: survivorMarkerNow,
+          },
+        ]
+      );
+    }
+
     const counterpartOf: Record<string, string> = {
       [survivorId]: loserId,
       [loserId]: survivorId,
     };
+    // Belt: a fresh claim may never overwrite state it cannot READ. A former
+    // survivor legitimately carries an {absorbed} marker (parses to an object
+    // without a stage — fine to absorb, the claim captured its genealogy
+    // above); a command blob routes to adopt/refuse before this point; but a
+    // blob in a shape we failed to parse must refuse, not be overwritten.
+    if (loserNow.mergeState && parseJsonish(loserNow.mergeState) === null) {
+      return {
+        decision: "REFUSED",
+        blockers: [
+          {
+            code: "UNREADABLE_MERGE_STATE",
+            detail: `${loserId} carries merge state this build cannot read — refusing to overwrite it. Escalate to engineering.`,
+          },
+        ],
+      };
+    }
     const claimConditions = (rowId: string): Parameters<typeof casGuardedUpdate>[3] => [
       {
         kind: "fieldEqualsOrMissing",
