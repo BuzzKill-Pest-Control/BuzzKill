@@ -46,6 +46,16 @@ let jobs: Job[] = [];
 let invoiceRows: Invoice[] = [];
 let routes: Route[] = [];
 let techs: Tech[] = [];
+type DisputeRow = {
+  id: string;
+  stripeDisputeId: string;
+  customerId?: string | null;
+  amountCents: number;
+  status: string;
+  evidenceDueBy?: string | null;
+  ownerEmail?: string | null;
+};
+let disputeRows: DisputeRow[] = [];
 
 /** Same shop-timezone date arithmetic the handler uses. */
 const easternPlusDays = (n: number) =>
@@ -60,13 +70,6 @@ const fakeDataClient = {
         data: plans.filter((p) => p.status === "ACTIVE"),
         nextToken: null,
       }),
-    },
-    // Light inventory low-stock digest: no tracked products in these tests.
-    Product: {
-      list: async () => ({ data: [], nextToken: null }),
-    },
-    ProductStockEntry: {
-      listProductStockEntryByProductId: async () => ({ data: [], nextToken: null }),
     },
     Job: {
       listJobByScheduledDate: async ({
@@ -95,15 +98,17 @@ const fakeDataClient = {
     },
     Invoice: {
       list: async () => ({ data: invoiceRows, nextToken: null }),
-      // Recovery lifecycle: the aging/dunning passes read the status index.
-      // These existing tests don't exercise recovery, so return nothing owed.
-      listInvoiceByStatusAndIssuedAt: async () => ({
-        data: [],
+      // The dunning/reminder passes read the status index.
+      listInvoiceByStatusAndIssuedAt: async ({ status }: { status: string }) => ({
+        data: invoiceRows.filter((i) => i.status === status),
         nextToken: null,
       }),
     },
     Dispute: {
-      listDisputeByStatus: async () => ({ data: [], nextToken: null }),
+      listDisputeByStatus: async ({ status }: { status: string }) => ({
+        data: disputeRows.filter((d) => d.status === status),
+        nextToken: null,
+      }),
     },
     Route: {
       get: async ({ id }: { id: string }) => ({
@@ -145,20 +150,6 @@ const { handler } = await import("./handler");
 const alertsAbout = (needle: string) =>
   officeEmails.filter((e) => e.subject.includes(needle));
 
-const seed = (over: Partial<Plan> = {}): Plan => {
-  const p: Plan = {
-    id: `p${plans.length + 1}`,
-    customerId: `c${plans.length + 1}`,
-    planName: "Residential monthly",
-    priceCents: 9900,
-    status: "ACTIVE",
-    stripeSubscriptionId: null,
-    ...over,
-  };
-  plans.push(p);
-  return p;
-};
-
 let jobSeq = 0;
 const seedJob = (over: Partial<Job> = {}): Job => {
   const j: Job = {
@@ -184,209 +175,10 @@ beforeEach(() => {
   invoiceRows = [];
   routes = [];
   techs = [];
+  disputeRows = [];
   jobSeq = 0;
   officeEmails.length = 0;
   customerEmails.length = 0;
-});
-
-describe("serviced-but-not-billing digest", () => {
-  it("reports a plan that has been serviced but never started billing", async () => {
-    const p = seed();
-    seedJob({ servicePlanId: p.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    const alerts = alertsAbout("serviced without billing");
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].bodyHtml).toContain("Customer c1");
-  });
-
-  it("stays silent about a plan whose first visit has not happened yet", async () => {
-    // Billing starts on first completion, so this plan is correctly unbilled.
-    const p = seed();
-    seedJob({ servicePlanId: p.id, status: "SCHEDULED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    expect(alertsAbout("serviced without billing")).toHaveLength(0);
-  });
-
-  it("stays silent about a plan that is billing normally", async () => {
-    const p = seed({ stripeSubscriptionId: "sub_live" });
-    seedJob({ servicePlanId: p.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    expect(alertsAbout("serviced without billing")).toHaveLength(0);
-  });
-
-  it("ignores canceled and paused plans", async () => {
-    const canceled = seed({ status: "CANCELED" });
-    const paused = seed({ status: "PAUSED" });
-    seedJob({ servicePlanId: canceled.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-    seedJob({ servicePlanId: paused.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    expect(officeEmails).toHaveLength(0);
-  });
-
-  it("totals the annual value so the email says what it is worth", async () => {
-    const a = seed({ priceCents: 9900 });
-    const b = seed({ priceCents: 4500 });
-    seedJob({ servicePlanId: a.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-    seedJob({ servicePlanId: b.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    // (99.00 + 45.00) * 12
-    expect(alertsAbout("serviced without billing")[0].bodyHtml).toContain(
-      "$1,728.00/yr"
-    );
-  });
-});
-
-describe("completed-but-never-charged digest", () => {
-  it("reports a completed one-time job with no invoice, with the amount", async () => {
-    seedJob({ customerId: "c9" });
-
-    await handler();
-
-    const alerts = alertsAbout("never been charged");
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].bodyHtml).toContain("Customer c9");
-    expect(alerts[0].bodyHtml).toContain("$299.00");
-  });
-
-  it("stays silent about a job paid up front at online booking", async () => {
-    seedJob({ paidAt: "2026-07-01T00:00:00.000Z" });
-
-    await handler();
-
-    expect(alertsAbout("never been charged")).toHaveLength(0);
-  });
-
-  it("stays silent about a job covered by a PAID or OPEN invoice", async () => {
-    const paid = seedJob();
-    const open = seedJob();
-    invoiceRows = [
-      { id: "i1", jobId: paid.id, status: "PAID" },
-      { id: "i2", jobId: open.id, status: "OPEN" },
-    ];
-
-    await handler();
-
-    expect(alertsAbout("never been charged")).toHaveLength(0);
-  });
-
-  it("stays silent about a job whose charge was deliberately refunded", async () => {
-    const j = seedJob();
-    invoiceRows = [{ id: "i1", jobId: j.id, status: "REFUNDED" }];
-
-    await handler();
-
-    expect(alertsAbout("never been charged")).toHaveLength(0);
-  });
-
-  it("keeps reporting after a FAILED charge or a voided invoice", async () => {
-    const failed = seedJob({ customerId: "c-failed" });
-    const voided = seedJob({ customerId: "c-voided" });
-    invoiceRows = [
-      { id: "i1", jobId: failed.id, status: "FAILED" },
-      { id: "i2", jobId: voided.id, status: "VOID" },
-    ];
-
-    await handler();
-
-    const alerts = alertsAbout("never been charged");
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].bodyHtml).toContain("Customer c-failed");
-    expect(alerts[0].bodyHtml).toContain("Customer c-voided");
-  });
-
-  it("ignores recurring plan visits — the subscription bills those", async () => {
-    // The plan side has its own digest; a plan visit here would double-count.
-    const p = seed({ stripeSubscriptionId: "sub_live" });
-    seedJob({ servicePlanId: p.id, type: "RECURRING", priceCents: 9900 });
-    seedJob({ servicePlanId: p.id, type: "RECURRING", status: "UNSCHEDULED", priceCents: null });
-
-    await handler();
-
-    expect(alertsAbout("never been charged")).toHaveLength(0);
-  });
-
-  it("ignores zero-priced jobs — there is nothing for Charge to take", async () => {
-    seedJob({ priceCents: 0 });
-    seedJob({ priceCents: null });
-
-    await handler();
-
-    expect(alertsAbout("never been charged")).toHaveLength(0);
-  });
-});
-
-describe("active-plan-with-no-next-visit digest", () => {
-  it("reports a billing plan whose only visit is completed and nothing is queued", async () => {
-    const p = seed({ stripeSubscriptionId: "sub_live" });
-    seedJob({ servicePlanId: p.id, status: "COMPLETED", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    const alerts = alertsAbout("no next visit");
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].bodyHtml).toContain("Customer c1");
-    expect(alerts[0].bodyHtml).toContain("billing is running");
-  });
-
-  it("reports a plan whose visit ended NO_ACCESS — the honest exit queues nothing", async () => {
-    const p = seed({ stripeSubscriptionId: "sub_live" });
-    seedJob({ servicePlanId: p.id, status: "NO_ACCESS", type: "RECURRING", priceCents: null });
-
-    await handler();
-
-    expect(alertsAbout("no next visit")).toHaveLength(1);
-  });
-
-  it("reports a plan whose only scheduled visit is in the past — nobody is coming", async () => {
-    const p = seed({ stripeSubscriptionId: "sub_live" });
-    seedJob({
-      servicePlanId: p.id,
-      status: "SCHEDULED",
-      type: "RECURRING",
-      priceCents: null,
-      scheduledDate: "2020-01-01",
-    });
-
-    await handler();
-
-    expect(alertsAbout("no next visit")).toHaveLength(1);
-  });
-
-  it("stays silent when a next visit is queued or on the calendar", async () => {
-    const queued = seed({ stripeSubscriptionId: "sub_1" });
-    const scheduled = seed({ stripeSubscriptionId: "sub_2" });
-    seedJob({ servicePlanId: queued.id, status: "UNSCHEDULED", type: "RECURRING", priceCents: null });
-    seedJob({
-      servicePlanId: scheduled.id,
-      status: "SCHEDULED",
-      type: "RECURRING",
-      priceCents: null,
-      scheduledDate: easternPlusDays(30),
-    });
-
-    await handler();
-
-    expect(alertsAbout("no next visit")).toHaveLength(0);
-  });
-
-  it("ignores paused and canceled plans — they are supposed to have no visit", async () => {
-    seed({ status: "PAUSED", stripeSubscriptionId: "sub_1" });
-    seed({ status: "CANCELED" });
-
-    await handler();
-
-    expect(alertsAbout("no next visit")).toHaveLength(0);
-  });
 });
 
 describe("unstaffed-visit gate on tomorrow's reminders", () => {
@@ -411,7 +203,7 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
 
     expect(customerEmails).toHaveLength(1);
     expect(customerEmails[0].to).toBe("c-early@example.com");
-    expect(alertsAbout("nobody coming")).toHaveLength(0);
+    expect(alertsAbout("Morning ops")).toHaveLength(0);
   });
 
   it("suppresses the reminder and alerts the office when the visit is on no route", async () => {
@@ -426,7 +218,7 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
     await handler();
 
     expect(customerEmails).toHaveLength(0);
-    const alerts = alertsAbout("nobody coming");
+    const alerts = alertsAbout("Morning ops");
     expect(alerts).toHaveLength(1);
     expect(alerts[0].bodyHtml).toContain("Customer c-lost");
     expect(alerts[0].bodyHtml).toContain("on no technician's route");
@@ -447,7 +239,7 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
     await handler();
 
     expect(customerEmails).toHaveLength(0);
-    const alerts = alertsAbout("nobody coming");
+    const alerts = alertsAbout("Morning ops");
     expect(alerts).toHaveLength(1);
     expect(alerts[0].bodyHtml).toContain("Sam, who is deactivated");
   });
@@ -466,7 +258,7 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
     await handler();
 
     expect(customerEmails).toHaveLength(0);
-    expect(alertsAbout("nobody coming")).toHaveLength(1);
+    expect(alertsAbout("Morning ops")).toHaveLength(1);
   });
 
   it("includes a pool job whose target date is tomorrow, without reminding anyone", async () => {
@@ -480,7 +272,7 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
     await handler();
 
     expect(customerEmails).toHaveLength(0);
-    const alerts = alertsAbout("nobody coming");
+    const alerts = alertsAbout("Morning ops");
     expect(alerts).toHaveLength(1);
     expect(alerts[0].bodyHtml).toContain("needs-scheduling pool");
   });
@@ -498,6 +290,57 @@ describe("unstaffed-visit gate on tomorrow's reminders", () => {
 
     expect(customerEmails).toHaveLength(1);
     expect(customerEmails[0].to).toBe("c-week@example.com");
-    expect(alertsAbout("nobody coming")).toHaveLength(0);
+    expect(alertsAbout("Morning ops")).toHaveLength(0);
+  });
+});
+
+describe("the consolidated morning ops email", () => {
+  const tomorrow = () => easternPlusDays(1);
+
+  it("bundles unstaffed visits and dispute deadlines into ONE email", async () => {
+    seedJob({
+      customerId: "c-lost",
+      status: "SCHEDULED",
+      scheduledDate: tomorrow(),
+      routeId: null,
+      completedAt: null,
+    });
+    disputeRows.push({
+      id: "d1",
+      stripeDisputeId: "dp_123",
+      customerId: "c-dis",
+      amountCents: 12500,
+      status: "NEEDS_RESPONSE",
+      evidenceDueBy: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      ownerEmail: null,
+    });
+
+    await handler();
+
+    expect(officeEmails).toHaveLength(1);
+    const email = officeEmails[0];
+    expect(email.subject).toContain("Morning ops:");
+    expect(email.subject).toContain("1 unstaffed visit tomorrow");
+    expect(email.subject).toContain("1 dispute needs evidence");
+    expect(email.bodyHtml).toContain("Customer c-lost");
+    // The dispute id deep-links straight to the Stripe response form —
+    // under /test/ off-main (PRODUCTION_EMAIL unset), live path on main.
+    expect(email.bodyHtml).toContain("dashboard.stripe.com/test/disputes/dp_123");
+  });
+
+  it("a morning with nothing to say sends nothing at all", async () => {
+    await handler();
+    expect(officeEmails).toHaveLength(0);
+  });
+
+  it("the retired info digests are gone — an outstanding invoice alone emails nobody", async () => {
+    // An OPEN invoice used to trigger the daily AR-aging digest
+    // unconditionally; the owner retired it (2026-08-15). No dueDate, so the
+    // customer-facing reminder pass correctly stays quiet too.
+    invoiceRows.push({ id: "i1", jobId: null, status: "OPEN" });
+
+    await handler();
+
+    expect(officeEmails).toHaveLength(0);
   });
 });
