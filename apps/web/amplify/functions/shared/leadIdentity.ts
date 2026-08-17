@@ -91,6 +91,10 @@ export async function findLeadDuplicates(input: {
   )) as CustomerRow[];
   for (const raw of rows) {
     if (input.excludeId && raw.id === input.excludeId) continue;
+    // A merge tombstone is not a person to match: a full tombstone has its
+    // contact fields blanked anyway, and skipping on status keeps a partial
+    // (mid-merge) blank from surfacing a retired row through this gate.
+    if (raw.status === "MERGED") continue;
     const cEmail = normalizeEmail(raw.email);
     const cPhone = normalizePhone(raw.phone);
     const cName = normalizeName(raw.displayName) ?? normalizeName(raw.contactName);

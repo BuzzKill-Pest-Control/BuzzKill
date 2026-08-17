@@ -29,6 +29,7 @@ import {
 } from "../shared/recovery";
 import { openOwnedWork } from "../shared/ownedWork";
 import { casGuardedUpdate } from "../shared/atomicLock";
+import { resolveMergedCustomer } from "../shared/customerMerge";
 import { forEachPage, listAll } from "../shared/pagination";
 import {
   cancelQueuedPlanVisits,
@@ -189,16 +190,51 @@ export const handler = async (
   return { statusCode: 200, body: "ok" };
 };
 
+/**
+ * Follow rule (customer merge): Stripe metadata freezes the CRM customer id
+ * when the intent/invoice is minted, and bank verifications and smart-retry
+ * dunning settle days later — a merge in between leaves the snapshot naming
+ * the retired row. Resolves to the live survivor; logs when it moved.
+ */
+async function resolveFrozenCustomerId(
+  frozenId: string,
+  context: string
+): Promise<string> {
+  const resolved = await resolveMergedCustomer(frozenId);
+  // A resolution that ends on a still-MERGED row is a broken pointer chain —
+  // never attribute money to an intermediate tombstone. Keep the frozen id.
+  if (resolved && resolved.status === "MERGED") {
+    console.error(
+      `${context}: merged customer ${frozenId} resolves to tombstone ${resolved.id} (broken pointer chain) — keeping the frozen id`
+    );
+    return frozenId;
+  }
+  if (resolved && resolved.id !== frozenId) {
+    console.log(
+      `${context}: frozen metadata names merged customer ${frozenId} — using survivor ${resolved.id}`
+    );
+    return resolved.id;
+  }
+  return frozenId;
+}
+
 /** Newly saved payment method → make it the customer default + cache label. */
 async function onSetupIntentSucceeded(intent: Stripe.SetupIntent) {
-  const crmCustomerId = intent.metadata?.crmCustomerId;
+  const frozenCrmCustomerId = intent.metadata?.crmCustomerId;
   const pmId =
     typeof intent.payment_method === "string"
       ? intent.payment_method
       : intent.payment_method?.id;
   const stripeCustomerId =
     typeof intent.customer === "string" ? intent.customer : intent.customer?.id;
-  if (!crmCustomerId || !pmId || !stripeCustomerId) return;
+  if (!frozenCrmCustomerId || !pmId || !stripeCustomerId) return;
+
+  // Stamped at SetupIntent creation — the label cache and the auto-start scan
+  // below must target the live survivor, never a merged-away tombstone.
+  const crmCustomerId = await resolveFrozenCustomerId(
+    frozenCrmCustomerId,
+    "onSetupIntentSucceeded"
+  );
 
   const stripe = stripeClient();
   await stripe.customers.update(stripeCustomerId, {
@@ -374,6 +410,16 @@ async function onSubscriptionInvoice(
     crmCustomerId ??= stripeSub.metadata?.crmCustomerId;
   }
   if (!crmServicePlanId || !crmCustomerId) return;
+
+  // The subscription-metadata snapshot on the invoice was stamped when the
+  // invoice was minted — one created before a merge carries the retired id
+  // even after the merge repointed the live subscription. Invoice.customerId,
+  // the accessGroups stamp, receipts, and failure notices below must all name
+  // the survivor.
+  crmCustomerId = await resolveFrozenCustomerId(
+    crmCustomerId,
+    "onSubscriptionInvoice"
+  );
 
   // PAGINATED to exhaustion: this lookup is BOTH the replay guard and the
   // FAILED→PAID transition path — a row hiding past the first filter-scan

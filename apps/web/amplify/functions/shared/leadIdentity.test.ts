@@ -97,6 +97,21 @@ describe("findLeadDuplicates", () => {
     ).toHaveLength(0);
   });
 
+  it("skips MERGED tombstones, even a partial one still carrying contact fields", async () => {
+    // A full tombstone has blanked contact fields, but a mid-merge (partial)
+    // row may not — the status skip keeps either out of the duplicate gate.
+    customers = [
+      { id: "c1", displayName: "Dana W", email: "dana@example.com", phone: null, status: "MERGED" },
+    ];
+    expect(await findLeadDuplicates({ email: "dana@example.com" })).toHaveLength(0);
+
+    // The live counterpart still matches.
+    customers.push({ id: "c2", displayName: "Dana W", email: "dana@example.com", phone: null, status: "ACTIVE" });
+    const hits = await findLeadDuplicates({ email: "dana@example.com" });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ id: "c2", matchedOn: "email" });
+  });
+
   it("pages the complete customer collection", async () => {
     paginate = true;
     customers = [

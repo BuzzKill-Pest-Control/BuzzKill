@@ -228,6 +228,42 @@ export type ChildRows = {
   } | null;
 };
 
+/** Same hop bound as resolveMergedCustomer's mergedIntoId walk. */
+const MERGE_FOLLOW_HOPS = 5;
+
+/**
+ * Whether two customer ids name the same customer once merge tombstones are
+ * followed: equal outright, or either id's row is MERGED with a mergedIntoId
+ * chain (hop-bounded) leading to the other. The caller supplies the
+ * tombstone → mergedIntoId map it loaded; no map means no follow.
+ */
+function sameCustomerThroughMerges(
+  a: string,
+  b: string,
+  mergedInto?: Record<string, string>
+): boolean {
+  if (a === b) return true;
+  if (!mergedInto) return false;
+  return (
+    mergeChainReaches(a, b, mergedInto) || mergeChainReaches(b, a, mergedInto)
+  );
+}
+
+function mergeChainReaches(
+  from: string,
+  to: string,
+  mergedInto: Record<string, string>
+): boolean {
+  let current = from;
+  for (let hop = 0; hop < MERGE_FOLLOW_HOPS; hop++) {
+    const next = mergedInto[current];
+    if (!next) return false;
+    if (next === to) return true;
+    current = next;
+  }
+  return false;
+}
+
 /**
  * GL-05 — relationships, not existence. A child record that RESOLVES but
  * belongs to a different customer/booking (a cross-link) is exactly the
@@ -245,13 +281,21 @@ export function mismatchedChildRelationships(
     stripePaymentIntentId?: string | null;
     recurring?: boolean | null;
   },
-  rows: ChildRows
+  rows: ChildRows,
+  /** Tombstone → mergedIntoId map: a customerId disagreement a completed
+   *  merge explains (either id follows to the other) is not a cross-link. */
+  mergedInto?: Record<string, string>
 ): string[] {
   const bad: string[] = [];
   const cid = booking.customerId ?? null;
   // Each comparison runs only when the loaded row actually carries the field —
   // a projection or fixture without it proves nothing either way.
-  if (rows.job && cid && rows.job.customerId != null && rows.job.customerId !== cid) {
+  if (
+    rows.job &&
+    cid &&
+    rows.job.customerId != null &&
+    !sameCustomerThroughMerges(rows.job.customerId, cid, mergedInto)
+  ) {
     bad.push(`job belongs to customer ${rows.job.customerId}, not ${cid}`);
   }
   if (
@@ -270,13 +314,18 @@ export function mismatchedChildRelationships(
     rows.agreement &&
     cid &&
     rows.agreement.customerId != null &&
-    rows.agreement.customerId !== cid
+    !sameCustomerThroughMerges(rows.agreement.customerId, cid, mergedInto)
   ) {
     bad.push(
       `agreement belongs to customer ${rows.agreement.customerId}, not ${cid}`
     );
   }
-  if (rows.plan && cid && rows.plan.customerId != null && rows.plan.customerId !== cid) {
+  if (
+    rows.plan &&
+    cid &&
+    rows.plan.customerId != null &&
+    !sameCustomerThroughMerges(rows.plan.customerId, cid, mergedInto)
+  ) {
     bad.push(`plan belongs to customer ${rows.plan.customerId}, not ${cid}`);
   }
   if (
@@ -290,7 +339,11 @@ export function mismatchedChildRelationships(
     );
   }
   if (rows.paidInvoice) {
-    if (cid && rows.paidInvoice.customerId && rows.paidInvoice.customerId !== cid) {
+    if (
+      cid &&
+      rows.paidInvoice.customerId &&
+      !sameCustomerThroughMerges(rows.paidInvoice.customerId, cid, mergedInto)
+    ) {
       bad.push(
         `paid invoice belongs to customer ${rows.paidInvoice.customerId}, not ${cid}`
       );

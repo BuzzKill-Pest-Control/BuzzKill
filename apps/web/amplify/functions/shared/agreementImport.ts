@@ -1,5 +1,6 @@
 import { dataClient } from "./dataClient";
 import { customerAccessGroups } from "./dynamicGroups";
+import { resolveMergedCustomer } from "./customerMerge";
 
 /**
  * One-time migration of established FieldRoutes agreements into the CRM.
@@ -139,7 +140,7 @@ export async function importAgreement(
   // 2. The customer — one per property, its OWN address. Reusing a single
   //    customer across properties would drop every address but the first
   //    (fillIfMissing); a group of per-property customers is the model.
-  await createOrGet(
+  const customerRow = await createOrGet(
     "customer",
     () =>
       client.models.Customer.create({
@@ -162,6 +163,26 @@ export async function importAgreement(
     () => client.models.Customer.get({ id: customerId })
   );
 
+  // The follow rule: a re-run may land on a row merged away since the last
+  // import. Plans and jobs attach to the SURVIVOR — never a tombstone — and
+  // carry the survivor's own access stamp. A broken pointer refuses the row
+  // outright rather than filing an agreement under a blanked record.
+  let planCustomerId = customerId;
+  let planAccessGroups = accessGroups;
+  if (customerRow.status === "MERGED") {
+    const live = await resolveMergedCustomer(customerId);
+    if (!live || live.status === "MERGED") {
+      throw new Error(
+        `customer ${customerId} was merged away and its survivor cannot be resolved — fix the merge pointer, then re-run`
+      );
+    }
+    planCustomerId = live.id;
+    planAccessGroups = customerAccessGroups(
+      live.id,
+      typeof live.groupId === "string" && live.groupId ? live.groupId : null
+    );
+  }
+
   // 3. The plan — the locked agreement. priceCents is the contract; billing
   //    reads it verbatim and never re-prices it.
   await createOrGet(
@@ -169,7 +190,7 @@ export async function importAgreement(
     () =>
       client.models.ServicePlan.create({
         id: servicePlanId,
-        customerId,
+        customerId: planCustomerId,
         planName: input.planName,
         priceCents: input.priceCents,
         serviceFrequency: input.serviceFrequency,
@@ -190,7 +211,7 @@ export async function importAgreement(
             ? ` Sales tax ${input.salesTaxPercent}% billed separately.`
             : ""
         }`,
-        accessGroups,
+        accessGroups: planAccessGroups,
       }),
     () => client.models.ServicePlan.get({ id: servicePlanId })
   );
@@ -206,7 +227,7 @@ export async function importAgreement(
       () =>
         client.models.Job.create({
           id: seedJobId!,
-          customerId,
+          customerId: planCustomerId,
           servicePlanId,
           type: "RECURRING",
           serviceType: input.serviceType,
@@ -215,11 +236,11 @@ export async function importAgreement(
           // NOT paid — migration creates no charge. Just the next visit.
           status: "SCHEDULED",
           notes: `First visit after FieldRoutes migration (agreement ${input.externalSubscriptionId}).`,
-          accessGroups,
+          accessGroups: planAccessGroups,
         }),
       () => client.models.Job.get({ id: seedJobId! })
     );
   }
 
-  return { groupId, customerId, servicePlanId, seedJobId };
+  return { groupId, customerId: planCustomerId, servicePlanId, seedJobId };
 }

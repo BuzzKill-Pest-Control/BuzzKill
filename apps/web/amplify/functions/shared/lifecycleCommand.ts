@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { dataClient } from "./dataClient";
 import { casTakeover, casFencedUpdate } from "./atomicLock";
+import { isMidMerge, mergeCounterpartCustomerId } from "./customerMerge";
 import type { LifecycleActor } from "./lifecycleLog";
 import { listAll } from "./pagination";
 
@@ -135,6 +136,41 @@ export async function claimLifecycleCommand(input: {
   // the provider on hope. The caller owns the refusal (owned recovery).
   if (!("CustomerLifecycleCommand" in client.models)) {
     return unverified("The lifecycle command store is unavailable.");
+  }
+
+  // The merge's exclusion is bidirectional (customerMerge.isMidMerge): a
+  // FRESH command must not start on a customer that is mid-merge, and a
+  // tombstone must never be transitioned. An EXISTING command under this key
+  // keeps its right to resume — the merge refuses to start while any
+  // non-settled command is open, so the two can never interleave. FAIL
+  // CLOSED: an unreadable customer row refuses the claim.
+  type MergeGateRow = {
+    status?: string | null;
+    mergedIntoId?: string | null;
+    mergeCounterpartId?: string | null;
+  };
+  let mergeRow: MergeGateRow | null = null;
+  let freshStart = false;
+  try {
+    freshStart = !(await client.models.CustomerLifecycleCommand.get({ id }))
+      .data;
+    if (freshStart) {
+      mergeRow = (await client.models.Customer.get({ id: input.customerId }))
+        .data as MergeGateRow | null;
+    }
+  } catch (err) {
+    console.error("claimLifecycleCommand: merge-state check failed", err);
+    return unverified("Could not verify merge state (customer read failure).");
+  }
+  if (freshStart && mergeRow?.status === "MERGED") {
+    throw new Error(
+      `This record was merged into ${mergeRow.mergedIntoId ?? "another record"}; act on that record instead.`
+    );
+  }
+  if (freshStart && mergeRow && isMidMerge(mergeRow)) {
+    throw new Error(
+      `Customer ${input.customerId} is mid-merge with ${mergeCounterpartCustomerId(mergeRow.mergeCounterpartId)} — finish or resume that merge before a ${input.action.toLowerCase()} can start.`
+    );
   }
 
   // Serialized reversal: any non-terminal command for this customer — either

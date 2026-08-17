@@ -258,4 +258,70 @@ describe("GL-05 — relationships, not existence", () => {
       })
     ).toEqual([]);
   });
+
+  // A completed customer merge repoints children but leaves frozen ids behind
+  // (booking checkpoints, unrepointed projections). A customerId disagreement
+  // the caller's tombstone → mergedIntoId map explains is not a cross-link.
+  const rowsFor = (cid: string) => ({
+    customer: { id: cid },
+    job: { id: "j1", customerId: cid, scheduledDate: "2026-07-25" },
+    agreement: { id: "a1", customerId: cid },
+    plan: null,
+    paidInvoice: {
+      id: "inv1",
+      customerId: cid,
+      jobId: "j1",
+      amountCents: 31300,
+      stripePaymentIntentId: "pi_1",
+    },
+  });
+
+  it("a merge-explained customerId disagreement is not a cross-link", () => {
+    // Booking frozen on the tombstone id; children repointed to the survivor.
+    expect(
+      mismatchedChildRelationships(
+        { ...BOOKING, customerId: "loser-1" },
+        rowsFor("surv-1"),
+        { "loser-1": "surv-1" }
+      )
+    ).toEqual([]);
+  });
+
+  it("the merge follow works in either direction", () => {
+    // Booking already repointed; a child projection still carries the old id.
+    expect(
+      mismatchedChildRelationships(
+        { ...BOOKING, customerId: "surv-1" },
+        rowsFor("loser-1"),
+        { "loser-1": "surv-1" }
+      )
+    ).toEqual([]);
+  });
+
+  it("an unrelated customer is still a cross-link even with a merge map supplied", () => {
+    const bad = mismatchedChildRelationships(
+      { ...BOOKING, customerId: "surv-1" },
+      rowsFor("c-OTHER"),
+      { "loser-1": "surv-1" }
+    );
+    expect(bad.join(" ")).toMatch(/job belongs to customer c-OTHER/);
+  });
+
+  it("the merge follow is hop-bounded at 5", () => {
+    const chain = { a: "b", b: "c", c: "d", d: "e", e: "f", f: "g" };
+    expect(
+      mismatchedChildRelationships(
+        { ...BOOKING, customerId: "a" },
+        rowsFor("f"), // 5 hops away — within the bound
+        chain
+      )
+    ).toEqual([]);
+    expect(
+      mismatchedChildRelationships(
+        { ...BOOKING, customerId: "a" },
+        rowsFor("g"), // 6 hops away — past the bound
+        chain
+      ).length
+    ).toBeGreaterThan(0);
+  });
 });

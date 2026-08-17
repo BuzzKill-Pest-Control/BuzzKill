@@ -11,6 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
 let updateThrows = false;
+const customers = new Map<string, Record<string, unknown>>();
+let customerGets = 0;
+const suppressions: Record<string, unknown>[] = [];
 vi.mock("../shared/dataClient", () => ({
   dataClient: async () => ({
     models: {
@@ -25,9 +28,18 @@ vi.mock("../shared/dataClient", () => ({
           return { data: row ?? null };
         },
       },
+      Customer: {
+        get: async ({ id }: { id: string }) => {
+          customerGets++;
+          return { data: customers.get(id) ?? null };
+        },
+      },
       SuppressedEmail: {
         get: async () => ({ data: null }),
-        create: async () => ({ data: {} }),
+        create: async (row: Record<string, unknown>) => {
+          suppressions.push(row);
+          return { data: row };
+        },
       },
     },
   }),
@@ -58,6 +70,9 @@ beforeEach(() => {
   logs.length = 0;
   updateThrows = false;
   workOpened.length = 0;
+  customers.clear();
+  customerGets = 0;
+  suppressions.length = 0;
 });
 
 describe("ses-events durability (GL-22)", () => {
@@ -101,5 +116,74 @@ describe("ses-events durability (GL-22)", () => {
     );
 
     expect(logs[0].deliveryStatus).toBe("DELIVERED");
+  });
+});
+
+describe("ses-events and the merge follow rule", () => {
+  const bounceEvent = () =>
+    snsEvent({
+      notificationType: "bounce",
+      mail: { messageId: "m1" },
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        bouncedRecipients: [{ emailAddress: "dana@example.com" }],
+      },
+    });
+
+  it("a bounce about a pre-merge send opens work naming the survivor, never the tombstone", async () => {
+    logs.push({
+      id: "l1",
+      messageId: "m1",
+      deliveryStatus: "SENT",
+      customerId: "cus-loser",
+    });
+    customers.set("cus-loser", {
+      id: "cus-loser",
+      status: "MERGED",
+      mergedIntoId: "cus-surv",
+    });
+    customers.set("cus-surv", { id: "cus-surv", status: "ACTIVE" });
+
+    await handler(bounceEvent());
+
+    expect(workOpened).toHaveLength(1);
+    expect(workOpened[0]).toMatchObject({
+      kind: "EMAIL_FAILURE",
+      customerId: "cus-surv",
+      relatedId: "cus-surv",
+      sourceUrl: "/customers/cus-surv",
+    });
+    // The suppression case follows the same pointer.
+    expect(suppressions[0]).toMatchObject({ relatedId: "cus-surv" });
+  });
+
+  it("a bounce for a live customer keeps its id unchanged", async () => {
+    logs.push({
+      id: "l1",
+      messageId: "m1",
+      deliveryStatus: "SENT",
+      customerId: "cus-live",
+    });
+    customers.set("cus-live", { id: "cus-live", status: "ACTIVE" });
+
+    await handler(bounceEvent());
+
+    expect(workOpened[0]).toMatchObject({ customerId: "cus-live" });
+  });
+
+  it("delivery events never pay for merge resolution (the hot path stays cheap)", async () => {
+    logs.push({
+      id: "l1",
+      messageId: "m1",
+      deliveryStatus: "SENT",
+      customerId: "cus-loser",
+    });
+
+    await handler(
+      snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } })
+    );
+
+    expect(customerGets).toBe(0);
   });
 });

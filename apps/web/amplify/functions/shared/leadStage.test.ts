@@ -31,6 +31,25 @@ describe("GL-02 controlled stages", () => {
     expect(deriveLeadStage({ doNotContact: true, lostReason: "PRICE" })).toBe("DNC");
     expect(deriveLeadStage({ status: "ACTIVE", doNotContact: true })).toBe("WON");
   });
+
+  it("a MERGED tombstone is terminal and never an open lead", () => {
+    expect(deriveLeadStage({ status: "MERGED" })).toBe("MERGED");
+    // Whatever facts the tombstone kept, none of them reopen or relabel it —
+    // the surviving record owns the live stage.
+    expect(
+      deriveLeadStage({ status: "MERGED", convertedAt: "2026-08-01T00:00:00Z" })
+    ).toBe("MERGED");
+    expect(
+      deriveLeadStage({ status: "MERGED", qualificationStatus: "QUALIFIED" })
+    ).toBe("MERGED");
+    expect(isLeadOpen({ status: "MERGED" })).toBe(false);
+    expect(
+      isLeadActionOverdue(
+        { status: "MERGED", nextActionAt: "2026-07-01T00:00:00Z" },
+        new Date("2026-07-14T16:00:00Z")
+      )
+    ).toBe(false);
+  });
 });
 
 describe("durable next obligation", () => {

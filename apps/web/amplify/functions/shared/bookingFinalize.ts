@@ -13,6 +13,7 @@ import {
   reserveSlot,
 } from "./capacity";
 import { casGuardedUpdate } from "./atomicLock";
+import { isMidMerge, resolveMergedCustomer } from "./customerMerge";
 import { forEachPage, listAll } from "./pagination";
 import { todayEastern } from "./dates";
 import { parseQuoteSnapshot } from "./quoteSnapshot";
@@ -926,6 +927,7 @@ type ExistingCustomer = {
   convertedAt?: string | null;
   groupId?: string | null;
   portalUserSub?: string | null;
+  mergeCounterpartId?: string | null;
 };
 
 /**
@@ -992,8 +994,26 @@ async function findCustomersByContact(
   });
   return rows.filter(
     (c) =>
-      (Boolean(target) && (c.email ?? "").trim().toLowerCase() === target) ||
-      (Boolean(targetPhone) && normalizePhone(c.phone) === targetPhone)
+      // A MERGED tombstone is never a match: its contact fields are blanked
+      // at merge time, but the belt stays — a stale or partially-blanked
+      // tombstone must not become a conversion target.
+      c.status !== "MERGED" &&
+      ((Boolean(target) && (c.email ?? "").trim().toLowerCase() === target) ||
+        (Boolean(targetPhone) && normalizePhone(c.phone) === targetPhone))
+  );
+}
+
+/**
+ * The defer contract with the merge command (customerMerge.isMidMerge):
+ * finalization must not create children on a customer whose merge is in
+ * flight — the merge would move or miss them. Thrown mid-finalization it is
+ * retryable: the claim is released, PAID_NOT_FINALIZED opens, and the
+ * webhook-redelivery / reconcile / office-Retry machinery re-drives
+ * finalization after the merge resolves.
+ */
+function midMergeDeferError(customerId: string): Error {
+  return new Error(
+    `Customer ${customerId} is mid-merge — finalization retries after it completes`
   );
 }
 
@@ -1066,18 +1086,27 @@ async function convertExistingCustomer(
     actor: { sub: null, email: "system@pestbuzzkill.com" },
     mutationId: `paid-conversion:${booking.id}`,
   });
-  let { data: updated } = await client.models.Customer.update(patch);
-  if (!updated && patch.phone) {
-    // Same rule as the create path: a paid booking must never be bricked by
-    // a phone-format rejection — retry the merge without it.
-    ({ data: updated } = await client.models.Customer.update({
-      ...patch,
-      phone: undefined,
-    }));
+  // Guarded flip: the write lands only while the row is still an ordinary
+  // customer (never a MERGED tombstone) with no merge in flight on it — the
+  // caller's mid-merge check leaves a window, and the merge marker can land
+  // between that read and this write. Evaluated with the write, not before it.
+  const sets: Record<string, string> = {};
+  for (const [field, value] of Object.entries(patch)) {
+    if (field !== "id" && value !== undefined) sets[field] = value;
   }
-  if (!updated) {
+  const flipped = await casGuardedUpdate("Customer", existing.id, sets, [
+    { kind: "fieldIn", field: "status", values: ["LEAD", "ACTIVE", "INACTIVE"] },
+    { kind: "fieldMissingOrNull", field: "mergeCounterpartId" },
+  ]);
+  if (!flipped.ok) {
+    // The guarded write did not land. Re-read: an in-flight merge is the
+    // expected cause and it defers — the retry converts after the merge
+    // resolves (survivor or released marker). Anything else fails closed
+    // into the same retryable exception.
+    const { data: now } = await client.models.Customer.get({ id: existing.id });
+    if (now && isMidMerge(now)) throw midMergeDeferError(existing.id);
     throw new Error(
-      `finalizeBooking: could not convert existing customer ${existing.id}`
+      `finalizeBooking: could not convert existing customer ${existing.id} (guarded status flip ${flipped.reason}, status now ${now?.status ?? "missing"})`
     );
   }
   const verified = await client.models.Customer.get({ id: existing.id });
@@ -1096,7 +1125,7 @@ async function convertExistingCustomer(
   if (followup.data?.status === "OPEN") {
     throw new Error(`finalizeBooking: converted lead ${existing.id} still has an open follow-up`);
   }
-  return { id: updated.id, groupId: updated.groupId };
+  return { id: existing.id, groupId: verified.data.groupId };
 }
 
 async function ownConversionIdentityDecision(
@@ -1269,13 +1298,29 @@ async function finalizeClaimed(
   // Reuse exactly that record — re-running the email match could now find the
   // fresh customer the last attempt created and, if a same-email lead also
   // exists, mint a second one. Identity we already committed to beats matching.
+  //
+  // The checkpoint is a STORED id: a merge since the last attempt may have
+  // retired it, so it resolves through the tombstone chain (the follow rule)
+  // and the finalization lands on the SURVIVING record — children, comms and
+  // portal must never target a MERGED tombstone.
   if (booking.customerId) {
-    const { data } = await matchClient.models.Customer.get({
-      id: booking.customerId,
-    });
-    if (data) {
-      customer = { id: data.id, groupId: data.groupId };
-      hadPortalLogin = Boolean(data.portalUserSub);
+    const resolved = (await resolveMergedCustomer(
+      booking.customerId
+    )) as ExistingCustomer | null;
+    if (resolved && isMidMerge(resolved)) {
+      throw midMergeDeferError(resolved.id);
+    }
+    if (resolved && resolved.status === "MERGED") {
+      // Terminal tombstone with a broken forward pointer: there is no live
+      // record to finalize onto, and re-matching would guess against the
+      // committed identity. Fail closed into the retryable exception.
+      throw new Error(
+        `finalizeBooking: checkpointed customer ${booking.customerId} was merged away but no surviving record resolves`
+      );
+    }
+    if (resolved) {
+      customer = { id: resolved.id, groupId: resolved.groupId };
+      hadPortalLogin = Boolean(resolved.portalUserSub);
     }
   }
   if (!customer) try {
@@ -1291,12 +1336,18 @@ async function finalizeClaimed(
     //     to a human instead.
     let existing: ExistingCustomer | null = null;
     if (booking.leadCustomerId) {
-      const { data } = await matchClient.models.Customer.get({
-        id: booking.leadCustomerId,
-      });
-      existing = data;
+      // A STORED id frozen into the booking link at /quote — follow any
+      // completed merge to the surviving record and convert THAT. A terminal
+      // tombstone whose pointer is broken resolves to no live record and
+      // falls into the human identity decision below.
+      const resolved = (await resolveMergedCustomer(
+        booking.leadCustomerId
+      )) as ExistingCustomer | null;
+      existing = resolved && resolved.status !== "MERGED" ? resolved : null;
       if (!existing) {
-        matchFallbackReason = `the booking link's lead reference (${booking.leadCustomerId}) no longer resolves to a customer record`;
+        matchFallbackReason = resolved
+          ? `the booking link's lead reference (${booking.leadCustomerId}) no longer resolves to a live customer — it was merged away and its merge pointer is broken`
+          : `the booking link's lead reference (${booking.leadCustomerId}) no longer resolves to a customer record`;
         // Do not guess that an email match is the referenced person, but do
         // place every plausible open lead into the visible identity decision.
         // Otherwise a paid conversion can leave a same-email lead aging as an
@@ -1324,6 +1375,11 @@ async function finalizeClaimed(
       }
     }
     if (existing) {
+      // The merge's exclusion is bidirectional: a customer with an in-flight
+      // merge gains no children (job, plan, portal, activity) until it
+      // completes. Retryable — the webhook redelivery / reconcile sweep /
+      // office Retry re-drives finalization after the merge resolves.
+      if (isMidMerge(existing)) throw midMergeDeferError(existing.id);
       const wasInactive = existing.status === "INACTIVE";
       customer = await convertExistingCustomer(matchClient, existing, booking, {
         leadSource,

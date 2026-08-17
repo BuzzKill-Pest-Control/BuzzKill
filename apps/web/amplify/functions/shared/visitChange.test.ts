@@ -1033,3 +1033,119 @@ describe("rescheduleVisit", () => {
     expect(mail.html).toMatch(/we'll confirm your appointment/i);
   });
 });
+
+describe("visit change — merge exclusion", () => {
+  it("refuses a FRESH cancel while the customer is mid-merge, naming the merge", async () => {
+    seedPaidVisit({ scheduledDate: daysFromNow(10) });
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana",
+      email: "dana@example.com",
+      status: "ACTIVE",
+      mergeCounterpartId: "c2",
+    });
+    await expect(
+      cancelVisit(fakeStripe, {
+        jobId: "j1",
+        decision: "CANCEL_REFUND",
+        reason: "customer moving",
+        actor: OFFICE,
+      })
+    ).rejects.toThrow(/mid-merge with c2/);
+    // Nothing was claimed, refunded, or canceled — the refusal happens before
+    // the durable command is created.
+    expect(visitClaims.size).toBe(0);
+    expect(refundsCreate).not.toHaveBeenCalled();
+    expect(jobs.get("j1")!.status).toBe("SCHEDULED");
+  });
+
+  it("refuses a FRESH reschedule while the customer is mid-merge", async () => {
+    seedPaidVisit({ scheduledDate: daysFromNow(10) });
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana",
+      email: "dana@example.com",
+      status: "ACTIVE",
+      mergeCounterpartId: "c2",
+    });
+    await expect(
+      rescheduleVisit({
+        jobId: "j1",
+        scheduledDate: daysFromNow(12),
+        reason: "customer asked",
+        actor: OFFICE,
+      })
+    ).rejects.toThrow(/mid-merge with c2/);
+    expect(visitClaims.size).toBe(0);
+    expect(jobs.get("j1")!.scheduledDate).toBe(daysFromNow(10));
+  });
+
+  it("refuses a merge tombstone with a pointer to the surviving record", async () => {
+    seedPaidVisit({ scheduledDate: daysFromNow(10) });
+    customers.set("c1", { id: "c1", status: "MERGED", mergedIntoId: "c9" });
+    await expect(
+      cancelVisit(fakeStripe, {
+        jobId: "j1",
+        decision: "CANCEL_REFUND",
+        reason: "customer moving",
+        actor: OFFICE,
+      })
+    ).rejects.toThrow(/merged into c9; act on that record instead/);
+    expect(visitClaims.size).toBe(0);
+  });
+
+  it("does NOT block reclaim/resume of an EXISTING command while the merge is in flight", async () => {
+    seedPaidVisit({ scheduledDate: daysFromNow(10) });
+    // An orphaned command from a dead prior attempt — old enough to steal.
+    visitClaims.set("j1", {
+      id: "j1",
+      action: "CANCEL",
+      decision: "CANCEL_REFUND",
+      reason: "customer moving",
+      stage: "REQUESTED",
+      createdAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+      requestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+      attemptCount: 1,
+    });
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Dana",
+      email: "dana@example.com",
+      status: "ACTIVE",
+      mergeCounterpartId: "c2",
+    });
+    const res = await cancelVisit(fakeStripe, {
+      jobId: "j1",
+      decision: "CANCEL_REFUND",
+      reason: "customer moving",
+      actor: OFFICE,
+    });
+    // The existing command finishes rather than wedging behind the merge.
+    expect(res.outcome).toBe("COMPLETE");
+    expect(refundsCreate).toHaveBeenCalledOnce();
+    expect(jobs.get("j1")!.status).toBe("CANCELED");
+  });
+
+  it("fails CLOSED when the customer row cannot be read", async () => {
+    seedPaidVisit({ scheduledDate: daysFromNow(10) });
+    const orig = fakeDataClient.models.Customer.get;
+    fakeDataClient.models.Customer.get = async () => {
+      throw new Error("dynamo down");
+    };
+    try {
+      await expect(
+        cancelVisit(fakeStripe, {
+          jobId: "j1",
+          decision: "CANCEL_REFUND",
+          reason: "customer moving",
+          actor: OFFICE,
+        })
+      ).rejects.toThrow(/could not verify merge state/i);
+      expect(visitClaims.size).toBe(0);
+      expect(refundsCreate).not.toHaveBeenCalled();
+      expect(jobs.get("j1")!.status).toBe("SCHEDULED");
+    } finally {
+      fakeDataClient.models.Customer.get = orig;
+    }
+  });
+});
