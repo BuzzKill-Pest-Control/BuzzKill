@@ -3296,15 +3296,53 @@ function MergeCustomerSheet({
 
   if (!other) {
     const q = query.trim().toLowerCase();
-    const shown = (candidates ?? [])
-      .filter(
-        (c) =>
-          !q ||
+    const digits = (v?: string | null) => (v ?? "").replace(/\D/g, "");
+    const qDigits = digits(q);
+    const norm = (v?: string | null) => (v ?? "").trim().toLowerCase();
+    // The evidence the office needs FIRST: records that match this one the
+    // way the lead dedup gate matches — exact email, exact phone, or
+    // name+ZIP. Same normalization, computed locally over the loaded pages.
+    const matchEvidence = (c: Customer): string | null => {
+      if (norm(c.email) && norm(c.email) === norm(customer.email)) {
+        return "same email";
+      }
+      if (
+        digits(c.phone).length >= 10 &&
+        digits(c.phone) === digits(customer.phone)
+      ) {
+        return "same phone";
+      }
+      if (
+        norm(c.displayName) === norm(customer.displayName) &&
+        (c.serviceZip ?? "") !== "" &&
+        c.serviceZip === customer.serviceZip
+      ) {
+        return "same name + ZIP";
+      }
+      return null;
+    };
+    const likely = q
+      ? []
+      : (candidates ?? [])
+          .map((c) => ({ c, why: matchEvidence(c) }))
+          .filter((m): m is { c: Customer; why: string } => m.why !== null)
+          .slice(0, 5);
+    const likelyIds = new Set(likely.map((m) => m.c.id));
+    const filtered = (candidates ?? []).filter(
+      (c) =>
+        !likelyIds.has(c.id) &&
+        (!q ||
           c.displayName.toLowerCase().includes(q) ||
           (c.serviceCity ?? "").toLowerCase().includes(q) ||
-          (c.email ?? "").toLowerCase().includes(q)
-      )
-      .slice(0, 8);
+          (c.email ?? "").toLowerCase().includes(q) ||
+          (qDigits.length >= 4 && digits(c.phone).includes(qDigits)))
+    );
+    const shown = filtered.slice(0, 8);
+    const hidden = filtered.length - shown.length;
+    const pick = (c: Customer) => {
+      setOther(c);
+      setKeep(defaultSurvivorChoice(customer, c));
+    };
     return (
       <div className="form-grid">
         <p className="muted small" style={{ margin: 0 }}>
@@ -3318,31 +3356,62 @@ function MergeCustomerSheet({
           </p>
         ) : null}
         <input
-          placeholder="Search name, city, email…"
+          placeholder="Search name, city, email, phone…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <ErrorNote error={candidatesError} />
         {!candidates ? (
           <Spinner />
-        ) : shown.length === 0 ? (
-          <p className="muted small">No matching customers.</p>
         ) : (
-          shown.map((c) => (
-            <ListRow
-              key={c.id}
-              title={c.displayName}
-              subtitle={
-                [c.email, c.phone, c.serviceCity].filter(Boolean).join(" · ") ||
-                undefined
-              }
-              meta={<StatusBadge status={c.status} />}
-              onClick={() => {
-                setOther(c);
-                setKeep(defaultSurvivorChoice(customer, c));
-              }}
-            />
-          ))
+          <>
+            {likely.length > 0 ? (
+              <>
+                <div className="section-label">Likely duplicates</div>
+                {likely.map(({ c, why }) => (
+                  <ListRow
+                    key={c.id}
+                    title={c.displayName}
+                    subtitle={
+                      [c.email, c.phone, c.serviceCity]
+                        .filter(Boolean)
+                        .join(" · ") || undefined
+                    }
+                    meta={
+                      <span className="row-meta">
+                        <Badge tone="info">{why}</Badge>
+                        <StatusBadge status={c.status} />
+                      </span>
+                    }
+                    onClick={() => pick(c)}
+                  />
+                ))}
+                <div className="section-label">Everyone else</div>
+              </>
+            ) : null}
+            {shown.length === 0 && likely.length === 0 ? (
+              <p className="muted small">No matching customers.</p>
+            ) : (
+              shown.map((c) => (
+                <ListRow
+                  key={c.id}
+                  title={c.displayName}
+                  subtitle={
+                    [c.email, c.phone, c.serviceCity]
+                      .filter(Boolean)
+                      .join(" · ") || undefined
+                  }
+                  meta={<StatusBadge status={c.status} />}
+                  onClick={() => pick(c)}
+                />
+              ))
+            )}
+            {hidden > 0 ? (
+              <p className="muted small" style={{ margin: 0 }}>
+                {hidden} more not shown — keep typing to narrow it down.
+              </p>
+            ) : null}
+          </>
         )}
       </div>
     );
