@@ -954,6 +954,79 @@ export function previewLifecycleTransition(input: {
   return api().queries.previewLifecycleTransition(input);
 }
 
+/**
+ * Customer merge (OWNER) — absorb a duplicate record (loser) into the record
+ * being kept (survivor). PREVIEW returns the server-computed consequence
+ * envelope without touching anything; EXECUTE runs the durable staged command;
+ * RESUME re-drives a parked merge under the SAME idempotencyKey. Shapes mirror
+ * shared/customerMerge.ts by hand — that module is not a pure leaf (it imports
+ * the backend data client), so it cannot be imported here even type-only
+ * without dragging backend-only modules into this app's typecheck graph.
+ */
+export type MergeWarning = { code: string; detail: string };
+export type MergeBlocker = { code: string; detail: string };
+export type MergePreview = {
+  survivor: { id: string; displayName: string; status: string };
+  loser: { id: string; displayName: string; status: string };
+  childCounts: Record<string, number>;
+  billing: {
+    survivorCard: string | null;
+    loserCard: string | null;
+    pointerPlan: "SURVIVOR_KEPT" | "ADOPTED_LOSER" | "NONE" | null | undefined;
+    loserActiveSubscriptions: number;
+  };
+  portal: {
+    survivorHasLogin: boolean;
+    loserHasLogin: boolean;
+    sharedLogin: boolean;
+  };
+  fieldDiff: {
+    field: string;
+    survivor: unknown;
+    loser: unknown;
+    outcome: "KEEP" | "FILL" | "CONFLICT";
+  }[];
+  warnings: MergeWarning[];
+  blockers: MergeBlocker[];
+};
+
+export type MergeOutcome =
+  | { decision: "PREVIEW"; preview: MergePreview }
+  | { decision: "REFUSED"; blockers: MergeBlocker[] }
+  | {
+      decision: "NEEDS_ACKNOWLEDGEMENT";
+      warnings: MergeWarning[];
+      preview: MergePreview;
+    }
+  | {
+      decision: "MERGED";
+      survivorId: string;
+      loserId: string;
+      decisions: Record<string, unknown>;
+    }
+  | { decision: "PARTIAL"; stage: string; error: string; idempotencyKey: string };
+
+/** The merge command blob persisted on the loser row (Customer.mergeState,
+ *  AWSJSON) — parsed defensively with jsonField. `blanked` is the snapshot of
+ *  every field the tombstone blanked, for the merged-record banner. */
+export type MergeStateInfo = {
+  survivorId?: string;
+  idempotencyKey?: string;
+  stage?: string;
+  lastError?: string | null;
+  blanked?: Record<string, unknown>;
+};
+
+export function mergeCustomers(input: {
+  action: "PREVIEW" | "EXECUTE" | "RESUME";
+  survivorId: string;
+  loserId: string;
+  idempotencyKey: string;
+  acknowledgeWarnings?: boolean;
+}): OpResult {
+  return api().mutations.mergeCustomers(input);
+}
+
 /** Parse an AWSJSON field that may arrive as a string. */
 export function jsonField<T>(raw: unknown): T | null {
   if (raw == null) return null;

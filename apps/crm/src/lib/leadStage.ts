@@ -55,6 +55,8 @@ export const LEAD_STAGE_LABEL: Record<LeadStage, string> = {
   WON: "Won",
   LOST: "Lost",
   DNC: "Do not contact",
+  // Terminal: absorbed into another record by a duplicate merge — never open.
+  MERGED: "Merged",
 };
 
 export const LEAD_STAGE_TONE: Record<
@@ -71,6 +73,7 @@ export const LEAD_STAGE_TONE: Record<
   WON: "ok",
   LOST: "muted",
   DNC: "danger",
+  MERGED: "muted",
 };
 
 export const OPEN_LEAD_STAGES: LeadStage[] = [
