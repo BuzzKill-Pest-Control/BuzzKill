@@ -1330,13 +1330,16 @@ describe("a finalized report is immutable", () => {
     // issuance is worse evidence than none.
     reports.push(validReport({ status: "FINALIZED" }));
 
-    await expect(
-      call("saveServiceReportDraft", {
-        jobId: "j1",
-        reportId: "rep_1",
-        servicesPerformed: "actually I didn't do that",
-      })
-    ).rejects.toThrow(/cannot be changed/i);
+    // A REFUSAL, not a throw: telling a technician "no" is expected use,
+    // and a thrown refusal counts as a Lambda error — one stale phone
+    // screen paged the owner as a system failure (Aug 18). The record
+    // stays immutable; only the delivery mechanism changed.
+    const res = (await call("saveServiceReportDraft", {
+      jobId: "j1",
+      reportId: "rep_1",
+      servicesPerformed: "actually I didn't do that",
+    })) as { refused?: string };
+    expect(res.refused).toMatch(/cannot be changed/i);
     expect(reports[0].servicesPerformed).toBe(
       "Exterior barrier treatment and web removal"
     );
@@ -1345,9 +1348,12 @@ describe("a finalized report is immutable", () => {
   it("refuses to change a finalized report's photos", async () => {
     reports.push(validReport({ status: "FINALIZED" }));
 
-    await expect(
-      call("setReportPhotos", { reportId: "rep_1", addKeys: ["p_new"] })
-    ).rejects.toThrow(/cannot be changed/i);
+    const res = (await call("setReportPhotos", {
+      reportId: "rep_1",
+      addKeys: ["p_new"],
+    })) as { refused?: string };
+    expect(res.refused).toMatch(/cannot be changed/i);
+    expect(reports[0].photoKeys ?? []).not.toContain("p_new");
   });
 
   it("MERGES a photo add against the report's current keys — no last-writer-wins loss", async () => {

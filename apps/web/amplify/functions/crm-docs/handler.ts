@@ -5259,9 +5259,10 @@ async function saveServiceReportDraft(
       throw new Error("This report does not belong to that job");
     }
     if (existing.status === "FINALIZED") {
-      throw new Error(
-        "This report has been finalized and sent to the customer — it is the record of the application and cannot be changed. Ask the office to issue an amendment."
-      );
+      return {
+        refused:
+          "This report has been finalized and sent to the customer — it is the record of the application and cannot be changed. Ask the office to issue an amendment.",
+      };
     }
     // GL-13: a draft is the applicator's own words. Only the technician who is
     // writing it may edit it — an office (or any other) caller is refused, so
@@ -5271,9 +5272,10 @@ async function saveServiceReportDraft(
     // office review).
     const callerTech = await technicianForCaller(identity);
     if (!callerTech || callerTech.id !== existing.technicianId) {
-      throw new Error(
-        "Only the technician writing this draft can edit it. To take over the visit, reassign it on the Schedule board (the draft goes to office review); to correct a finalized report, issue an amendment."
-      );
+      return {
+        refused:
+          "Only the technician writing this draft can edit it. To take over the visit, reassign it on the Schedule board (the draft goes to office review); to correct a finalized report, issue an amendment.",
+      };
     }
     const { data: updated, errors } = await client.models.ServiceReport.update({
       id: args.reportId,
@@ -5335,9 +5337,10 @@ async function setReportPhotos(
   const { data: report } = await client.models.ServiceReport.get({ id: reportId });
   if (!report) throw new Error(`Report ${reportId} not found`);
   if (report.status === "FINALIZED") {
-    throw new Error(
-      "This report has been finalized — its photos are part of the record and cannot be changed"
-    );
+    return {
+      refused:
+        "This report has been finalized — its photos are part of the record and cannot be changed.",
+    };
   }
   // Merge server-side against the CURRENT keys so concurrent edits don't clobber
   // each other: (current ∪ addKeys) \ removeKeys, order-preserving and deduped.

@@ -186,6 +186,25 @@ describe("ops-alerts", () => {
     expect(sentEmails[0].to).toBe("someone@example.com");
   });
 
+  it("SDK runtime chatter never reaches the excerpt — only real failures do", async () => {
+    logPages = [
+      {
+        events: [
+          {
+            timestamp: 1,
+            message:
+              "ERROR (node:2) Warning: NodeVersionSupportWarning: The AWS SDK for JavaScript (v3) will require node >=22",
+          },
+          { timestamp: 2, message: "ERROR Invoke Error real failure here" },
+        ],
+      },
+    ];
+    await handler(snsEvent(alarm()));
+    const html = sentEmails[0].html;
+    expect(html).toContain("real failure here");
+    expect(html).not.toContain("NodeVersionSupportWarning");
+  });
+
   it("an unreadable log group never blocks the alert — the email says so instead", async () => {
     logsFail = true;
     await handler(snsEvent(alarm()));

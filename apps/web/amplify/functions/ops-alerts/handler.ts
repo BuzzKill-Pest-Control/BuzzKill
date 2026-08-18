@@ -102,7 +102,18 @@ async function recentErrorLogs(
           nextToken,
         })
       );
-      events.push(...(res.events ?? []));
+      // Runtime chatter that prints via stderr (the AWS SDK's node-version
+      // warning, trace-warnings hints) matches the ERROR filter but tells
+      // the reader nothing about the failure — it drowned the one real
+      // stack in the Aug 18 alert. Drop it before it reaches the excerpt.
+      events.push(
+        ...(res.events ?? []).filter(
+          (e) =>
+            !/NodeVersionSupportWarning|node --trace-warnings|https:\/\/a\.co\//.test(
+              e.message ?? ""
+            )
+        )
+      );
       nextToken = res.nextToken;
       if (!nextToken) break;
       if (page === MAX_LOG_PAGES - 1) scanIncomplete = true;
