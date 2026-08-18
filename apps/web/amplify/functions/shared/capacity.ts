@@ -1,9 +1,15 @@
 import { dataClient } from "./dataClient";
 import { casGuardedAdd, casGuardedUpdate , type LockCondition } from "./atomicLock";
 import { onsiteMinutesFor } from "./dispatchReadiness";
-import { driveMinutesBetween, HQ_ADDRESS } from "./driveTime";
+import {
+  driveLegBetween,
+  driveMinutesBetween,
+  HQ_ADDRESS,
+  type DriveLegFailure,
+  type DriveLegResult,
+} from "./driveTime";
 import { licenseFactsFromRecords, licenseRecordsFor } from "./licenses";
-import { openOwnedWork } from "./ownedWork";
+import { openOwnedWork, resolveOwnedWork } from "./ownedWork";
 import { forEachPage, listAll } from "./pagination";
 import { routingAddress } from "./serviceAddress";
 
@@ -551,7 +557,7 @@ export async function reserveSlot(
       ok: false,
       soldOut: false,
       message:
-        "That technician's day can't be routed — one of its stops has an address we can't find, so the day is held until it's fixed. See the exceptions queue, or pick another day.",
+        "That technician's day is held: an address on it can't be found, so the day can't be measured. The exceptions queue names the exact address to fix — or pick another day.",
     };
   }
   return {
@@ -1059,13 +1065,42 @@ export async function bestSlotFor(opts: {
 export function makeLegResolver(
   routesKey: string | null
 ): (from: string, to: string) => Promise<number | null> {
-  const memo = new Map<string, Promise<number | null>>();
+  const classified = makeClassifiedLegResolver(routesKey);
+  return async (from: string, to: string) => {
+    const r = await classified(from, to);
+    return "minutes" in r ? r.minutes : null;
+  };
+}
+
+export type ClassifiedLegResolver = (
+  from: string,
+  to: string
+) => Promise<DriveLegResult>;
+
+/** The failure-aware resolver the TOUR paths use: a held day is a strong
+ *  claim, so the tour must know whether a leg failed because an address is
+ *  bad (hold the day, name the address) or because routing itself is
+ *  down/unconfigured (touch nothing, page infra ONCE). A missing key is a
+ *  PROVIDER_ERROR — the Aug 2026 incident was exactly this key missing on
+ *  the nightly reconcile's function, misread as 35 bad customer addresses. */
+export function makeClassifiedLegResolver(
+  routesKey: string | null
+): ClassifiedLegResolver {
+  const memo = new Map<string, Promise<DriveLegResult>>();
   return (from: string, to: string) => {
-    if (!routesKey) return Promise.resolve(null);
+    if (!routesKey) {
+      return Promise.resolve({
+        failure: {
+          kind: "PROVIDER_ERROR" as const,
+          detail:
+            "GOOGLE_ROUTES_API_KEY is not configured on this function — no leg can be measured.",
+        },
+      });
+    }
     const key = `${from}→${to}`;
     let inFlight = memo.get(key);
     if (!inFlight) {
-      inFlight = driveMinutesBetween(routesKey, from, to);
+      inFlight = driveLegBetween(routesKey, from, to);
       memo.set(key, inFlight);
     }
     return inFlight;
@@ -1189,7 +1224,7 @@ export type TourStop = {
 export async function closedTourMinutes(
   base: string | null,
   stops: TourStop[],
-  legMinutes: (from: string, to: string) => Promise<number | null>
+  legMinutes: ClassifiedLegResolver
 ): Promise<{
   travel: number;
   treatment: number;
@@ -1197,10 +1232,14 @@ export async function closedTourMinutes(
   /** Per-stop estimated arrival (minutes after local midnight), parallel to
    *  `stops`. Empty on an unverified tour. */
   arrivals: number[];
-  /** When unverified: the stop that broke the tour, so the office is told WHICH
-   *  address to fix instead of just "that day is now fully booked". Absent when
-   *  the base itself is the missing fact. */
-  blockedBy?: { address: string | null; label?: string | null };
+  /** When unverified because an ADDRESS is genuinely bad: which one — with
+   *  the failing END of the leg named, so the base can be blamed when the
+   *  base is the problem instead of whichever customer led the route. */
+  blockedBy?: { address: string | null; label?: string | null; isBase?: boolean };
+  /** When unverified because ROUTING ITSELF failed (missing key, auth,
+   *  quota, network): the detail. Says nothing about any address — callers
+   *  must not open address cases or downgrade measured days on it. */
+  providerError?: string;
 }> {
   const treatment = stops.reduce((sum, s) => sum + s.onsite, 0);
   if (stops.length === 0) {
@@ -1209,10 +1248,46 @@ export async function closedTourMinutes(
   if (!base) return { travel: 0, treatment, verified: false, arrivals: [] };
   let travel = 0;
   let prev = base;
+  let prevLabel: string | null = null; // null label = prev IS the base
   // The technician's wall clock as the day plays out: it advances by each drive
   // leg, stamps the arrival, then advances by that stop's on-site time.
   let clock = DAY_START_MINUTES;
   const arrivals: number[] = [];
+  const blame = (
+    failure: DriveLegFailure,
+    fromAddress: string,
+    fromLabel: string | null,
+    fromIsBase: boolean,
+    toAddress: string,
+    toLabel: string | null,
+    toIsBase: boolean
+  ) => {
+    if (failure.kind === "PROVIDER_ERROR") {
+      return { travel: 0, treatment, verified: false, arrivals: [], providerError: failure.detail };
+    }
+    // Name the failing END when Google told us which; an unknown end blames
+    // the destination unless the origin is the base — a bad base breaks
+    // every leg it touches and deserves first suspicion.
+    const origin = {
+      address: fromAddress,
+      label: fromLabel,
+      ...(fromIsBase ? { isBase: true } : {}),
+    };
+    const destination = {
+      address: toAddress,
+      label: toLabel,
+      ...(toIsBase ? { isBase: true } : {}),
+    };
+    const blocked =
+      failure.badEndpoint === "origin"
+        ? origin
+        : failure.badEndpoint === "destination"
+          ? destination
+          : fromIsBase
+            ? origin
+            : destination;
+    return { travel: 0, treatment, verified: false, arrivals: [], blockedBy: blocked };
+  };
   for (const stop of stops) {
     // A stop with no address, or one Routes cannot resolve, is the reason the
     // whole day becomes unsellable — name it.
@@ -1226,32 +1301,37 @@ export async function closedTourMinutes(
       };
     }
     const leg = await legMinutes(prev, stop.address);
-    if (leg == null) {
-      return {
-        travel: 0,
-        treatment,
-        verified: false,
-        arrivals: [],
-        blockedBy: { address: stop.address, label: stop.label ?? null },
-      };
+    if (!("minutes" in leg)) {
+      return blame(
+        leg.failure,
+        prev,
+        prevLabel,
+        prev === base && prevLabel === null,
+        stop.address,
+        stop.label ?? null,
+        false
+      );
     }
-    travel += leg;
-    clock += leg;
+    travel += leg.minutes;
+    clock += leg.minutes;
     arrivals.push(clock);
     clock += stop.onsite;
     prev = stop.address;
+    prevLabel = stop.label ?? null;
   }
   const home = await legMinutes(prev, base);
-  if (home == null) {
-    return {
-      travel: 0,
-      treatment,
-      verified: false,
-      arrivals: [],
-      blockedBy: { address: prev, label: stops[stops.length - 1]?.label ?? null },
-    };
+  if (!("minutes" in home)) {
+    return blame(
+      home.failure,
+      prev,
+      prevLabel,
+      false,
+      base,
+      null,
+      true
+    );
   }
-  travel += home;
+  travel += home.minutes;
   return { travel, treatment, verified: true, arrivals };
 }
 
@@ -1326,7 +1406,7 @@ export async function recomputeSlotMinutes(
     // booked" on every mutation. Production always has a key; this is the
     // local-dev / no-key path (mirrors ALLOW_UNVERIFIED_ROUTES elsewhere).
     if (!key) return;
-    const legMinutes = makeLegResolver(key);
+    const legMinutes = makeClassifiedLegResolver(key);
 
     // This tech's counted stops for the date, in route order.
     const stops: (TourStop & {
@@ -1452,7 +1532,7 @@ export async function reconcileCapacityDay(
   }
 
   const eligibility = await dayEligibility(date);
-  const legMinutes = makeLegResolver(routesKey);
+  const legMinutes = makeClassifiedLegResolver(routesKey);
 
   // Group the day's counted jobs by slot, in route order.
   type StopJob = {
@@ -1547,6 +1627,9 @@ export async function reconcileCapacityDay(
   ]);
   let slots = 0;
   let unverified = 0;
+  // Set when a tour failed for PROVIDER reasons (key/auth/quota/network):
+  // one page per rebuild, never one per customer, and no day is downgraded.
+  let providerFailure: string | null = null;
   for (const id of allSlotIds) {
     const [, techId] = id.split("#") as [string, string];
     const stops = (jobsBySlot.get(id) ?? []).sort(
@@ -1569,16 +1652,37 @@ export async function reconcileCapacityDay(
       const base =
         eligibility.techs.find((t) => t.id === techId)?.baseAddress ?? null;
       const tour = await closedTourMinutes(base, stops, legMinutes);
+      // ROUTING ITSELF failed (missing key, auth, quota, network): that says
+      // NOTHING about this day. Leave whatever measurement it already has —
+      // the Aug 2026 incident was a keyless nightly run downgrading the whole
+      // horizon to "held" and blaming 35 innocent customer addresses. One
+      // infra page per run, then skip the slot entirely.
+      if (!tour.verified && tour.providerError) {
+        providerFailure = tour.providerError;
+        continue;
+      }
       travelMinutes = tour.travel;
       treatmentMinutes = tour.treatment;
       verified = tour.verified;
       if (tour.verified) arrivals = stops.map((_, i) => tour.arrivals[i] ?? null);
+      if (tour.verified) {
+        // A day that measures clean closes its own held-day case.
+        await resolveOwnedWork({
+          kind: "ADDRESS_UNROUTABLE",
+          dedupeKey: `unroutable:${date}:${techId}`,
+          note: "The day measured clean — every address resolved.",
+        }).catch(() => undefined);
+      }
       // An unmeasurable day is pinned to the full window below, so from the
       // office's side it is indistinguishable from a full one — it just stops
-      // taking bookings. Name the stop that broke it, or the silence costs a
-      // technician's entire day of capacity until someone goes looking.
+      // taking bookings. Name the address that broke it — INCLUDING the
+      // technician's base, which is on every leg and used to get its blame
+      // pinned on whichever customer led the route.
       if (!verified && tour.blockedBy && stops.length > 0) {
-        const who = tour.blockedBy.label ?? "A stop";
+        const isBase = tour.blockedBy.isBase === true;
+        const who = isBase
+          ? "the technician's base address"
+          : (tour.blockedBy.label ?? "A stop");
         const where = tour.blockedBy.address ?? "(no address on file)";
         await openOwnedWork({
           kind: "ADDRESS_UNROUTABLE",
@@ -1586,12 +1690,17 @@ export async function reconcileCapacityDay(
           // a retry of the same broken day re-announces rather than piling up.
           dedupeKey: `unroutable:${date}:${techId}`,
           title: `Can't route ${who} — ${date} is held`,
-          detail: `${who} (${where}) could not be resolved by Google Routes, so this technician's whole day for ${date} cannot be measured. The day is held at full capacity and will refuse new stops until the address is corrected — it is NOT actually full. Fix the service address on the customer, then the nightly rebuild (or the next scheduling change) frees the day.`,
-          customerId: stops.find((s) => s.label === tour.blockedBy?.label)?.customerId,
+          detail: isBase
+            ? `The technician's own base address (${where}) could not be resolved by Google Routes, so every tour that starts there — including ${date} — cannot be measured. Fix the base address on the Staff screen; every held day frees on the next rebuild.`
+            : `${who} (${where}) could not be resolved by Google Routes, so this technician's whole day for ${date} cannot be measured. The day is held at full capacity and will refuse new stops until the address is corrected — it is NOT actually full. Fix the service address on the customer, then the nightly rebuild (or the next scheduling change) frees the day.`,
+          customerId: isBase
+            ? undefined
+            : stops.find((s) => s.label === tour.blockedBy?.label)?.customerId,
           relatedId: `${date}#${techId}`,
-          sourceUrl: `/schedule`,
-          resolutionAction:
-            "Correct the customer's service address so it resolves in Google Maps, or mark the property outside the service area.",
+          sourceUrl: isBase ? `/staff` : `/schedule`,
+          resolutionAction: isBase
+            ? "Correct the technician's base address on the Staff screen so it resolves in Google Maps."
+            : "Correct the customer's service address so it resolves in Google Maps, or mark the property outside the service area.",
           ownerTeam: "OPS",
         }).catch(() => undefined);
       }
@@ -1620,6 +1729,19 @@ export async function reconcileCapacityDay(
     }
     slots++;
     if (!verified) unverified++;
+  }
+  if (providerFailure) {
+    await openOwnedWork({
+      kind: "INFRA_ALERT",
+      dedupeKey: "routing-provider-error",
+      title: "Google Routes is failing — days cannot be measured",
+      detail: `Route measurement failed for provider reasons, not address reasons: ${providerFailure} Existing day measurements were left untouched and NO address cases were opened — nothing is wrong with any customer address. Fix the provider problem (key configuration, quota, or outage) and the next rebuild measures normally.`,
+      relatedId: "routing-provider-error",
+      sourceUrl: "/schedule",
+      resolutionAction:
+        "Confirm GOOGLE_ROUTES_API_KEY is configured on every scheduling function and the Google project has quota, then verify a rebuild measures a day.",
+      ownerTeam: "OPS",
+    }).catch(() => undefined);
   }
   // GL-07: rebuild every technician's assigned-stop day ledger from ground
   // truth — drifted counters (a crashed compensation, a legacy row)

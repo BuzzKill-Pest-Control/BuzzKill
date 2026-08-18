@@ -17,12 +17,26 @@ const ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes";
 const MATRIX_URL =
   "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
 
-/** Minutes to drive between two addresses; null when unroutable. */
-export async function driveMinutesBetween(
+/**
+ * A leg failure is not one thing (the Aug 2026 incident: a missing API key
+ * made every leg fail, and the old boolean surface blamed 35 innocent
+ * customer addresses across the whole scheduling horizon). Callers that hold
+ * capacity hostage over a failure MUST know which kind they have:
+ *  - ADDRESS_NOT_FOUND — Google resolved the call but not a waypoint; the
+ *    named endpoint is genuinely bad and a human must fix that address.
+ *  - PROVIDER_ERROR — auth/quota/network/5xx; says NOTHING about any address
+ *    and must never open an address case or downgrade a measured day.
+ */
+export type DriveLegFailure =
+  | { kind: "ADDRESS_NOT_FOUND"; badEndpoint: "origin" | "destination" | "unknown" }
+  | { kind: "PROVIDER_ERROR"; detail: string };
+export type DriveLegResult = { minutes: number } | { failure: DriveLegFailure };
+
+export async function driveLegBetween(
   apiKey: string,
   origin: string,
   destination: string
-): Promise<number | null> {
+): Promise<DriveLegResult> {
   try {
     const res = await fetch(ROUTES_URL, {
       method: "POST",
@@ -37,15 +51,62 @@ export async function driveMinutesBetween(
         travelMode: "DRIVE",
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      // Routes rejects an unresolvable waypoint with a 400 whose message
+      // names it ("Geocoding failed for: origin" and variants).
+      if (res.status === 400 && /geocod|not found|could not resolve/i.test(text)) {
+        const namesOrigin = /origin/i.test(text);
+        const namesDestination = /destination/i.test(text);
+        return {
+          failure: {
+            kind: "ADDRESS_NOT_FOUND",
+            badEndpoint:
+              namesOrigin && !namesDestination
+                ? "origin"
+                : namesDestination && !namesOrigin
+                  ? "destination"
+                  : "unknown",
+          },
+        };
+      }
+      return {
+        failure: {
+          kind: "PROVIDER_ERROR",
+          detail: `HTTP ${res.status}: ${text.slice(0, 200)}`,
+        },
+      };
+    }
     const json = (await res.json()) as {
       routes?: { duration?: string }[];
     };
     const seconds = parseInt(json.routes?.[0]?.duration ?? "", 10);
-    return Number.isFinite(seconds) ? Math.round(seconds / 60) : null;
-  } catch {
-    return null;
+    if (!Number.isFinite(seconds)) {
+      // An empty result set on a 200: no drivable route between two real
+      // points, or a silently-dropped waypoint. Address-shaped either way.
+      return { failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "unknown" } };
+    }
+    return { minutes: Math.round(seconds / 60) };
+  } catch (err) {
+    return {
+      failure: {
+        kind: "PROVIDER_ERROR",
+        detail: String(err instanceof Error ? err.message : err).slice(0, 200),
+      },
+    };
   }
+}
+
+/** Minutes to drive between two addresses; null when the leg can't be
+ *  measured for ANY reason. Prefer driveLegBetween where the caller's
+ *  behavior should differ by failure kind. */
+export async function driveMinutesBetween(
+  apiKey: string,
+  origin: string,
+  destination: string
+): Promise<number | null> {
+  const r = await driveLegBetween(apiKey, origin, destination);
+  return "minutes" in r ? r.minutes : null;
 }
 
 /**

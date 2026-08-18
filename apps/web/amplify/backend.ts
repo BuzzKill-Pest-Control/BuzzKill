@@ -583,6 +583,16 @@ for (const key of ["ANTHROPIC_API_KEY", "GOOGLE_ROUTES_API_KEY"] as const) {
       // the service address (on-site-presence review). Best-effort — its
       // absence never blocks a technician's report.
       backend.crmDocs.addEnvironment(key, v);
+      // EVERY function that can rebuild a technician-day tour needs the key
+      // (Aug 2026 incident: the nightly reconcile in daily-reminders never
+      // had it, failed every leg, held the whole scheduling horizon, and
+      // blamed 35 innocent customer addresses). The rebuild is reached from
+      // assignVisit/visitChange/callbacks/bookingFinalize, which run in
+      // these functions too:
+      backend.dailyReminders.addEnvironment(key, v);
+      backend.crmBilling.addEnvironment(key, v);
+      backend.stripeWebhook.addEnvironment(key, v);
+      backend.crmAdmin.addEnvironment(key, v);
     }
     if (key === "ANTHROPIC_API_KEY") {
       backend.pricingRefresh.addEnvironment(key, v);

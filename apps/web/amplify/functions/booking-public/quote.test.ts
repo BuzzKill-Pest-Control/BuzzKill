@@ -177,6 +177,10 @@ let nearestBaseMinutes: number | null = 20;
 vi.mock("../shared/driveTime", () => ({
   HQ_ADDRESS: "81 Greenwich Rd, Ware, MA 01082",
   driveMinutesBetween: async () => nearestBaseMinutes,
+  driveLegBetween: async () =>
+    nearestBaseMinutes == null
+      ? { failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "unknown" } }
+      : { minutes: nearestBaseMinutes },
   driveMinutesFromNearestBase: async () => nearestBaseMinutes,
   driveMatrixTo: async (_k: string, origins: string[]) =>
     origins.map(() => nearestBaseMinutes),
