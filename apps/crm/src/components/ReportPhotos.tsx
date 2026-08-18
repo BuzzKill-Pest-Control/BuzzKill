@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, opResult, unwrap, type ServiceReport } from "../lib/api";
+import { api, opResult, type ServiceReport } from "../lib/api";
 import { useAction } from "../lib/useAsync";
 import { Button, ErrorNote } from "../ui/kit";
 
@@ -68,12 +68,13 @@ export default function ReportPhotos({
     if (added.length) {
       // Send only the delta — the server merges against the report's current
       // keys, so a photo another device just added is never overwritten.
-      unwrap(
+      const res = opResult<{ refused?: string }>(
         await api().mutations.setReportPhotos({
           reportId: report.id,
           addKeys: added,
         })
       );
+      if (res?.refused) throw new Error(res.refused);
       await onChanged();
     }
   }, "Photo upload failed");
@@ -85,12 +86,13 @@ export default function ReportPhotos({
   };
 
   const removePhoto = useAction(async (key: string) => {
-    unwrap(
+    const res = opResult<{ refused?: string }>(
       await api().mutations.setReportPhotos({
         reportId: report.id,
         removeKeys: [key],
       })
     );
+    if (res?.refused) throw new Error(res.refused);
     await onChanged();
   }, "Could not remove photo");
 

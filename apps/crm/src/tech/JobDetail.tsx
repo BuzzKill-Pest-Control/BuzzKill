@@ -1435,13 +1435,16 @@ function ReportForm({
     // a pesticide record the customer holds a copy of, and it used to be
     // rewritable after issuance. The mutation creates or updates the draft and
     // refuses once it is FINALIZED.
-    const saved = opResult<{ reportId?: string }>(
+    const saved = opResult<{ reportId?: string; refused?: string }>(
       await api().mutations.saveServiceReportDraft({
         jobId: job.id,
         reportId: reportId ?? undefined,
         ...fields,
       })
     );
+    // A refusal is the server saying "no" in words meant for this screen
+    // (finalized record, someone else's draft) — surface it verbatim.
+    if (saved?.refused) throw new Error(saved.refused);
     if (!saved?.reportId) throw new Error("Could not save the report");
     // Remember what this tech applied, to prefill the next report.
     rememberAmounts(products);
