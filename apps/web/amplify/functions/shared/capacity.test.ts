@@ -1,3 +1,7 @@
+import type { DriveLegResult } from "./driveTime";
+const NOT_FOUND_LEG: DriveLegResult = {
+  failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "unknown" },
+};
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "./atomicLock";
 import { capacityFixtureModels } from "./capacityTestFixture";
@@ -66,15 +70,35 @@ vi.mock("./dataClient", () => ({
   }),
 }));
 
+const driveLegBetween = vi.fn();
+const workOpened: Record<string, unknown>[] = [];
+const workResolved: Record<string, unknown>[] = [];
 const driveMinutesBetween = vi.fn(
   async (_k: string, _from: string, _to: string): Promise<number | null> => 15
 );
+vi.mock("./ownedWork", () => ({
+  WORK_SUPPRESSED: "suppressed",
+  openOwnedWork: async (o: Record<string, unknown>) => {
+    workOpened.push(o);
+    return `w-${workOpened.length}`;
+  },
+  resolveOwnedWork: async (o: Record<string, unknown>) => {
+    workResolved.push(o);
+    return true;
+  },
+}));
+
 vi.mock("./driveTime", () => ({
   HQ_ADDRESS: "81 Greenwich Rd, Ware, MA 01082",
   driveMinutesBetween: (...a: unknown[]) =>
     (driveMinutesBetween as unknown as (...x: unknown[]) => Promise<number | null>)(
       ...a
     ),
+  // The classified resolver is its OWN mockable fn; its default (set in
+  // beforeEach) rides the driveMinutesBetween mock — a null leg reads as a
+  // not-found address, exactly the old fixtures' semantics.
+  driveLegBetween: (...a: unknown[]) =>
+    (driveLegBetween as unknown as (...x: unknown[]) => Promise<unknown>)(...a),
 }));
 
 const {
@@ -109,6 +133,17 @@ const WED = "2026-08-05";
 const SAT = "2026-08-08";
 
 beforeEach(() => {
+  workOpened.length = 0;
+  workResolved.length = 0;
+  driveLegBetween.mockReset();
+  driveLegBetween.mockImplementation(async (...a: unknown[]) => {
+    const m = await (
+      driveMinutesBetween as unknown as (...x: unknown[]) => Promise<number | null>
+    )(...a);
+    return m == null
+      ? { failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "unknown" } }
+      : { minutes: m };
+  });
   for (const t of [
     technicians,
     jobs,
@@ -863,6 +898,109 @@ describe("nightly rebuild — base → stops → base with real legs", () => {
     expect(jobs.get("j1")!.etaMinutes).toBeNull();
   });
 
+  it("a PROVIDER failure (missing key, quota, outage) downgrades NOTHING and pages infra once — never 35 customer cases", async () => {
+    // The Aug 2026 incident: the nightly reconcile ran without the Routes
+    // key, every leg failed, and the whole horizon was held with a case
+    // blaming an innocent customer per day.
+    customers.set("c1", {
+      id: "c1",
+      serviceStreet: "9 Elm St",
+      serviceCity: "Ware",
+      serviceState: "MA",
+      serviceZip: "01082",
+    });
+    jobs.set("j1", {
+      id: "j1",
+      customerId: "c1",
+      scheduledDate: WED,
+      status: "SCHEDULED",
+      technicianId: "t1",
+      routeOrder: 1,
+      etaMinutes: DAY_START_MINUTES + 20,
+    });
+    // Yesterday's GOOD measurement is on the books.
+    capacityDays.set(slotId(WED, "t1"), {
+      id: slotId(WED, "t1"),
+      date: WED,
+      technicianId: "t1",
+      committedMinutes: 60,
+      verified: true,
+    });
+
+    const res = await reconcileCapacityDay(WED, null); // no key on this fn
+
+    const slot = capacityDays.get(slotId(WED, "t1"))!;
+    expect(slot.committedMinutes).toBe(60); // untouched — NOT pinned to 540
+    expect(slot.verified).toBe(true);
+    expect(res.unverified).toBe(0);
+    expect(jobs.get("j1")!.etaMinutes).toBe(DAY_START_MINUTES + 20); // kept
+    const kinds = workOpened.map((w) => w.kind);
+    expect(kinds).not.toContain("ADDRESS_UNROUTABLE");
+    expect(kinds).toContain("INFRA_ALERT");
+    const alert = workOpened.find((w) => w.kind === "INFRA_ALERT")!;
+    expect(String(alert.detail)).toContain("GOOGLE_ROUTES_API_KEY");
+    expect(String(alert.detail)).toContain("nothing is wrong with any customer address");
+  });
+
+  it("a genuinely bad BASE address blames the base and points at the Staff screen — never a customer", async () => {
+    customers.set("c1", {
+      id: "c1",
+      displayName: "Innocent Customer",
+      serviceStreet: "9 Elm St",
+      serviceCity: "Ware",
+      serviceState: "MA",
+      serviceZip: "01082",
+    });
+    jobs.set("j1", {
+      id: "j1",
+      customerId: "c1",
+      scheduledDate: WED,
+      status: "SCHEDULED",
+      technicianId: "t1",
+      routeOrder: 1,
+    });
+    // Routes names the ORIGIN as unresolvable — on the first leg that is
+    // the technician's base.
+    driveLegBetween.mockImplementation(async () => ({
+      failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "origin" },
+    }));
+
+    const res = await reconcileCapacityDay(WED, "routes-key");
+
+    expect(res.unverified).toBe(1);
+    const item = workOpened.find((w) => w.kind === "ADDRESS_UNROUTABLE")!;
+    expect(String(item.title)).toContain("the technician's base address");
+    expect(String(item.detail)).toContain("Staff screen");
+    expect(item.customerId).toBeUndefined();
+    driveLegBetween.mockReset();
+  });
+
+  it("a day that measures clean auto-resolves its held-day case", async () => {
+    customers.set("c1", {
+      id: "c1",
+      serviceStreet: "9 Elm St",
+      serviceCity: "Ware",
+      serviceState: "MA",
+      serviceZip: "01082",
+    });
+    jobs.set("j1", {
+      id: "j1",
+      customerId: "c1",
+      scheduledDate: WED,
+      status: "SCHEDULED",
+      technicianId: "t1",
+      routeOrder: 1,
+    });
+
+    const res = await reconcileCapacityDay(WED, "routes-key");
+
+    expect(res.unverified).toBe(0);
+    const resolved = workResolved.find(
+      (w) => w.kind === "ADDRESS_UNROUTABLE"
+    )!;
+    expect(resolved.dedupeKey).toBe(`unroutable:${WED}:t1`);
+  });
+
   it("stopsBySlotOn joins jobs and live claims into their tech-day slots", async () => {
     customers.set("c1", {
       id: "c1",
@@ -899,10 +1037,10 @@ describe("closedTourMinutes — travel is ONE tour, not a round trip per stop", 
   // A far cluster: base ↔ cluster is 85 min each way; hops WITHIN the cluster
   // are 5 min. This is the Ware-base / Ashland-work shape that read "full" at
   // two stops under the old per-stop double-count.
-  const leg = async (from: string, to: string): Promise<number | null> => {
-    if (from === to) return 0;
+  const leg = async (from: string, to: string): Promise<DriveLegResult> => {
+    if (from === to) return { minutes: 0 };
     const near = (a: string) => a.includes("Cluster");
-    return near(from) && near(to) ? 5 : 85;
+    return { minutes: near(from) && near(to) ? 5 : 85 };
   };
   const clusterStop = (n: number, onsite: number) => ({
     address: `${n} Cluster Way`,
@@ -930,7 +1068,7 @@ describe("closedTourMinutes — travel is ONE tour, not a round trip per stop", 
     const res = await closedTourMinutes(
       BASE,
       [clusterStop(1, 30)],
-      async () => null
+      async () => NOT_FOUND_LEG
     );
     expect(res.verified).toBe(false);
     expect(res.treatment).toBe(30);
@@ -962,7 +1100,7 @@ describe("closedTourMinutes — travel is ONE tour, not a round trip per stop", 
   });
 
   it("hands out NO arrival on a tour it could not measure — never a stale guess", async () => {
-    const res = await closedTourMinutes(BASE, [clusterStop(1, 30)], async () => null);
+    const res = await closedTourMinutes(BASE, [clusterStop(1, 30)], async () => NOT_FOUND_LEG);
     expect(res.verified).toBe(false);
     expect(res.arrivals).toEqual([]);
   });
@@ -976,8 +1114,10 @@ describe("closedTourMinutes — travel is ONE tour, not a round trip per stop", 
     // The middle stop cannot be resolved by Routes. Reporting only
     // "unverified" would surface to staff as a bare "that day is fully booked"
     // on a day that is nearly empty — the whole point is to say WHICH address.
-    const legs = async (_from: string, to: string) =>
-      to.includes("Bad") ? null : 10;
+    const legs = async (_from: string, to: string): Promise<DriveLegResult> =>
+      to.includes("Bad")
+        ? { failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "destination" } }
+        : { minutes: 10 };
     const res = await closedTourMinutes(
       BASE,
       [
@@ -1084,7 +1224,7 @@ describe("reserveSlot — an unroutable day is not a full day", () => {
 
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.message).toMatch(/can't be routed/i);
+      expect(res.message).toMatch(/is held.*can't be found.*exceptions queue/i);
       expect(res.message).not.toMatch(/fully booked/i);
       // Not "sold out" — there is capacity, it is being withheld.
       expect(res.soldOut).toBe(false);

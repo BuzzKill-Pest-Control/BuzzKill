@@ -99,6 +99,7 @@ vi.mock("../shared/email", () => ({
 vi.mock("../shared/driveTime", () => ({
   HQ_ADDRESS: "81 Greenwich Rd, Ware, MA 01082",
   driveMinutesBetween: async () => 20,
+  driveLegBetween: async () => ({ minutes: 20 }),
   driveMatrixFrom: async (_k: string, _o: string, dests: string[]) =>
     dests.map(() => null),
 }));

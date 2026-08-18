@@ -65,6 +65,10 @@ let legMins = 20;
 vi.mock("../shared/driveTime", () => ({
   HQ_ADDRESS: "81 Greenwich Rd, Ware, MA 01082",
   driveMinutesBetween: async () => legMins,
+  driveLegBetween: async () =>
+    legMins == null
+      ? { failure: { kind: "ADDRESS_NOT_FOUND", badEndpoint: "unknown" } }
+      : { minutes: legMins },
   driveMatrixFrom: async (_k: string, _o: string, dests: string[]) =>
     dests.map(() => 10),
 }));
