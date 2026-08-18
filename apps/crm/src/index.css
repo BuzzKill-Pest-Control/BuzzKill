@@ -691,6 +691,12 @@ textarea {
   align-items: flex-end;
   justify-content: center;
   animation: fade-in 0.15s ease-out;
+  overscroll-behavior: contain;
+}
+
+/* While any sheet is up, the page underneath must not scroll along. */
+body.sheet-open {
+  overflow: hidden;
 }
 
 @keyframes fade-in {
@@ -709,6 +715,11 @@ textarea {
   flex-direction: column;
   animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
   box-shadow: var(--shadow-lg);
+}
+
+/* The container takes programmatic focus on open — no ring for that. */
+.sheet:focus {
+  outline: none;
 }
 
 .sheet::before {
@@ -758,6 +769,7 @@ textarea {
 .sheet-body {
   padding: 8px 18px calc(22px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: 12px;
 }

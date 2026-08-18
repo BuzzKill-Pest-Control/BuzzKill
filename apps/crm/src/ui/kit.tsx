@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode, ButtonHTMLAttributes } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -324,26 +324,91 @@ export function EmptyState({
   );
 }
 
+/**
+ * How many sheets are open right now. Body scroll stays locked until the
+ * LAST one closes, so a sheet stacked on another can't unlock the page early.
+ */
+let openSheetCount = 0;
+
 export function Sheet({
   open,
   onClose,
   title,
   children,
+  locked = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /**
+   * While true the sheet cannot be dismissed: backdrop taps, Escape, and the
+   * ✕ are all off. Use it while a destructive operation is mid-flight so a
+   * stray tap can't hide the progress the office needs to watch.
+   */
+  locked?: boolean;
 }) {
+  const titleId = useId();
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  // Move focus into the sheet on open and hand it back on close, so a
+  // keyboard or VoiceOver user isn't left interacting with the page
+  // underneath. Deliberately lightweight: initial focus + Escape + dialog
+  // semantics, no full focus trap.
+  useEffect(() => {
+    if (!open) return;
+    const before =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    sheetRef.current?.focus();
+    return () => before?.focus();
+  }, [open]);
+
+  // Lock the page scroll while any sheet is open.
+  useEffect(() => {
+    if (!open) return;
+    openSheetCount += 1;
+    document.body.classList.add("sheet-open");
+    return () => {
+      openSheetCount -= 1;
+      if (openSheetCount <= 0) document.body.classList.remove("sheet-open");
+    };
+  }, [open]);
+
+  // Escape closes — unless the sheet is locked mid-operation.
+  useEffect(() => {
+    if (!open || locked) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, locked, onClose]);
+
   if (!open) return null;
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+    <div className="sheet-backdrop" onClick={locked ? undefined : onClose}>
+      <div
+        className="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        ref={sheetRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="sheet-head">
-          <h2>{title}</h2>
-          <button className="sheet-close" aria-label="Close" onClick={onClose}>
-            ✕
-          </button>
+          <h2 id={titleId}>{title}</h2>
+          {locked ? null : (
+            <button
+              className="sheet-close"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              ✕
+            </button>
+          )}
         </div>
         <div className="sheet-body">{children}</div>
       </div>

@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -44,7 +45,7 @@ import {
 } from "../lib/api";
 import { SERVICE_CATALOG } from "../../../web/amplify/functions/shared/serviceCatalog";
 import { fmtDate, fmtDateTime, money, todayEastern } from "../lib/format";
-import { useAction, useAsync, useKeyedAction } from "../lib/useAsync";
+import { toMessage, useAction, useAsync, useKeyedAction } from "../lib/useAsync";
 import { daysPastDue } from "../lib/aging";
 import { isManualSettled } from "../lib/deposits";
 import { dunningStateLabel, isOverdue } from "../lib/recovery";
@@ -112,6 +113,120 @@ function mergeCounterpartCustomerId(
   if (!marker) return null;
   const hash = marker.indexOf("#");
   return hash === -1 ? marker : marker.slice(0, hash);
+}
+
+/** Office words for the schema's field names — used by the merge preview's
+ *  diff rows and the tombstone's preserved-details snapshot. */
+const FIELD_LABELS: Record<string, string> = {
+  displayName: "Name",
+  contactName: "Contact name",
+  email: "Email",
+  phone: "Phone",
+  serviceStreet: "Street",
+  serviceUnit: "Unit",
+  serviceCity: "City",
+  serviceState: "State",
+  serviceZip: "ZIP",
+  billingStreet: "Billing street",
+  billingCity: "Billing city",
+  billingState: "Billing state",
+  billingZip: "Billing ZIP",
+  propertyClass: "Property type",
+  leadSource: "Source",
+  notes: "Notes",
+  externalRef: "Prior-system reference",
+  bookingLinkToken: "Booking link",
+  bookingLinkTokenExpiresAt: "Booking link expires",
+  portalUserSub: "Portal login",
+  stripeCustomerId: "Billing account",
+  paymentMethodLabel: "Payment method",
+  paymentMethodKind: "Payment method type",
+  groupId: "Group",
+};
+
+function fieldLabel(field: string): string {
+  const named = FIELD_LABELS[field];
+  if (named) return named;
+  const spaced = field.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Office words for the linked-record model names in the merge preview. */
+const CHILD_MODEL_LABELS: Record<string, string> = {
+  ServicePlan: "Service plans",
+  Job: "Jobs",
+  Agreement: "Agreements",
+  ServiceReport: "Service reports",
+  ServiceReportAmendment: "Report corrections",
+  Invoice: "Invoices",
+  Dispute: "Payment disputes",
+  TreatmentObligation: "Treatment schedule",
+  PortalRequest: "Portal requests",
+  CallbackRequest: "Guarantee callbacks",
+  LeadPricingRun: "Saved price quotes",
+  LeadActivity: "Lead history",
+  BookingRequest: "Quotes & bookings",
+};
+
+function childModelLabel(model: string): string {
+  return (
+    CHILD_MODEL_LABELS[model] ?? model.replace(/([a-z])([A-Z])/g, "$1 $2")
+  );
+}
+
+/** Office words for where an unfinished merge stopped ("stopped while …"). */
+const MERGE_STAGE_LABEL: Record<string, string> = {
+  CLAIM: "locking the records",
+  IDENTITY: "moving contact identifiers",
+  FIELDS: "combining details",
+  BILLING: "pointing billing at the kept record",
+  PORTAL_GRANT: "granting portal access",
+  CHILDREN: "moving linked records",
+  WORK: "moving open tasks",
+  TOMBSTONE: "retiring the duplicate",
+};
+
+function mergeStageLabel(stage: string): string {
+  return MERGE_STAGE_LABEL[stage] ?? stage.replace(/_/g, " ").toLowerCase();
+}
+
+/** Retype-to-confirm comparison: trim, case-fold, and unify curly/straight
+ *  apostrophes and quotes — "O'Brien" typed with an iPhone smart quote must
+ *  still count as a match. */
+function normalizeConfirmText(s: string): string {
+  return s
+    .replace(/[‘’‚‛′]/g, "'")
+    .replace(/[“”„‟″]/g, '"')
+    .trim()
+    .toLowerCase();
+}
+
+/** A slow response during EXECUTE is not a failure — a big merge keeps running
+ *  server-side after the request times out client-side. (Safari says "Load
+ *  failed"; Chrome says "Failed to fetch".) */
+const MERGE_TIMEOUT_ERROR =
+  /timed? ?out|timeout|failed to fetch|load failed|network ?error|network request failed|socket|connection/i;
+
+/** Default survivor by record weight, not by which page the sheet opened on:
+ *  ACTIVE beats LEAD/INACTIVE; then having a saved payment method; then the
+ *  older record (the longer history). */
+function defaultSurvivorChoice(
+  thisRecord: Customer,
+  otherRecord: Customer
+): "THIS" | "OTHER" {
+  const weight = (c: Customer) => (c.status === "ACTIVE" ? 1 : 0);
+  if (weight(thisRecord) !== weight(otherRecord)) {
+    return weight(thisRecord) > weight(otherRecord) ? "THIS" : "OTHER";
+  }
+  const hasCard = (c: Customer) =>
+    Boolean(c.paymentMethodLabel || c.stripeCustomerId);
+  if (hasCard(thisRecord) !== hasCard(otherRecord)) {
+    return hasCard(thisRecord) ? "THIS" : "OTHER";
+  }
+  const a = thisRecord.createdAt ?? "";
+  const b = otherRecord.createdAt ?? "";
+  if (a && b && a !== b) return a < b ? "THIS" : "OTHER";
+  return "THIS";
 }
 
 function RecordSection({
@@ -212,12 +327,18 @@ export default function CustomerDetail() {
     | "portal"
     | "group"
   >(null);
-  // Duplicate-customer merge (OWNER). The hint arrives from the lead inbox's
-  // duplicate decision: the just-created duplicate's id, prefilled as the
-  // record to absorb into the one on this page.
+  // Duplicate-customer merge (OWNER). The hint arrives once from the lead
+  // inbox's duplicate decision via nav state (consumed below, so a reload
+  // never re-opens the sheet): the just-created duplicate's id, prefilled as
+  // the record to absorb into the one on this page.
   const [merging, setMerging] = useState(false);
-  const mergeHint =
-    (location.state as { mergeLoserId?: string } | null)?.mergeLoserId ?? null;
+  const [mergePrefill, setMergePrefill] = useState<string | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [infoNote, setInfoNote] = useState<string | null>(null);
+  // The mid-merge banner names the counterpart, and the tombstone page names
+  // the record it was kept under — both fetched, with the id as fallback.
+  const [counterpartName, setCounterpartName] = useState<string | null>(null);
+  const [mergedIntoName, setMergedIntoName] = useState<string | null>(null);
   // GL-09 — the lifecycle transition ledger (deactivate/reactivate history) and
   // the reason-picker sheets that gate each transition on a controlled reason.
   const [lifecycle, setLifecycle] = useState<CustomerLifecycleEvent[]>([]);
@@ -353,12 +474,160 @@ export default function CustomerDetail() {
       .catch(() => undefined);
   }, [customer, roles.office]);
 
-  // Arriving from the lead inbox's duplicate decision: open the merge sheet
-  // with the duplicate prefilled. Merge is OWNER-only; anyone else just lands
-  // on the record.
+  // Nav-state arrivals, consumed exactly once and then cleared (replace
+  // navigation) so a reload or back/forward never replays them:
+  // - mergeLoserId (+ nonce) from the lead inbox's duplicate decision opens
+  //   the merge sheet with the duplicate prefilled (OWNER-only; anyone else
+  //   just lands on the record);
+  // - mergedFrom is the landing note after a merge navigated here from the
+  //   absorbed side.
   useEffect(() => {
-    if (mergeHint && roles.owner) setMerging(true);
-  }, [mergeHint, roles.owner]);
+    const st = location.state as {
+      mergeLoserId?: string;
+      mergeNonce?: string;
+      mergeHintAt?: number;
+      mergedFrom?: string;
+    } | null;
+    if (!st || (!st.mergeLoserId && !st.mergedFrom)) return;
+    if (roles.loading) return; // wait until we know who this is
+    if (st.mergedFrom) {
+      setNotice(`Merged ${st.mergedFrom} into this record.`);
+    }
+    if (st.mergeLoserId && roles.owner) {
+      // The nonce (mergeHintAt from the lead inbox) marks this specific
+      // handoff: even if the same history entry replays (back/forward cache),
+      // the sheet opens only the first time.
+      const nonce =
+        st.mergeNonce ??
+        (st.mergeHintAt != null ? String(st.mergeHintAt) : null);
+      const nonceKey = nonce ? `merge-hint-${nonce}` : null;
+      const alreadySeen = nonceKey
+        ? window.sessionStorage.getItem(nonceKey) !== null
+        : false;
+      if (!alreadySeen) {
+        if (nonceKey) window.sessionStorage.setItem(nonceKey, "1");
+        setMergePrefill(st.mergeLoserId);
+        setMerging(true);
+      }
+    }
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, roles.loading, roles.owner, navigate]);
+
+  // Mirrors the server's isMidMerge: mergeCounterpartId is the marker set for
+  // the whole in-flight command. While it is set, the recovery banner under
+  // the page header owns the record.
+  const counterpartCustomerId = mergeCounterpartCustomerId(
+    customer?.mergeCounterpartId
+  );
+
+  // Name the counterpart in the mid-merge banner — the id alone tells the
+  // office nothing when both records carry the same customer name.
+  useEffect(() => {
+    setCounterpartName(null);
+    if (!counterpartCustomerId) return;
+    let stale = false;
+    void (async () => {
+      try {
+        const row = unwrap(
+          await api().models.Customer.get({ id: counterpartCustomerId })
+        );
+        if (!stale) setCounterpartName(row?.displayName ?? null);
+      } catch {
+        // The small id line still identifies it.
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [counterpartCustomerId]);
+
+  // Name the survivor on the tombstone page's "merged into" link.
+  const mergedIntoId =
+    customer?.status === "MERGED" ? (customer.mergedIntoId ?? null) : null;
+  useEffect(() => {
+    setMergedIntoName(null);
+    if (!mergedIntoId) return;
+    let stale = false;
+    void (async () => {
+      try {
+        const row = unwrap(
+          await api().models.Customer.get({ id: mergedIntoId })
+        );
+        if (!stale) setMergedIntoName(row?.displayName ?? null);
+      } catch {
+        // The generic link text still works.
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [mergedIntoId]);
+
+  // Resume an unfinished merge from the banner. Its failures render inside
+  // the banner card (its own error channel), not the page-top ErrorNote.
+  const resumeMerge = useAction(async () => {
+    if (!customer) return;
+    const counterpartId = mergeCounterpartCustomerId(
+      customer.mergeCounterpartId
+    );
+    // The command blob lives on the LOSER row, and this page may be either
+    // side: read our own blob first, then the counterpart's. survivorId +
+    // idempotencyKey come from the blob — resuming under a guessed key would
+    // fork the command.
+    let info = jsonField<MergeStateInfo>(customer.mergeState);
+    let loserId = customer.id;
+    if ((!info?.idempotencyKey || !info?.survivorId) && counterpartId) {
+      const counterpart = unwrap(
+        await api().models.Customer.get({ id: counterpartId })
+      );
+      info = jsonField<MergeStateInfo>(counterpart?.mergeState);
+      loserId = counterpartId;
+    }
+    if (!info?.idempotencyKey || !info?.survivorId) {
+      throw new Error(
+        "The merge's saved state could not be read. It stays parked and the daily reconcile will resume it — or try again shortly."
+      );
+    }
+    const res = opResult<MergeOutcome>(
+      await mergeCustomers({
+        action: "RESUME",
+        survivorId: info.survivorId,
+        loserId,
+        idempotencyKey: info.idempotencyKey,
+        acknowledgeWarnings: true,
+      })
+    );
+    if (res?.decision === "MERGED") {
+      if (res.survivorId === customer.id) {
+        setNotice(
+          "The merge finished — the duplicate is absorbed into this record."
+        );
+        await load();
+      } else {
+        // This page was the absorbed side — follow the survivor, and tell
+        // the landing page what just happened.
+        navigate(`/customers/${res.survivorId}`, {
+          state: { mergedFrom: customer.displayName },
+        });
+      }
+      return;
+    }
+    if (res?.decision === "PARTIAL") {
+      throw new Error(
+        `The merge is still unfinished — it stopped while ${mergeStageLabel(
+          res.stage
+        )}${res.error ? ` (${res.error})` : ""}. It stays parked and is safe to resume again.`
+      );
+    }
+    if (res?.decision === "REFUSED") {
+      throw new Error(
+        res.blockers.map((b) => b.detail).join(" ") || "The merge was refused."
+      );
+    }
+    throw new Error(
+      "The merge returned an unexpected result — reload and try again."
+    );
+  }, "Could not resume the merge");
 
   if (notFound) {
     return (
@@ -400,7 +669,7 @@ export default function CustomerDetail() {
                 className="text-action"
                 onClick={() => navigate(`/customers/${customer.mergedIntoId}`)}
               >
-                the record it was kept under
+                {mergedIntoName ?? "the record it was kept under"}
               </button>
             ) : (
               <span className="muted">
@@ -417,7 +686,7 @@ export default function CustomerDetail() {
             <dl className="kv">
               {blanked.map(([k, v]) => (
                 <Fragment key={k}>
-                  <dt>{k}</dt>
+                  <dt>{fieldLabel(k)}</dt>
                   <dd>{fieldValue(v)}</dd>
                 </Fragment>
               ))}
@@ -526,12 +795,8 @@ export default function CustomerDetail() {
       </span>
     );
 
-  // Mirrors the server's isMidMerge: mergeCounterpartId is the marker set for
-  // the whole in-flight command (a finished tombstone took the early return
-  // above). While it is set, the recovery banner below owns the record.
-  const counterpartCustomerId = mergeCounterpartCustomerId(
-    customer.mergeCounterpartId
-  );
+  // A finished tombstone took the early return above, so a set marker here
+  // means the merge is still in flight or parked.
   const midMerge = Boolean(counterpartCustomerId);
 
   const mergeAction = midMerge ? null : roles.owner ? (
@@ -542,10 +807,19 @@ export default function CustomerDetail() {
     <span
       className="permission-tooltip"
       title="Only an owner can merge duplicate customer records."
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 2,
+      }}
     >
       <Button small variant="ghost" disabled>
         Merge into another customer…
       </Button>
+      <span className="muted" style={{ fontSize: 11 }}>
+        Owner only
+      </span>
     </span>
   );
 
@@ -563,6 +837,38 @@ export default function CustomerDetail() {
     >
       <ErrorNote error={error ?? perform.error} />
       <SuccessNote message={notice} />
+      {infoNote ? (
+        <p className="info-note" role="status">
+          {infoNote}
+        </p>
+      ) : null}
+
+      {/* A mid-merge customer is a third state: other durable commands refuse
+          while the marker is set, so the one safe action is resuming the
+          merge — under its own saved idempotency key, never a fresh one. It
+          renders first, before the summary card, because until it finishes it
+          owns everything below it. Resume failures render inside this card. */}
+      {midMerge ? (
+        <Card>
+          <Badge tone="danger">merge needs recovery</Badge>
+          <p className="muted small" style={{ marginTop: 8 }}>
+            A merge between this record and{" "}
+            <strong>{counterpartName ?? "its duplicate"}</strong>{" "}
+            <span style={{ fontSize: 11 }}>({counterpartCustomerId})</span>{" "}
+            didn't finish. Other changes to either record are refused until it
+            does — resume it to continue from the last completed step. Nothing
+            is lost while it waits.
+          </p>
+          <ErrorNote error={resumeMerge.error} />
+          <Button
+            block
+            loading={resumeMerge.busy}
+            onClick={() => void resumeMerge.run()}
+          >
+            Resume merge
+          </Button>
+        </Card>
+      ) : null}
 
       <Card className="customer-summary-card">
         <div className="customer-summary-status">
@@ -1608,94 +1914,6 @@ export default function CustomerDetail() {
         </Card>
       ) : null}
 
-      {/* A mid-merge customer is likewise a third state: other durable
-          commands refuse while the marker is set, so the one safe action is
-          resuming the merge — under its own saved idempotency key, never a
-          fresh one. */}
-      {midMerge ? (
-        <Card>
-          <Badge tone="danger">merge needs recovery</Badge>
-          <p className="muted small" style={{ marginTop: 8 }}>
-            A merge between this record and its duplicate (
-            {counterpartCustomerId}) is in flight or parked. Other changes to
-            either record are refused until it finishes — resume it to continue
-            from the last completed step. Nothing is lost while it waits.
-          </p>
-          <Button
-            block
-            loading={perform.busyKey === "resume-merge"}
-            onClick={() => {
-              void perform.run("resume-merge", async () => {
-                // The command blob lives on the LOSER row, and this page may
-                // be either side: read our own blob first, then the
-                // counterpart's. survivorId + idempotencyKey come from the
-                // blob — resuming under a guessed key would fork the command.
-                let info = jsonField<MergeStateInfo>(customer.mergeState);
-                let loserId = customer.id;
-                if (
-                  (!info?.idempotencyKey || !info?.survivorId) &&
-                  counterpartCustomerId
-                ) {
-                  const counterpart = unwrap(
-                    await api().models.Customer.get({
-                      id: counterpartCustomerId,
-                    })
-                  );
-                  info = jsonField<MergeStateInfo>(counterpart?.mergeState);
-                  loserId = counterpartCustomerId;
-                }
-                if (!info?.idempotencyKey || !info?.survivorId) {
-                  throw new Error(
-                    "The merge's saved state could not be read. It stays parked and the daily reconcile will resume it — or try again shortly."
-                  );
-                }
-                const res = opResult<MergeOutcome>(
-                  await mergeCustomers({
-                    action: "RESUME",
-                    survivorId: info.survivorId,
-                    loserId,
-                    idempotencyKey: info.idempotencyKey,
-                    acknowledgeWarnings: true,
-                  })
-                );
-                if (res?.decision === "MERGED") {
-                  if (res.survivorId === customer.id) {
-                    setNotice(
-                      "The merge finished — the duplicate is absorbed into this record."
-                    );
-                    await load();
-                  } else {
-                    // This page was the absorbed side — follow the survivor.
-                    navigate(`/customers/${res.survivorId}`);
-                  }
-                  return;
-                }
-                if (res?.decision === "PARTIAL") {
-                  throw new Error(
-                    `The merge is still unfinished (stopped at ${res.stage
-                      .replace(/_/g, " ")
-                      .toLowerCase()}${
-                      res.error ? `: ${res.error}` : ""
-                    }). It stays parked and is safe to resume again.`
-                  );
-                }
-                if (res?.decision === "REFUSED") {
-                  throw new Error(
-                    res.blockers.map((b) => b.detail).join(" ") ||
-                      "The merge was refused."
-                  );
-                }
-                throw new Error(
-                  "The merge returned an unexpected result — reload and try again."
-                );
-              });
-            }}
-          >
-            Resume merge
-          </Button>
-        </Card>
-      ) : null}
-
       {/* GL-09: a customer mid-transition is a THIRD state, not active or
           inactive — the next employee sees one safe resume action. */}
       {openLifecycleCommand ? (
@@ -2240,15 +2458,30 @@ export default function CustomerDetail() {
 
       <Sheet
         open={merging}
-        onClose={() => setMerging(false)}
+        // While the merge itself is running the sheet cannot be closed — a
+        // half-watched EXECUTE must keep its owner in front of the outcome.
+        locked={mergeBusy}
+        onClose={() => {
+          if (mergeBusy) return;
+          setMerging(false);
+          setMergePrefill(null);
+        }}
         title="Merge duplicate records"
       >
         {merging ? (
           <MergeCustomerSheet
             customer={customer}
-            prefillLoserId={mergeHint}
-            onDone={async (msg, survivorId) => {
+            prefillLoserId={mergePrefill}
+            onBusyChange={setMergeBusy}
+            onPrefillAlreadyMerged={() => {
               setMerging(false);
+              setMergePrefill(null);
+              setInfoNote("Already merged — nothing to do.");
+            }}
+            onDone={async (msg, survivorId, loserName) => {
+              setMerging(false);
+              setMergePrefill(null);
+              setMergeBusy(false);
               if (survivorId === customer.id) {
                 setNotice(msg);
                 window.setTimeout(
@@ -2257,8 +2490,11 @@ export default function CustomerDetail() {
                 );
                 await load();
               } else {
-                // The record on this page was absorbed — follow the survivor.
-                navigate(`/customers/${survivorId}`);
+                // The record on this page was absorbed — follow the survivor,
+                // and tell the landing page what just happened.
+                navigate(`/customers/${survivorId}`, {
+                  state: { mergedFrom: loserName },
+                });
               }
             }}
           />
@@ -2756,40 +2992,118 @@ function SettleInvoiceSheet({
   );
 }
 
+/** One selectable survivor card. Duplicates usually share the exact same
+ *  name, so the card carries what actually tells them apart: status, email or
+ *  phone, and how long the record has existed. */
+function SurvivorOptionCard({
+  record,
+  checked,
+  disabled,
+  onSelect,
+}: {
+  record: Customer;
+  checked: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onSelect}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: checked ? "var(--brand-soft)" : "var(--surface)",
+        border: checked
+          ? "2px solid var(--brand)"
+          : "1px solid var(--line-strong)",
+        borderRadius: "var(--radius-sm)",
+        // One extra pixel of padding when unchecked keeps the box from
+        // shifting as the border width changes.
+        padding: checked ? "9px 11px" : "10px 12px",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled && !checked ? 0.6 : 1,
+      }}
+    >
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <strong>{record.displayName}</strong>
+        <StatusBadge status={record.status} />
+        {checked ? <Badge tone="ok">keeping</Badge> : null}
+      </span>
+      <span className="muted small" style={{ display: "block", marginTop: 3 }}>
+        {record.email || record.phone || "no email or phone on file"}
+      </span>
+      <span className="muted small" style={{ display: "block" }}>
+        since {fmtDate(record.createdAt, true)}
+      </span>
+    </button>
+  );
+}
+
 /**
  * Absorb a duplicate customer record into the one being kept (OWNER-only,
  * enforced server-side). Nothing is touched until the server's PREVIEW
- * envelope has been shown and the kept record's name retyped — the
+ * envelope has been shown and the kept record confirmed by retyping — the
  * ChargeCardSheet rule: an irreversible action of this size is read past
- * exactly when it matters, so it must be typed. EXECUTE runs the durable
- * staged command; a PARTIAL outcome is parked server-side and resumed under
- * the SAME idempotency key, never a fresh one.
+ * exactly when it matters, so it must be typed. Because duplicates usually
+ * share the exact same name, the retype target is the kept record's email or
+ * phone when the names match. EXECUTE runs the durable staged command; a
+ * PARTIAL outcome is parked server-side and resumed under the SAME
+ * idempotency key, never a fresh one.
  */
 function MergeCustomerSheet({
   customer,
   prefillLoserId,
+  onBusyChange,
+  onPrefillAlreadyMerged,
   onDone,
 }: {
   customer: Customer;
   prefillLoserId: string | null;
-  onDone: (message: string, survivorId: string) => Promise<void>;
+  /** Lifts "the merge itself is running" so the parent can lock the sheet. */
+  onBusyChange: (busy: boolean) => void;
+  /** The hinted duplicate is already a tombstone — nothing to do. */
+  onPrefillAlreadyMerged: () => void;
+  onDone: (
+    message: string,
+    survivorId: string,
+    loserName: string
+  ) => Promise<void>;
 }) {
   const [other, setOther] = useState<Customer | null>(null);
   const [prefillFailed, setPrefillFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [keep, setKeep] = useState<"THIS" | "OTHER">("THIS");
   const [preview, setPreview] = useState<MergePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewNonce, setPreviewNonce] = useState(0);
+  const [showUnchanged, setShowUnchanged] = useState(false);
   const [partial, setPartial] = useState<{
     stage: string;
     error: string;
     idempotencyKey: string;
   } | null>(null);
+  // A thrown network/timeout during EXECUTE is NOT a failure — the durable
+  // command keeps running server-side. This flag renders the "still working"
+  // note in place of the buttons instead of a red error.
+  const [stillWorking, setStillWorking] = useState(false);
   const [retyped, setRetyped] = useState("");
   // One idempotency key per sheet open: the preview, the execute, and any
   // in-sheet resume all address the same server-side command.
   const [idemKey] = useState(() => crypto.randomUUID());
-  const perform = useKeyedAction("Could not merge");
-  const { clearError } = perform;
+  const confirmRef = useRef<HTMLDivElement | null>(null);
 
   // Candidate list for the picker. The status GSI never lists MERGED
   // tombstones, so one can never be picked as either side.
@@ -2813,7 +3127,8 @@ function MergeCustomerSheet({
   );
 
   // Prefill from the lead inbox's duplicate decision: the just-created
-  // duplicate arrives as the record to absorb.
+  // duplicate arrives as the record to absorb. A hint that is already a
+  // tombstone means the merge already happened — a no-op, not a load failure.
   useEffect(() => {
     if (!prefillLoserId) return;
     let stale = false;
@@ -2823,8 +3138,14 @@ function MergeCustomerSheet({
           await api().models.Customer.get({ id: prefillLoserId })
         );
         if (stale) return;
-        if (row && row.status !== "MERGED") setOther(row);
-        else setPrefillFailed(true);
+        if (row && row.status === "MERGED") {
+          onPrefillAlreadyMerged();
+        } else if (row) {
+          setOther(row);
+          setKeep(defaultSurvivorChoice(customer, row));
+        } else {
+          setPrefillFailed(true);
+        }
       } catch {
         if (!stale) setPrefillFailed(true);
       }
@@ -2832,116 +3153,51 @@ function MergeCustomerSheet({
     return () => {
       stale = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillLoserId]);
 
-  // A different pairing or survivor choice invalidates the shown preview —
-  // the consequences on screen must be the consequences of THIS pairing.
-  useEffect(() => {
-    setPreview(null);
-    setRetyped("");
-    clearError();
-  }, [other?.id, keep, clearError]);
-
-  if (prefillLoserId && !other && !prefillFailed) {
-    return <Spinner label="Loading the duplicate record…" />;
-  }
-
-  if (!other) {
-    const q = query.trim().toLowerCase();
-    const shown = (candidates ?? [])
-      .filter(
-        (c) =>
-          !q ||
-          c.displayName.toLowerCase().includes(q) ||
-          (c.serviceCity ?? "").toLowerCase().includes(q) ||
-          (c.email ?? "").toLowerCase().includes(q)
-      )
-      .slice(0, 8);
-    return (
-      <div className="form-grid">
-        <p className="muted small" style={{ margin: 0 }}>
-          Pick the record this one duplicates. Nothing changes until you have
-          seen the full consequences and confirmed.
-        </p>
-        {prefillFailed ? (
-          <p className="muted small" style={{ margin: 0 }}>
-            The record handed over from the lead inbox could not be loaded —
-            pick it here instead.
-          </p>
-        ) : null}
-        <input
-          placeholder="Search name, city, email…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <ErrorNote error={candidatesError} />
-        {!candidates ? (
-          <Spinner />
-        ) : shown.length === 0 ? (
-          <p className="muted small">No matching customers.</p>
-        ) : (
-          shown.map((c) => (
-            <ListRow
-              key={c.id}
-              title={c.displayName}
-              subtitle={
-                [c.email, c.phone, c.serviceCity].filter(Boolean).join(" · ") ||
-                undefined
-              }
-              meta={<StatusBadge status={c.status} />}
-              onClick={() => setOther(c)}
-            />
-          ))
-        )}
-      </div>
-    );
-  }
-
-  const survivorRec = keep === "THIS" ? customer : other;
-  const loserRec = keep === "THIS" ? other : customer;
-  const blocked = (preview?.blockers.length ?? 0) > 0;
-  const retypeOk = retyped.trim() === survivorRec.displayName.trim();
-
-  const runPreview = () =>
-    void perform.run("preview", async () => {
-      const res = opResult<MergeOutcome>(
-        await mergeCustomers({
-          action: "PREVIEW",
-          survivorId: survivorRec.id,
-          loserId: loserRec.id,
-          idempotencyKey: idemKey,
-        })
-      );
-      if (res?.decision !== "PREVIEW") {
-        throw new Error("Could not compute the merge preview");
+  const executeMerge = useAction(
+    async (action: "EXECUTE" | "RESUME", key: string) => {
+      if (!other) return;
+      const survivorRec = keep === "THIS" ? customer : other;
+      const loserRec = keep === "THIS" ? other : customer;
+      setStillWorking(false);
+      let res: MergeOutcome | null;
+      try {
+        res = opResult<MergeOutcome>(
+          await mergeCustomers({
+            action,
+            survivorId: survivorRec.id,
+            loserId: loserRec.id,
+            idempotencyKey: key,
+            // The retype gate below IS the acknowledgement — the server
+            // refuses an unacknowledged EXECUTE that carries warnings.
+            acknowledgeWarnings: true,
+          })
+        );
+      } catch (err) {
+        // A big merge can outlive the request; the command is durable and
+        // resumable under its saved key, so a timeout is "still working",
+        // never a failure.
+        if (MERGE_TIMEOUT_ERROR.test(toMessage(err, ""))) {
+          setStillWorking(true);
+          return;
+        }
+        throw err;
       }
-      setPreview(res.preview);
-    });
-
-  const execute = (action: "EXECUTE" | "RESUME", key: string) =>
-    void perform.run("execute", async () => {
-      const res = opResult<MergeOutcome>(
-        await mergeCustomers({
-          action,
-          survivorId: survivorRec.id,
-          loserId: loserRec.id,
-          idempotencyKey: key,
-          // The retype gate below IS the acknowledgement — the server refuses
-          // an unacknowledged EXECUTE that carries warnings.
-          acknowledgeWarnings: true,
-        })
-      );
       if (!res) throw new Error("The merge returned no result");
       if (res.decision === "MERGED") {
         await onDone(
           `Merged ${loserRec.displayName} into ${survivorRec.displayName}.`,
-          res.survivorId
+          res.survivorId,
+          loserRec.displayName
         );
         return;
       }
       if (res.decision === "PARTIAL") {
-        // Parked, not failed: the banner resumes it under the SAME key the
-        // server reported, so the command continues instead of forking.
+        // Parked, not failed: the resume below re-drives it under the SAME
+        // key the server reported, so the command continues instead of
+        // forking.
         setPartial({
           stage: res.stage,
           error: res.error,
@@ -2960,217 +3216,535 @@ function MergeCustomerSheet({
         // fresh consequences and require a fresh confirmation.
         setPreview(res.preview);
         setRetyped("");
+        setShowUnchanged(false);
         throw new Error(
           "The records changed since the preview — review the updated consequences and confirm again."
         );
       }
       throw new Error("The merge returned an unexpected result");
-    });
+    },
+    "Could not merge"
+  );
+  const clearExecuteError = executeMerge.clearError;
+
+  // The preview runs on its own as soon as a pairing exists and re-runs when
+  // the survivor choice flips (the deactivate-sheet pattern) — the
+  // consequences on screen are always the consequences of THIS pairing.
+  useEffect(() => {
+    if (!other || partial || stillWorking) return;
+    let stale = false;
+    setPreview(null);
+    setRetyped("");
+    setShowUnchanged(false);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    clearExecuteError();
+    const survivorId = keep === "THIS" ? customer.id : other.id;
+    const loserId = keep === "THIS" ? other.id : customer.id;
+    void (async () => {
+      try {
+        const res = opResult<MergeOutcome>(
+          await mergeCustomers({
+            action: "PREVIEW",
+            survivorId,
+            loserId,
+            idempotencyKey: idemKey,
+          })
+        );
+        if (stale) return;
+        if (res?.decision !== "PREVIEW") {
+          throw new Error("Could not check what this merge will do");
+        }
+        setPreview(res.preview);
+      } catch (err) {
+        if (!stale) {
+          setPreviewError(
+            toMessage(err, "Could not check what this merge will do")
+          );
+        }
+      } finally {
+        if (!stale) setPreviewLoading(false);
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [other?.id, keep, previewNonce, customer.id, idemKey, clearExecuteError]);
+
+  // Bring the confirm section into view when the consequences land — on a
+  // phone the preview alone fills the screen.
+  useEffect(() => {
+    if (preview) {
+      confirmRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [preview]);
+
+  // The parent locks the sheet while the merge itself runs — watching the
+  // outcome land is part of the action.
+  useEffect(() => {
+    onBusyChange(executeMerge.busy);
+  }, [executeMerge.busy, onBusyChange]);
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
+
+  if (prefillLoserId && !other && !prefillFailed) {
+    return <Spinner label="Loading the duplicate record…" />;
+  }
+
+  if (!other) {
+    const q = query.trim().toLowerCase();
+    const digits = (v?: string | null) => (v ?? "").replace(/\D/g, "");
+    const qDigits = digits(q);
+    const norm = (v?: string | null) => (v ?? "").trim().toLowerCase();
+    // The evidence the office needs FIRST: records that match this one the
+    // way the lead dedup gate matches — exact email, exact phone, or
+    // name+ZIP. Same normalization, computed locally over the loaded pages.
+    const matchEvidence = (c: Customer): string | null => {
+      if (norm(c.email) && norm(c.email) === norm(customer.email)) {
+        return "same email";
+      }
+      if (
+        digits(c.phone).length >= 10 &&
+        digits(c.phone) === digits(customer.phone)
+      ) {
+        return "same phone";
+      }
+      if (
+        norm(c.displayName) === norm(customer.displayName) &&
+        (c.serviceZip ?? "") !== "" &&
+        c.serviceZip === customer.serviceZip
+      ) {
+        return "same name + ZIP";
+      }
+      return null;
+    };
+    const likely = q
+      ? []
+      : (candidates ?? [])
+          .map((c) => ({ c, why: matchEvidence(c) }))
+          .filter((m): m is { c: Customer; why: string } => m.why !== null)
+          .slice(0, 5);
+    const likelyIds = new Set(likely.map((m) => m.c.id));
+    const filtered = (candidates ?? []).filter(
+      (c) =>
+        !likelyIds.has(c.id) &&
+        (!q ||
+          c.displayName.toLowerCase().includes(q) ||
+          (c.serviceCity ?? "").toLowerCase().includes(q) ||
+          (c.email ?? "").toLowerCase().includes(q) ||
+          (qDigits.length >= 4 && digits(c.phone).includes(qDigits)))
+    );
+    const shown = filtered.slice(0, 8);
+    const hidden = filtered.length - shown.length;
+    const pick = (c: Customer) => {
+      setOther(c);
+      setKeep(defaultSurvivorChoice(customer, c));
+    };
+    return (
+      <div className="form-grid">
+        <p className="muted small" style={{ margin: 0 }}>
+          Pick the record this one duplicates. Nothing changes until you have
+          seen the full consequences and confirmed.
+        </p>
+        {prefillFailed ? (
+          <p className="muted small" style={{ margin: 0 }}>
+            The record handed over from the lead inbox could not be loaded —
+            pick it here instead.
+          </p>
+        ) : null}
+        <input
+          placeholder="Search name, city, email, phone…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ErrorNote error={candidatesError} />
+        {!candidates ? (
+          <Spinner />
+        ) : (
+          <>
+            {likely.length > 0 ? (
+              <>
+                <div className="section-label">Likely duplicates</div>
+                {likely.map(({ c, why }) => (
+                  <ListRow
+                    key={c.id}
+                    title={c.displayName}
+                    subtitle={
+                      [c.email, c.phone, c.serviceCity]
+                        .filter(Boolean)
+                        .join(" · ") || undefined
+                    }
+                    meta={
+                      <span className="row-meta">
+                        <Badge tone="info">{why}</Badge>
+                        <StatusBadge status={c.status} />
+                      </span>
+                    }
+                    onClick={() => pick(c)}
+                  />
+                ))}
+                <div className="section-label">Everyone else</div>
+              </>
+            ) : null}
+            {shown.length === 0 && likely.length === 0 ? (
+              <p className="muted small">No matching customers.</p>
+            ) : (
+              shown.map((c) => (
+                <ListRow
+                  key={c.id}
+                  title={c.displayName}
+                  subtitle={
+                    [c.email, c.phone, c.serviceCity]
+                      .filter(Boolean)
+                      .join(" · ") || undefined
+                  }
+                  meta={<StatusBadge status={c.status} />}
+                  onClick={() => pick(c)}
+                />
+              ))
+            )}
+            {hidden > 0 ? (
+              <p className="muted small" style={{ margin: 0 }}>
+                {hidden} more not shown — keep typing to narrow it down.
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const survivorRec = keep === "THIS" ? customer : other;
+  const loserRec = keep === "THIS" ? other : customer;
+  const blocked = (preview?.blockers.length ?? 0) > 0;
+  // While the merge runs (or may still be running server-side), the pairing
+  // must not change out from under it.
+  const flightLocked = executeMerge.busy || stillWorking || Boolean(partial);
+
+  // Retype gate. Duplicates usually share the exact same name, so typing the
+  // name proves nothing — fall back to the kept record's email, then the last
+  // 4 digits of its phone, then the word KEEP.
+  const sameName =
+    normalizeConfirmText(customer.displayName) ===
+    normalizeConfirmText(other.displayName);
+  const phoneLast4 = (survivorRec.phone ?? "").replace(/\D/g, "").slice(-4);
+  const confirm = !sameName
+    ? {
+        kind: "text" as const,
+        expected: survivorRec.displayName,
+        label: `Type "${survivorRec.displayName}" to confirm`,
+        why: null as string | null,
+      }
+    : survivorRec.email
+      ? {
+          kind: "text" as const,
+          expected: survivorRec.email,
+          label: `Type the kept record's email — ${survivorRec.email} — to confirm`,
+          why: "Both records have the same name, so the kept record's email is the check instead.",
+        }
+      : phoneLast4.length === 4
+        ? {
+            kind: "digits" as const,
+            expected: phoneLast4,
+            label: `Type the last 4 digits of the kept record's phone (ending ${phoneLast4}) to confirm`,
+            why: "Both records have the same name and no email, so the kept record's phone is the check instead.",
+          }
+        : {
+            kind: "text" as const,
+            expected: "KEEP",
+            label: 'Type "KEEP" to confirm',
+            why: "Both records have the same name and no email or phone to tell them apart.",
+          };
+  const retypeOk =
+    confirm.kind === "digits"
+      ? retyped.replace(/\D/g, "") === confirm.expected
+      : normalizeConfirmText(retyped) ===
+        normalizeConfirmText(confirm.expected);
+  const showMismatch = !retypeOk && retyped.trim().length >= 3;
 
   return (
     <div className="form-grid">
-      <ListRow
-        title={other.displayName}
-        subtitle={
-          [other.email, other.phone, other.serviceCity]
-            .filter(Boolean)
-            .join(" · ") || undefined
-        }
-        meta={
-          <span className="inline-actions">
-            <StatusBadge status={other.status} />
-            {partial ? null : (
-              <Button small variant="ghost" onClick={() => setOther(null)}>
-                Change
-              </Button>
-            )}
-          </span>
-        }
-      />
       {partial ? (
         <p className="muted small" style={{ margin: 0 }}>
           Keeping <strong>{survivorRec.displayName}</strong> — absorbing{" "}
           <strong>{loserRec.displayName}</strong>.
         </p>
       ) : (
-        <Field
-          group
-          label="Which record survives?"
-          hint="The other becomes a pointer to it; every linked record moves to the kept one."
-        >
-          <SegControl
-            options={[
-              { value: "THIS" as const, label: `Keep ${customer.displayName}` },
-              { value: "OTHER" as const, label: `Keep ${other.displayName}` },
-            ]}
-            value={keep}
-            onChange={setKeep}
-          />
-        </Field>
-      )}
-      {!preview ? (
         <>
-          <ErrorNote error={perform.error} />
+          <div className="row-split">
+            <p className="muted small" style={{ margin: 0 }}>
+              Merging this record with <strong>{other.displayName}</strong>.
+            </p>
+            <Button
+              small
+              variant="ghost"
+              disabled={flightLocked}
+              onClick={() => setOther(null)}
+            >
+              Change
+            </Button>
+          </div>
+          <Field
+            group
+            label="Which record do we keep?"
+            hint="Keeping the record with the longer history — switch if that's wrong."
+          >
+            <div
+              role="radiogroup"
+              aria-label="Which record do we keep?"
+              style={{ display: "grid", gap: 8 }}
+            >
+              <SurvivorOptionCard
+                record={customer}
+                checked={keep === "THIS"}
+                disabled={flightLocked}
+                onSelect={() => setKeep("THIS")}
+              />
+              <SurvivorOptionCard
+                record={other}
+                checked={keep === "OTHER"}
+                disabled={flightLocked}
+                onSelect={() => setKeep("OTHER")}
+              />
+            </div>
+          </Field>
+        </>
+      )}
+      {previewLoading ? (
+        <Spinner label="Checking what this merge will do…" />
+      ) : null}
+      {previewError ? (
+        <>
+          <ErrorNote error={previewError} />
           <Button
             block
-            loading={perform.busyKey === "preview"}
-            onClick={runPreview}
+            variant="subtle"
+            onClick={() => setPreviewNonce((n) => n + 1)}
           >
-            Preview the merge
+            Try again
           </Button>
         </>
-      ) : (
-        <>
-          <div className="muted small" style={{ display: "grid", gap: 6 }}>
-            {(() => {
-              const moving = Object.entries(preview.childCounts).filter(
-                ([, n]) => n > 0
-              );
-              return moving.length === 0 ? (
-                <div>
-                  <strong>Linked records:</strong> none to move.
-                </div>
-              ) : (
-                <div>
-                  <strong>Moving to the kept record:</strong>
-                  <dl className="kv">
-                    {moving.map(([model, n]) => (
-                      <Fragment key={model}>
-                        <dt>{model.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt>
-                        <dd>{n}</dd>
-                      </Fragment>
-                    ))}
-                  </dl>
-                </div>
-              );
-            })()}
-            <div>
-              <strong>Billing:</strong>{" "}
-              {preview.billing.pointerPlan === "ADOPTED_LOSER"
-                ? `the kept record adopts the duplicate's saved card${
-                    preview.billing.loserCard
-                      ? ` (${preview.billing.loserCard})`
+      ) : null}
+      {preview ? (
+        <div className="muted small" style={{ display: "grid", gap: 6 }}>
+          {(() => {
+            const moving = Object.entries(preview.childCounts).filter(
+              ([, n]) => n > 0
+            );
+            return moving.length === 0 ? (
+              <div>
+                <strong>Linked records:</strong> none to move.
+              </div>
+            ) : (
+              <div>
+                <strong>Moving to the kept record:</strong>
+                <dl className="kv">
+                  {moving.map(([model, n]) => (
+                    <Fragment key={model}>
+                      <dt>{childModelLabel(model)}</dt>
+                      <dd>{n}</dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              </div>
+            );
+          })()}
+          <div>
+            <strong>Billing:</strong>{" "}
+            {preview.billing.pointerPlan === "ADOPTED_LOSER"
+              ? `the kept record adopts the duplicate's saved card${
+                  preview.billing.loserCard
+                    ? ` (${preview.billing.loserCard})`
+                    : ""
+                }.`
+              : preview.billing.pointerPlan === "SURVIVOR_KEPT"
+                ? `the kept record keeps its own card${
+                    preview.billing.survivorCard
+                      ? ` (${preview.billing.survivorCard})`
                       : ""
                   }.`
-                : preview.billing.pointerPlan === "SURVIVOR_KEPT"
-                  ? `the kept record keeps its own card${
-                      preview.billing.survivorCard
-                        ? ` (${preview.billing.survivorCard})`
-                        : ""
-                    }.`
-                  : "neither record has card billing to move."}
-              {preview.billing.loserActiveSubscriptions > 0
-                ? ` ${preview.billing.loserActiveSubscriptions} active subscription${
-                    preview.billing.loserActiveSubscriptions === 1 ? "" : "s"
-                  } repoint to the kept record.`
-                : ""}
-            </div>
-            <div>
-              <strong>Portal:</strong>{" "}
-              {preview.portal.sharedLogin
-                ? "both records already share one login — it keeps working."
-                : preview.portal.loserHasLogin
-                  ? "the duplicate's login is granted the kept record before its own access is retired."
-                  : preview.portal.survivorHasLogin
-                    ? "the kept record's login is unaffected."
-                    : "neither record has a portal login."}
-            </div>
-            {preview.fieldDiff.length > 0 ? (
-              <div>
-                <strong>Contact &amp; address:</strong>
-                {preview.fieldDiff.map((d) => (
-                  <span className="nested-line" key={d.field}>
-                    {d.field}: {fieldValue(d.survivor)}
-                    {" ← "}
-                    {fieldValue(d.loser)}{" "}
-                    <Badge
-                      tone={
-                        d.outcome === "CONFLICT"
-                          ? "warn"
-                          : d.outcome === "FILL"
-                            ? "info"
-                            : "muted"
-                      }
-                    >
-                      {d.outcome === "FILL"
-                        ? "filled from duplicate"
-                        : d.outcome === "CONFLICT"
-                          ? "kept record wins"
-                          : "kept"}
-                    </Badge>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {preview.warnings.map((w) => (
-              <div key={w.code}>
-                <Badge tone="warn">warning</Badge> {w.detail}
-              </div>
-            ))}
-            {preview.blockers.map((b) => (
-              <div key={b.code}>
-                <Badge tone="danger">blocked</Badge> {b.detail}
-              </div>
-            ))}
+                : "neither record has card billing to move."}
+            {preview.billing.loserActiveSubscriptions > 0
+              ? ` ${preview.billing.loserActiveSubscriptions} active subscription${
+                  preview.billing.loserActiveSubscriptions === 1 ? "" : "s"
+                } repoint to the kept record.`
+              : ""}
           </div>
-          {partial ? (
-            <>
-              <span>
-                <Badge tone="danger">merge unfinished</Badge>
-              </span>
-              <p className="muted small" style={{ margin: 0 }}>
-                The merge stopped at{" "}
-                {partial.stage.replace(/_/g, " ").toLowerCase()}
-                {partial.error ? ` (${partial.error})` : ""}. Nothing is lost —
-                it is parked server-side and resumes from the last completed
-                step.
-              </p>
-              <ErrorNote error={perform.error} />
-              <Button
-                block
-                loading={perform.busyKey === "execute"}
-                onClick={() => execute("RESUME", partial.idempotencyKey)}
-              >
-                Resume merge
-              </Button>
-            </>
-          ) : blocked ? (
-            <>
-              <ErrorNote error={perform.error} />
-              <p className="muted small" style={{ margin: 0 }}>
-                The merge cannot run until the blockers above are resolved.
-              </p>
-            </>
-          ) : (
-            <>
-              <Field
-                label={`Type "${survivorRec.displayName}" to confirm`}
-                hint={
-                  preview.warnings.length > 0
-                    ? "Confirming acknowledges the warnings above. A merge moves every linked record and cannot be undone."
-                    : "A merge moves every linked record and cannot be undone."
-                }
-              >
-                <input
-                  value={retyped}
-                  onChange={(e) => setRetyped(e.target.value)}
-                  placeholder={survivorRec.displayName}
-                />
-              </Field>
-              <ErrorNote error={perform.error} />
-              <Button
-                block
-                variant="danger"
-                loading={perform.busyKey === "execute"}
-                disabled={!retypeOk}
-                onClick={() => execute("EXECUTE", idemKey)}
-              >
-                Merge {loserRec.displayName} into {survivorRec.displayName}
-              </Button>
-            </>
-          )}
-        </>
-      )}
+          <div>
+            <strong>Portal:</strong>{" "}
+            {preview.portal.sharedLogin
+              ? "both records already share one login — it keeps working."
+              : preview.portal.loserHasLogin
+                ? "the duplicate's login is granted the kept record before its own access is retired."
+                : preview.portal.survivorHasLogin
+                  ? "the kept record's login is unaffected."
+                  : "neither record has a portal login."}
+          </div>
+          {preview.fieldDiff.length > 0
+            ? (() => {
+                const changedRows = preview.fieldDiff.filter(
+                  (d) => d.outcome !== "KEEP"
+                );
+                const unchangedRows = preview.fieldDiff.filter(
+                  (d) => d.outcome === "KEEP"
+                );
+                return (
+                  <div>
+                    <strong>Contact &amp; address</strong> (duplicate → kept)
+                    {changedRows.map((d) => (
+                      <span className="nested-line" key={d.field}>
+                        {fieldLabel(d.field)}: {fieldValue(d.loser)} →{" "}
+                        {fieldValue(
+                          d.outcome === "FILL" ? d.loser : d.survivor
+                        )}{" "}
+                        <Badge
+                          tone={d.outcome === "CONFLICT" ? "warn" : "info"}
+                        >
+                          {d.outcome === "FILL"
+                            ? "filled from duplicate"
+                            : "kept record wins"}
+                        </Badge>
+                      </span>
+                    ))}
+                    {changedRows.length === 0 ? (
+                      <span className="nested-line">
+                        Nothing changes on the kept record.
+                      </span>
+                    ) : null}
+                    {unchangedRows.length > 0 ? (
+                      <>
+                        <span className="nested-line">
+                          <button
+                            type="button"
+                            className="text-action"
+                            onClick={() => setShowUnchanged((v) => !v)}
+                          >
+                            {showUnchanged
+                              ? "Hide unchanged fields"
+                              : `Show ${unchangedRows.length} unchanged field${
+                                  unchangedRows.length === 1 ? "" : "s"
+                                }`}
+                          </button>
+                        </span>
+                        {showUnchanged
+                          ? unchangedRows.map((d) => (
+                              <span className="nested-line" key={d.field}>
+                                {fieldLabel(d.field)}:{" "}
+                                {fieldValue(d.survivor)}{" "}
+                                <Badge tone="muted">unchanged</Badge>
+                              </span>
+                            ))
+                          : null}
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })()
+            : null}
+          {preview.warnings.map((w) => (
+            <div key={w.code}>
+              <Badge tone="warn">warning</Badge> {w.detail}
+            </div>
+          ))}
+          {preview.blockers.map((b) => (
+            <div key={b.code}>
+              <Badge tone="danger">blocked</Badge> {b.detail}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div ref={confirmRef} style={{ display: "grid", gap: 12 }}>
+        {stillWorking ? (
+          <p className="info-note" role="status" style={{ margin: 0 }}>
+            Still working — a big merge can take a minute. It's safe to leave
+            this open, or check the banner on this page shortly; nothing is
+            lost.
+          </p>
+        ) : partial ? (
+          <>
+            <span>
+              <Badge tone="danger">merge unfinished</Badge>
+            </span>
+            <p className="muted small" style={{ margin: 0 }}>
+              The merge stopped while {mergeStageLabel(partial.stage)}
+              {partial.error ? ` (${partial.error})` : ""}. Nothing is lost —
+              it is parked server-side and resumes from the last completed
+              step.
+            </p>
+            <ErrorNote error={executeMerge.error} />
+            <Button
+              block
+              loading={executeMerge.busy}
+              onClick={() =>
+                void executeMerge.run("RESUME", partial.idempotencyKey)
+              }
+            >
+              Resume merge
+            </Button>
+          </>
+        ) : preview && blocked ? (
+          <>
+            <p className="muted small" style={{ margin: 0 }}>
+              The merge can't run until the blockers above are cleared. Sort
+              them out, then check again from here.
+            </p>
+            <Button
+              block
+              variant="subtle"
+              loading={previewLoading}
+              onClick={() => setPreviewNonce((n) => n + 1)}
+            >
+              Re-check
+            </Button>
+          </>
+        ) : preview ? (
+          <>
+            <Field
+              label={confirm.label}
+              hint={[
+                confirm.why,
+                preview.warnings.length > 0
+                  ? "Confirming acknowledges the warnings above."
+                  : null,
+                "A merge moves every linked record and cannot be undone.",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <input
+                value={retyped}
+                onChange={(e) => setRetyped(e.target.value)}
+                placeholder="Type it here"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode={confirm.kind === "digits" ? "numeric" : "text"}
+              />
+              {showMismatch ? (
+                <span className="small" style={{ color: "var(--warn-ink)" }}>
+                  Doesn't match yet — type it exactly as shown.
+                </span>
+              ) : null}
+            </Field>
+            <ErrorNote error={executeMerge.error} />
+            <Button
+              block
+              variant="danger"
+              loading={executeMerge.busy}
+              disabled={!retypeOk}
+              onClick={() => void executeMerge.run("EXECUTE", idemKey)}
+            >
+              {sameName
+                ? "Merge the duplicate into the kept record"
+                : `Merge ${loserRec.displayName} into ${survivorRec.displayName}`}
+            </Button>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

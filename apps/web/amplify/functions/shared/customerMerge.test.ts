@@ -742,6 +742,144 @@ describe("the staging-drill cascade class", () => {
   });
 });
 
+describe("office-facing copy (the UX review class)", () => {
+  it("TOKEN_STALENESS appears only when a record actually has a portal login", async () => {
+    seedCustomer("surv");
+    seedCustomer("dup");
+    const none = await run("PREVIEW");
+    if (none.decision !== "PREVIEW") throw new Error(none.decision);
+    expect(none.preview.warnings.map((w) => w.code)).not.toContain(
+      "TOKEN_STALENESS"
+    );
+
+    seedCustomer("surv2", { portalUserSub: "sub-s" });
+    seedCustomer("dup2");
+    const keptSide = await run("PREVIEW", "surv2", "dup2");
+    if (keptSide.decision !== "PREVIEW") throw new Error(keptSide.decision);
+    expect(keptSide.preview.warnings.map((w) => w.code)).toContain(
+      "TOKEN_STALENESS"
+    );
+
+    seedCustomer("surv3");
+    seedCustomer("dup3", { portalUserSub: "sub-l" });
+    const dupSide = await run("PREVIEW", "surv3", "dup3");
+    if (dupSide.decision !== "PREVIEW") throw new Error(dupSide.decision);
+    expect(dupSide.preview.warnings.map((w) => w.code)).toContain(
+      "TOKEN_STALENESS"
+    );
+  });
+
+  it("keeping a LEAD over an ACTIVE customer warns, needs acknowledgement, and is never a blocker", async () => {
+    seedCustomer("surv", { status: "LEAD" });
+    seedCustomer("dup", { status: "ACTIVE" });
+
+    const preview = await run("PREVIEW");
+    if (preview.decision !== "PREVIEW") throw new Error(preview.decision);
+    const warning = preview.preview.warnings.find(
+      (w) => w.code === "LEAD_SURVIVOR"
+    );
+    expect(warning).toBeDefined();
+    expect(warning!.detail).toContain(
+      "double-check which record should survive"
+    );
+    expect(preview.preview.blockers).toHaveLength(0);
+
+    const unacked = await run("EXECUTE");
+    expect(unacked.decision).toBe("NEEDS_ACKNOWLEDGEMENT");
+    if (unacked.decision === "NEEDS_ACKNOWLEDGEMENT") {
+      expect(unacked.warnings.map((w) => w.code)).toContain("LEAD_SURVIVOR");
+    }
+    const acked = await run("EXECUTE", "surv", "dup", {
+      acknowledgeWarnings: true,
+    });
+    expect(acked.decision).toBe("MERGED");
+  });
+
+  it("the usual direction (ACTIVE keeps, LEAD absorbed) does not warn", async () => {
+    seedCustomer("surv", { status: "ACTIVE" });
+    seedCustomer("dup", { status: "LEAD" });
+    const preview = await run("PREVIEW");
+    if (preview.decision !== "PREVIEW") throw new Error(preview.decision);
+    expect(preview.preview.warnings.map((w) => w.code)).not.toContain(
+      "LEAD_SURVIVOR"
+    );
+  });
+
+  it("blockers name people (id in parentheses), not bare UUIDs, and say the next step", async () => {
+    seedCustomer("surv", { displayName: "Dana Keeper" });
+    seedCustomer("dup", { displayName: "Dana K. (old)" });
+    table("ServicePlan").set("p1", {
+      id: "p1",
+      customerId: "dup",
+      planName: "Quarterly Pest Prevention",
+    });
+    table("PlanCancellationClaim").set("p1", { id: "p1", stage: "BILLING" });
+
+    const out = await run("PREVIEW");
+    if (out.decision !== "PREVIEW") throw new Error(out.decision);
+    const blocker = out.preview.blockers.find(
+      (b) => b.code === "OPEN_PLAN_CANCELLATION"
+    );
+    expect(blocker).toBeDefined();
+    // Named, with the id in parentheses for support — never the id alone.
+    expect(blocker!.detail).toContain("Dana K. (old) (dup)");
+    expect(blocker!.detail).toContain("Quarterly Pest Prevention");
+    // The next step, in office terms.
+    expect(blocker!.detail).toContain("Service plans card");
+  });
+
+  it("no blocker or warning ever says 'survivor' to the office", async () => {
+    seedCustomer("surv", { status: "INACTIVE", portalUserSub: "sub-s" });
+    seedCustomer("dup", { groupId: "g1", externalRef: "tt#1" });
+    const out = await run("PREVIEW");
+    if (out.decision !== "PREVIEW") throw new Error(out.decision);
+    const texts = [
+      ...out.preview.blockers.map((b) => b.detail),
+      ...out.preview.warnings.map((w) => w.detail),
+    ];
+    expect(texts.length).toBeGreaterThan(0);
+    for (const t of texts) {
+      expect(t.toLowerCase()).not.toContain("survivor");
+    }
+    const group = out.preview.blockers.find((b) => b.code === "GROUP_CONFLICT");
+    expect(group!.detail).toContain("the kept record");
+  });
+
+  it("a parked merge leads with a plain sentence for the office and keeps the raw error for engineering", async () => {
+    seedCustomer("surv", { displayName: "Kept Person" });
+    seedCustomer("dup", { displayName: "Dupe Person", stripeCustomerId: "cus_l" });
+    stripeSubs.cus_l = ["sub_1"];
+    const failing = deps();
+    failing.stripe = {
+      ...fakeStripe(),
+      setSubscriptionCrmCustomer: async () => {
+        throw new Error("stripe down");
+      },
+    };
+    const first = await mergeCustomers({
+      action: "EXECUTE",
+      survivorId: "surv",
+      loserId: "dup",
+      idempotencyKey: "mk-copy",
+      deps: failing,
+    });
+    expect(first.decision).toBe("PARTIAL");
+    if (first.decision === "PARTIAL") {
+      // Plain sentence first, technical tail after.
+      expect(first.error).toMatch(
+        /^The merge of Dupe Person \(dup\) into Kept Person \(surv\) stopped partway\./
+      );
+      expect(first.error).toContain("stripe down");
+    }
+    const work = workOpened.find((w) => w.kind === "MERGE_RECOVERY")!;
+    expect(String(work.detail)).toMatch(/^The merge of Dupe Person/);
+    expect(String(work.detail)).toContain("stripe down");
+    // mergeState.lastError stays the raw engine message, untouched.
+    const parked = parseMergeState(table("Customer").get("dup")!.mergeState)!;
+    expect(parked.lastError).toBe("stripe down");
+  });
+});
+
 describe("the follow rule", () => {
   it("resolveMergedCustomer follows a chain to its terminus, bounded", async () => {
     seedCustomer("a", { status: "MERGED", mergedIntoId: "b" });
