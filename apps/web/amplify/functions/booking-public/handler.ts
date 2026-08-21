@@ -820,6 +820,12 @@ async function quoteStatus(
       name: booking.name,
       email: booking.email,
       phone: booking.phone ?? undefined,
+      // GL-03/TCPA: carry the consent EXACTLY as captured at submission.
+      // Dropping it here made every resumed CONTACT outcome promise an email
+      // to a lead who ticked "you may call me" — and stamped callConsent:false
+      // TCPA evidence over the truth. Never fabricated: absent stays absent.
+      callConsent: booking.callConsent ?? undefined,
+      callConsentTextVersion: booking.callConsentTextVersion ?? undefined,
       address: {
         street: booking.street ?? undefined,
         city: booking.city ?? undefined,
@@ -1319,6 +1325,22 @@ async function quote(
         name,
         email,
         phone: phone ?? undefined,
+        // GL-03/TCPA: the call-consent tick (and WHICH wording was agreed to)
+        // is captured ONCE, on the original form submission, and must live on
+        // the durable request from the moment it exists. Every later leg — the
+        // browser's /quote-status poll and the pricing worker's rate-ready
+        // reverse invoke — rebuilds its QuoteInput from this row; before this
+        // was persisted here, a PENDING request resumed with no consent at
+        // all, so a lead who granted call permission was told "we'll email"
+        // and the CONTACT row recorded them as unconsented. Absent stays
+        // absent: only a boolean actually captured is stored, never a default.
+        callConsent:
+          typeof input.callConsent === "boolean" ? input.callConsent : undefined,
+        callConsentTextVersion:
+          input.callConsent === true
+            ? (input.callConsentTextVersion?.slice(0, 40) ??
+              CALL_CONSENT_TEXT_VERSION)
+            : undefined,
         street: addr.street!.trim(),
         city: addr.city!.trim(),
         state: addr.state!.trim().toUpperCase(),
@@ -1403,7 +1425,13 @@ async function quote(
 
     const contactFields = {
       status: "CONTACT",
-      callConsent: input.callConsent === true,
+      // Same faithful-carry rule as makeBooking's base: a boolean actually
+      // captured is recorded; absent stays absent (never coerced to false —
+      // that wrote wrong TCPA evidence on resumed requests). The update
+      // transport drops undefined keys, so an absent value also never
+      // clobbers consent already stored on the row.
+      callConsent:
+        typeof input.callConsent === "boolean" ? input.callConsent : undefined,
       callConsentTextVersion:
         input.callConsent === true
           ? (input.callConsentTextVersion?.slice(0, 40) ??

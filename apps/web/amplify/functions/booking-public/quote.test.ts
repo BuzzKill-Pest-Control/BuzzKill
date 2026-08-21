@@ -1477,6 +1477,116 @@ describe("the only surviving CONTACT outcomes", () => {
   });
 });
 
+describe("GL-03/TCPA: captured call consent survives the resume rebuild", () => {
+  // Both resume legs run through the SAME /quote-status code path: the
+  // browser's poll and the pricing worker's rate-ready reverse invoke post an
+  // identical HTTP-shaped /quote-status event (pricing-refresh/handler.ts
+  // builds exactly this event for its reverse invoke). One postQuoteStatus
+  // therefore exercises the leg the worker drives too.
+  //
+  // The bug: /quote never persisted callConsent onto the PENDING request, so
+  // the resume rebuilt a QuoteInput with NO consent — a lead who ticked "you
+  // may call me" was promised an email, and the CONTACT write stamped
+  // callConsent:false over the truth as the row's TCPA evidence.
+
+  /** Fill every sellable day so the resume falls to the CONTACT path (same
+   *  window arithmetic as the fully-booked test above). */
+  const fillEveryDay = () => {
+    for (let i = 0; i <= 41; i++) {
+      const d = new Date(Date.now() + i * 86_400_000).toISOString().slice(0, 10);
+      capacityFixture.maps.capacityDays.set(`${d}#t1`, {
+        id: `${d}#t1`,
+        date: d,
+        technicianId: "t1",
+        committedMinutes: 540,
+      });
+    }
+  };
+
+  it("a consented lead's resumed CONTACT outcome still promises the call", async () => {
+    marketRateResult = null; // cold cache → durable PENDING request
+
+    const pending = await postQuote({
+      ...rodentInput,
+      phone: "(413) 555-0123",
+      callConsent: true,
+      // A PRIOR wording version: the row must carry the version the lead
+      // actually agreed to, never re-stamp the current one.
+      callConsentTextVersion: "2026-07-01.1",
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    // The consent lives on the durable request from the moment it exists —
+    // this is the write the bug dropped.
+    expect(bookings[0]).toMatchObject({
+      status: "PENDING",
+      callConsent: true,
+      callConsentTextVersion: "2026-07-01.1",
+    });
+
+    // Research lands, but the month filled up meanwhile: the resume falls to
+    // the CONTACT path — which must still know the lead said "you may call".
+    marketRateResult = {
+      priceCents: 19900,
+      sheet: { oneTimeCents: 19900 },
+      basis: "test",
+      cached: true,
+    };
+    fillEveryDay();
+    const resumed = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(resumed.body.decision).toBe("CONTACT");
+    expect(resumed.body.message).toMatch(/call you/i);
+    const contactAlert = leadEmails[leadEmails.length - 1];
+    expect(contactAlert.subject).toBe("Website lead needs a call");
+    // The TCPA evidence survives the round trip untouched.
+    expect(bookings[0]).toMatchObject({
+      status: "CONTACT",
+      callConsent: true,
+      callConsentTextVersion: "2026-07-01.1",
+    });
+  });
+
+  it("an unconsented lead stays email-only after the resume — consent is never fabricated", async () => {
+    marketRateResult = null; // cold cache → durable PENDING request
+
+    const pending = await postQuote({
+      ...rodentInput,
+      phone: "(413) 555-0123",
+      // No callConsent: the tick was never given. A phone alone must not
+      // become call permission on any leg.
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    expect(bookings[0].callConsent).toBeUndefined();
+    expect(bookings[0].callConsentTextVersion).toBeUndefined();
+
+    marketRateResult = {
+      priceCents: 19900,
+      sheet: { oneTimeCents: 19900 },
+      basis: "test",
+      cached: true,
+    };
+    fillEveryDay();
+    const resumed = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(resumed.body.decision).toBe("CONTACT");
+    expect(resumed.body.message).toMatch(/email you/i);
+    expect(leadEmails[leadEmails.length - 1].subject).toBe(
+      "Website lead needs an email"
+    );
+    // Absent stayed absent end to end: nothing wrote a fabricated boolean.
+    expect(bookings[0].callConsent).toBeUndefined();
+    expect(bookings[0].callConsentTextVersion).toBeUndefined();
+  });
+});
+
 describe("PRICED quotes carry the checkout terms (R17)", () => {
   it("returns the current terms version and text with the price", async () => {
     const res = await postQuote(rodentInput);
