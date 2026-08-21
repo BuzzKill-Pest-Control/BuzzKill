@@ -171,6 +171,10 @@ export async function extractLead(
 export type ExtractedQuoteInput = {
   service: string;
   propertyKind: "RESIDENTIAL" | "COMMUNITY" | "COMMERCIAL";
+  /** Condo/HOA only: the ask is one unit treated on its own, so the engine
+   *  prices it residentially (sqft in, residential sheet out) — never the
+   *  per-unit HOA common-area sheet. Same flag the structured form sends. */
+  inUnit?: boolean;
   sqft?: number;
   units?: number;
   nestCount?: number;
@@ -272,7 +276,22 @@ export function quoteInputFromExtraction(e: Extraction): ExtractionMapping {
         reason: "About how many square feet is the property? That sets the price.",
       };
     }
-    return { ok: true, assumptions, input: { service, propertyKind, sqft: e.sqft, recurringPreference: freq } };
+    // "Roaches in my condo" is one dwelling treated on its own, not a
+    // common-area program: at an association the sqft-priced specialties go up
+    // as IN-UNIT, so the engine prices the residential sheet instead of
+    // demanding a unit count the ask never had (which dead-ended the quote) —
+    // or worse, serving the per-unit HOA rate as the whole price.
+    return {
+      ok: true,
+      assumptions,
+      input: {
+        service,
+        propertyKind,
+        ...(propertyKind === "COMMUNITY" ? { inUnit: true } : {}),
+        sqft: e.sqft,
+        recurringPreference: freq,
+      },
+    };
   }
 
   if (e.propertyType === "mosquito") {

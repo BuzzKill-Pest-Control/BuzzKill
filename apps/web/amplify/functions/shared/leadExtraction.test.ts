@@ -74,6 +74,42 @@ describe("the mapping never invents a price input", () => {
     }
   });
 
+  it("a sqft-priced specialty at an association goes up IN-UNIT, never as a per-unit program", () => {
+    // "Roaches in my condo" is one dwelling treated on its own. Without the
+    // in-unit flag the engine either demanded a unit count the ask never had,
+    // or priced one apartment off the per-unit HOA common-area sheet.
+    const r = quoteInputFromExtraction({
+      ...base,
+      propertyType: "association",
+      specialtyKind: "roach",
+      sqft: 1200,
+      units: 40,
+    } as Extraction);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.input).toMatchObject({
+        service: "ROACH",
+        propertyKind: "COMMUNITY",
+        inUnit: true,
+        sqft: 1200,
+      });
+      expect(r.input.units).toBeUndefined();
+    }
+  });
+
+  it("the in-unit flag never rides along outside an association", () => {
+    const r = quoteInputFromExtraction({
+      ...base,
+      specialtyKind: "roach",
+      sqft: 1200,
+    } as Extraction);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.input.propertyKind).toBe("RESIDENTIAL");
+      expect(r.input.inUnit).toBeUndefined();
+    }
+  });
+
   it("routes an association to the per-unit program on its unit count", () => {
     const r = quoteInputFromExtraction({
       ...base,
@@ -160,6 +196,7 @@ describe("refusals — a callback beats a wrong price", () => {
     const allowed = new Set([
       "service",
       "propertyKind",
+      "inUnit",
       "sqft",
       "units",
       "nestCount",

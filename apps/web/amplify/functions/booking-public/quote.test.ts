@@ -1108,6 +1108,65 @@ describe("COMMUNITY prices the common-area plan from the HOA sheet", () => {
     expect(res.body.errors?.units).toBeUndefined();
   });
 
+  it("IN-UNIT ROACH: a cold-cache quote researches the ROACH sheet and RESUMES in-unit — the HOA per-unit sheet is never touched on any leg", async () => {
+    // The production incident (Aug 2026): prod had no ROACH sheet, so an
+    // in-unit condo roach quote went PENDING. The /quote-status rebuild then
+    // DROPPED the in-unit flag, so the poll — and the pricing worker's
+    // rate-ready reverse invoke, which runs through the same path — flipped
+    // the pricing view back to common-area COMMUNITY: a per-DOOR HOA rate
+    // ($16/mo) was served as the whole visit price, with the day board's
+    // R62 variable-cost floor quietly propping the absurd derived one-time
+    // up to $177. In-unit must survive the round trip.
+    marketRateByService = { ...marketRateByService, ROACH: null };
+
+    const pending = await postQuote({
+      ...communityInput,
+      service: "ROACH",
+      inUnit: true,
+      units: undefined,
+      sqft: 1200,
+      recurringPreference: "",
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    // The research demanded is the RESIDENTIAL roach sheet — never HOA.
+    expect(enqueueCalls).toHaveLength(1);
+    expect(enqueueCalls[0]).toMatchObject({ service: "ROACH", sqft: 1200 });
+    // The pricing view survives on the durable request…
+    expect(bookings[0]).toMatchObject({ status: "PENDING", inUnit: true });
+
+    // …so when the roach research lands, the secure poll prices the SAME
+    // residential visit the customer asked for.
+    marketRateByService = {
+      ...marketRateByService,
+      ROACH: {
+        priceCents: 27500,
+        sheet: { oneTimeCents: 27500 },
+        basis: "researched roach sheet",
+        cached: true,
+      },
+    };
+    const ready = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(ready.status).toBe(200);
+    expect(ready.body.decision).toBe("PRICED");
+    // Across BOTH legs, the HOA per-unit sheet was never consulted.
+    expect(marketRateCalls.some((c) => c.service === "ROACH")).toBe(true);
+    expect(marketRateCalls.some((c) => c.service === "HOA")).toBe(false);
+    // Priced like a home: real day prices off the roach sheet, no per-unit
+    // arithmetic, and no plan offer (roach sells no program).
+    const prices = (ready.body.days as { priceCents: number }[]).map(
+      (d) => d.priceCents
+    );
+    expect(prices.length).toBeGreaterThan(0);
+    for (const p of prices) expect(p).toBeGreaterThan(0);
+    expect(ready.body.recurringOffer ?? null).toBeNull();
+    expect(bookings[0]).toMatchObject({ status: "QUOTED", inUnit: true });
+  });
+
   it("the in-unit flag is IGNORED outside a community", async () => {
     // It only means something at an association; a commercial quote must still
     // price from the commercial sheet.
@@ -1415,6 +1474,116 @@ describe("the only surviving CONTACT outcomes", () => {
 
     expect(res.body.decision).toBe("CONTACT");
     expect(res.body.message).toMatch(/fully booked/i);
+  });
+});
+
+describe("GL-03/TCPA: captured call consent survives the resume rebuild", () => {
+  // Both resume legs run through the SAME /quote-status code path: the
+  // browser's poll and the pricing worker's rate-ready reverse invoke post an
+  // identical HTTP-shaped /quote-status event (pricing-refresh/handler.ts
+  // builds exactly this event for its reverse invoke). One postQuoteStatus
+  // therefore exercises the leg the worker drives too.
+  //
+  // The bug: /quote never persisted callConsent onto the PENDING request, so
+  // the resume rebuilt a QuoteInput with NO consent — a lead who ticked "you
+  // may call me" was promised an email, and the CONTACT write stamped
+  // callConsent:false over the truth as the row's TCPA evidence.
+
+  /** Fill every sellable day so the resume falls to the CONTACT path (same
+   *  window arithmetic as the fully-booked test above). */
+  const fillEveryDay = () => {
+    for (let i = 0; i <= 41; i++) {
+      const d = new Date(Date.now() + i * 86_400_000).toISOString().slice(0, 10);
+      capacityFixture.maps.capacityDays.set(`${d}#t1`, {
+        id: `${d}#t1`,
+        date: d,
+        technicianId: "t1",
+        committedMinutes: 540,
+      });
+    }
+  };
+
+  it("a consented lead's resumed CONTACT outcome still promises the call", async () => {
+    marketRateResult = null; // cold cache → durable PENDING request
+
+    const pending = await postQuote({
+      ...rodentInput,
+      phone: "(413) 555-0123",
+      callConsent: true,
+      // A PRIOR wording version: the row must carry the version the lead
+      // actually agreed to, never re-stamp the current one.
+      callConsentTextVersion: "2026-07-01.1",
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    // The consent lives on the durable request from the moment it exists —
+    // this is the write the bug dropped.
+    expect(bookings[0]).toMatchObject({
+      status: "PENDING",
+      callConsent: true,
+      callConsentTextVersion: "2026-07-01.1",
+    });
+
+    // Research lands, but the month filled up meanwhile: the resume falls to
+    // the CONTACT path — which must still know the lead said "you may call".
+    marketRateResult = {
+      priceCents: 19900,
+      sheet: { oneTimeCents: 19900 },
+      basis: "test",
+      cached: true,
+    };
+    fillEveryDay();
+    const resumed = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(resumed.body.decision).toBe("CONTACT");
+    expect(resumed.body.message).toMatch(/call you/i);
+    const contactAlert = leadEmails[leadEmails.length - 1];
+    expect(contactAlert.subject).toBe("Website lead needs a call");
+    // The TCPA evidence survives the round trip untouched.
+    expect(bookings[0]).toMatchObject({
+      status: "CONTACT",
+      callConsent: true,
+      callConsentTextVersion: "2026-07-01.1",
+    });
+  });
+
+  it("an unconsented lead stays email-only after the resume — consent is never fabricated", async () => {
+    marketRateResult = null; // cold cache → durable PENDING request
+
+    const pending = await postQuote({
+      ...rodentInput,
+      phone: "(413) 555-0123",
+      // No callConsent: the tick was never given. A phone alone must not
+      // become call permission on any leg.
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    expect(bookings[0].callConsent).toBeUndefined();
+    expect(bookings[0].callConsentTextVersion).toBeUndefined();
+
+    marketRateResult = {
+      priceCents: 19900,
+      sheet: { oneTimeCents: 19900 },
+      basis: "test",
+      cached: true,
+    };
+    fillEveryDay();
+    const resumed = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(resumed.body.decision).toBe("CONTACT");
+    expect(resumed.body.message).toMatch(/email you/i);
+    expect(leadEmails[leadEmails.length - 1].subject).toBe(
+      "Website lead needs an email"
+    );
+    // Absent stayed absent end to end: nothing wrote a fabricated boolean.
+    expect(bookings[0].callConsent).toBeUndefined();
+    expect(bookings[0].callConsentTextVersion).toBeUndefined();
   });
 });
 
