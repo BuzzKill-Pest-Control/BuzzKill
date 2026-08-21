@@ -366,9 +366,51 @@ describe("invoice-me — HOA/commercial book card-less on net terms", () => {
     // No card intent reference was written.
     expect(booking.stripePaymentIntentId ?? null).toBeNull();
   });
+
+  it("an IN-UNIT community invoice booking claims the residential 30-minute on-site", async () => {
+    // In-unit keeps the property a COMMUNITY (the HOA is still the payer, so
+    // net terms stay available) — but the visit itself was quoted as a
+    // residential 30, and the card-less re-check must claim the same.
+    booking.propertyKind = "COMMUNITY";
+    booking.inUnit = true;
+
+    const res = await bookIt({ invoice: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ booked: true });
+    expect(intentCreate).not.toHaveBeenCalled();
+    // 30 on-site + the fixture's 2×20 travel legs (a common-area stop claims 100).
+    expect(booking.capacityMinutes).toBe(70);
+  });
 });
 
 describe("booking re-checks live availability (R29)", () => {
+  it("an in-unit community booking re-checks and claims the RESIDENTIAL 30-minute on-site, not the common-area 60", async () => {
+    // The quote priced an in-unit condo visit as a residential 30 (the
+    // pricing view, not the property class). The /book re-check used to key
+    // on propertyKind alone and count it as a 60-minute community stop —
+    // claiming double the minutes the quote reserved, so an in-unit booking
+    // could be refused "sold out" on a day the quote had just offered.
+    booking.propertyKind = "COMMUNITY";
+    booking.inUnit = true;
+
+    const res = await bookIt();
+
+    expect(res.status).toBe(200);
+    // 30 on-site + the fixture's 2×20 travel legs — identical to the
+    // residential claim, where a common-area community stop claims 100.
+    expect(booking.capacityMinutes).toBe(70);
+  });
+
+  it("a common-area community booking still claims the 60-minute on-site", async () => {
+    booking.propertyKind = "COMMUNITY";
+
+    const res = await bookIt();
+
+    expect(res.status).toBe(200);
+    expect(booking.capacityMinutes).toBe(100);
+  });
+
   it("books when the day is still live — at the quoted price, not a reprice", async () => {
     const res = await bookIt();
 

@@ -1108,6 +1108,65 @@ describe("COMMUNITY prices the common-area plan from the HOA sheet", () => {
     expect(res.body.errors?.units).toBeUndefined();
   });
 
+  it("IN-UNIT ROACH: a cold-cache quote researches the ROACH sheet and RESUMES in-unit — the HOA per-unit sheet is never touched on any leg", async () => {
+    // The production incident (Aug 2026): prod had no ROACH sheet, so an
+    // in-unit condo roach quote went PENDING. The /quote-status rebuild then
+    // DROPPED the in-unit flag, so the poll — and the pricing worker's
+    // rate-ready reverse invoke, which runs through the same path — flipped
+    // the pricing view back to common-area COMMUNITY: a per-DOOR HOA rate
+    // ($16/mo) was served as the whole visit price, with the day board's
+    // R62 variable-cost floor quietly propping the absurd derived one-time
+    // up to $177. In-unit must survive the round trip.
+    marketRateByService = { ...marketRateByService, ROACH: null };
+
+    const pending = await postQuote({
+      ...communityInput,
+      service: "ROACH",
+      inUnit: true,
+      units: undefined,
+      sqft: 1200,
+      recurringPreference: "",
+    });
+
+    expect(pending.body.decision).toBe("PENDING");
+    // The research demanded is the RESIDENTIAL roach sheet — never HOA.
+    expect(enqueueCalls).toHaveLength(1);
+    expect(enqueueCalls[0]).toMatchObject({ service: "ROACH", sqft: 1200 });
+    // The pricing view survives on the durable request…
+    expect(bookings[0]).toMatchObject({ status: "PENDING", inUnit: true });
+
+    // …so when the roach research lands, the secure poll prices the SAME
+    // residential visit the customer asked for.
+    marketRateByService = {
+      ...marketRateByService,
+      ROACH: {
+        priceCents: 27500,
+        sheet: { oneTimeCents: 27500 },
+        basis: "researched roach sheet",
+        cached: true,
+      },
+    };
+    const ready = await postQuoteStatus({
+      bookingId: pending.body.bookingId,
+      statusToken: pending.body.statusToken,
+    });
+
+    expect(ready.status).toBe(200);
+    expect(ready.body.decision).toBe("PRICED");
+    // Across BOTH legs, the HOA per-unit sheet was never consulted.
+    expect(marketRateCalls.some((c) => c.service === "ROACH")).toBe(true);
+    expect(marketRateCalls.some((c) => c.service === "HOA")).toBe(false);
+    // Priced like a home: real day prices off the roach sheet, no per-unit
+    // arithmetic, and no plan offer (roach sells no program).
+    const prices = (ready.body.days as { priceCents: number }[]).map(
+      (d) => d.priceCents
+    );
+    expect(prices.length).toBeGreaterThan(0);
+    for (const p of prices) expect(p).toBeGreaterThan(0);
+    expect(ready.body.recurringOffer ?? null).toBeNull();
+    expect(bookings[0]).toMatchObject({ status: "QUOTED", inUnit: true });
+  });
+
   it("the in-unit flag is IGNORED outside a community", async () => {
     // It only means something at an association; a commercial quote must still
     // price from the commercial sheet.

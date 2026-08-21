@@ -809,6 +809,14 @@ async function quoteStatus(
   return quote(
     {
       propertyKind: booking.propertyKind ?? undefined,
+      // The PRICING VIEW the original submission asked for. Dropping this on
+      // the resume rebuild is how an in-unit condo quote flipped back to a
+      // common-area COMMUNITY quote the moment its research landed: the poll
+      // (and the worker's rate-ready reverse invoke, which runs through this
+      // same path) re-priced one apartment off the per-unit HOA sheet — or
+      // dead-ended on a "how many units?" error the in-unit form never asks.
+      inUnit: booking.inUnit === true,
+      lotHalfAcres: booking.lotHalfAcres ?? undefined,
       name: booking.name,
       email: booking.email,
       phone: booking.phone ?? undefined,
@@ -2790,9 +2798,12 @@ async function book(
             ? booking.zone
             : undefined,
         onlyDate: date,
+        // The LOCKED property-class on-site rule, at the PRICING view the
+        // quote used: an in-unit community visit is a residential 30, so the
+        // re-check must not claim double the minutes the quote reserved.
         onsiteMinutes:
           booking.propertyKind === "COMMERCIAL" ||
-          booking.propertyKind === "COMMUNITY"
+          (booking.propertyKind === "COMMUNITY" && booking.inUnit !== true)
             ? 60
             : 30,
       });
@@ -2925,10 +2936,12 @@ async function book(
       booking.zone === "A" || booking.zone === "B" ? booking.zone : undefined,
     onlyDate: date,
     // The LOCKED property-class on-site rule — the re-check must count a
-    // commercial/community stop at 60 minutes, same as the quote did.
+    // commercial/community stop at 60 minutes, same as the quote did. An
+    // in-unit community visit was quoted as a residential 30, so it re-checks
+    // at 30 too.
     onsiteMinutes:
       booking.propertyKind === "COMMERCIAL" ||
-      booking.propertyKind === "COMMUNITY"
+      (booking.propertyKind === "COMMUNITY" && booking.inUnit !== true)
         ? 60
         : 30,
   });
