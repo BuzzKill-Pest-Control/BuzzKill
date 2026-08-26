@@ -19,6 +19,7 @@ import {
   mergeCustomers,
   previewLifecycleTransition,
   opResult,
+  opResultUnlessRefused,
   REACTIVATION_REASONS,
   recordOfflinePayment,
   rescheduleVisit,
@@ -1215,8 +1216,12 @@ export default function CustomerDetail() {
                             }
                             void run(
                               `start-${p.id}`,
+                              // A refusal (no card on file, plan not active)
+                              // arrives as a successful response, so it has to
+                              // be read here or the success line below would
+                              // announce monthly billing that never started.
                               async () =>
-                                unwrap(
+                                opResultUnlessRefused(
                                   await api().mutations.startSubscription({
                                     servicePlanId: p.id,
                                   })
@@ -1235,7 +1240,7 @@ export default function CustomerDetail() {
                         onClick={() => {
                           if (!window.confirm("Deactivate this plan? Billing pauses and no new visits are scheduled.")) return;
                           void run(`pause-${p.id}`, async () =>
-                            unwrap(
+                            opResultUnlessRefused(
                               await api().mutations.pausePlan({
                                 servicePlanId: p.id,
                               })
@@ -1254,7 +1259,7 @@ export default function CustomerDetail() {
                       loading={perform.busyKey === `resume-${p.id}`}
                       onClick={() =>
                         void run(`resume-${p.id}`, async () =>
-                          unwrap(
+                          opResultUnlessRefused(
                             await api().mutations.resumePlan({
                               servicePlanId: p.id,
                             })
@@ -1441,7 +1446,12 @@ export default function CustomerDetail() {
                               // real status. A bank (ACH) debit comes back
                               // "processing": the money is NOT collected yet, so
                               // don't claim it was charged.
-                              const res = opResult<{ status?: string }>(
+                              // The refusal check comes FIRST: a refused
+                              // charge has no status, and the line below reads
+                              // a missing status as "bank payment processing"
+                              // — telling the office money is on its way when
+                              // no charge was attempted at all.
+                              const res = opResultUnlessRefused<{ status?: string }>(
                                 await api().mutations.chargeOneTimeJob({ jobId: j.id })
                               );
                               const collected =
@@ -1826,7 +1836,7 @@ export default function CustomerDetail() {
                             void run(
                               `settle-${inv.id}`,
                               async () => {
-                                const res = opResult<{
+                                const res = opResultUnlessRefused<{
                                   status?: string;
                                   failureReason?: string;
                                 }>(
@@ -1895,8 +1905,11 @@ export default function CustomerDetail() {
                             if (!reason?.trim()) return;
                             void run(
                               `void-${inv.id}`,
+                              // The invoice list is a snapshot; by the time
+                              // Void is pressed the money may have landed. That
+                              // refusal must not read as "Voided".
                               async () =>
-                                unwrap(
+                                opResultUnlessRefused(
                                   await api().mutations.voidInvoice({
                                     invoiceId: inv.id,
                                     reason: reason.trim(),
@@ -2948,7 +2961,10 @@ function SettleInvoiceSheet({
     const note = [`Received by ${method.toLowerCase()}`, reference.trim()]
       .filter(Boolean)
       .join(" — ");
-    unwrap(
+    // A refusal here means the invoice moved under this sheet (settled, or
+    // voided, or a debit already in flight). Raising it stops the "marked
+    // paid" confirmation below from claiming a settlement that did not happen.
+    opResultUnlessRefused(
       await settleInvoice({
         invoiceId: invoice.id,
         method: "OFFLINE",

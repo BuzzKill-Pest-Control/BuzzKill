@@ -19,6 +19,13 @@ let createResult: { data: unknown; errors?: { message: string }[] } = {
   data: { id: "inv_1", status: "PAID" },
 };
 let customerEmail: string | null = "dana@example.com";
+/** The Stripe default payment method, or null for "no card on file". */
+let defaultPaymentMethod: { id: string; type: string } | null = {
+  id: "pm_1",
+  type: "card",
+};
+/** The plan startSubscription/pausePlan read, or null for "no such plan". */
+let plan: (Record<string, unknown> & { id: string }) | null = null;
 const baseJob = () => ({
   customerId: "c1",
   type: "ONE_TIME",
@@ -64,6 +71,13 @@ const fakeDataClient = {
         data: { id, ...job },
       }),
     },
+    ServicePlan: {
+      get: async () => ({ data: plan }),
+      update: async (patch: Record<string, unknown>) => {
+        if (plan) plan = { ...plan, ...patch } as typeof plan;
+        return { data: plan };
+      },
+    },
   },
 };
 vi.mock("../shared/dataClient", () => ({ dataClient: async () => fakeDataClient }));
@@ -80,6 +94,8 @@ const paymentIntentsCancel = vi.fn(async () => ({
   id: "pi_1",
   status: "canceled",
 }));
+const subscriptionsCreate = vi.fn(async () => ({ id: "sub_1" }));
+const subscriptionsUpdate = vi.fn(async () => ({ id: "sub_1" }));
 vi.mock("../shared/stripeClient", () => ({
   stripeClient: () => ({
     paymentIntents: {
@@ -90,8 +106,16 @@ vi.mock("../shared/stripeClient", () => ({
     customers: {
       retrieve: async () => ({
         deleted: false,
-        invoice_settings: { default_payment_method: { id: "pm_1", type: "card" } },
+        invoice_settings: { default_payment_method: defaultPaymentMethod },
       }),
+    },
+    products: {
+      list: async () => ({ data: [{ id: "prod_1", metadata: { crmProduct: "true" } }] }),
+      create: async () => ({ id: "prod_1" }),
+    },
+    subscriptions: {
+      create: subscriptionsCreate,
+      update: subscriptionsUpdate,
     },
   }),
   paymentMethodLabel: () => ({ label: "Visa ••4242", kind: "CARD" }),
@@ -150,6 +174,11 @@ beforeEach(() => {
   notifyOffice.mockClear();
   customerEmail = "dana@example.com";
   createResult = { data: { id: "inv_1", status: "PAID" } };
+  defaultPaymentMethod = { id: "pm_1", type: "card" };
+  plan = { id: "p1", customerId: "c1", status: "ACTIVE", priceCents: 9900 };
+  subscriptionsCreate.mockClear();
+  subscriptionsCreate.mockImplementation(async () => ({ id: "sub_1" }));
+  subscriptionsUpdate.mockClear();
 });
 
 describe("chargeManualAmount ceiling", () => {
@@ -494,18 +523,27 @@ describe("voidInvoice", () => {
   it("refuses to void a paid invoice — money that moved is refunded, not forgotten", async () => {
     invoices.push({ id: "inv_1", status: "PAID", amountCents: 29900 });
 
-    await expect(
-      call("voidInvoice", { invoiceId: "inv_1", reason: "oops" })
-    ).rejects.toThrow(/refund it instead/i);
+    // The words come back as DATA. Thrown, this guard — reachable from any
+    // invoice list rendered a moment before the webhook settled the row — was
+    // an invocation error, which is to say the crm-billing error alarm.
+    const res = (await call("voidInvoice", {
+      invoiceId: "inv_1",
+      reason: "oops",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/refund it instead/i);
     expect(invoices[0].status).toBe("PAID");
   });
 
   it("refuses to void a refunded invoice", async () => {
     invoices.push({ id: "inv_1", status: "REFUNDED", amountCents: 29900 });
 
-    await expect(
-      call("voidInvoice", { invoiceId: "inv_1", reason: "x" })
-    ).rejects.toThrow(/refund it instead/i);
+    const res = (await call("voidInvoice", {
+      invoiceId: "inv_1",
+      reason: "x",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/refund it instead/i);
   });
 
   it("requires a reason", async () => {
@@ -543,9 +581,12 @@ describe("voidInvoice", () => {
       status: "processing",
     }));
 
-    await expect(
-      call("voidInvoice", { invoiceId: "inv_1", reason: "x" })
-    ).rejects.toThrow(/still processing/i);
+    const res = (await call("voidInvoice", {
+      invoiceId: "inv_1",
+      reason: "x",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/still processing/i);
     expect(paymentIntentsCancel).not.toHaveBeenCalled();
     expect(invoices[0].status).toBe("OPEN");
   });
@@ -562,9 +603,32 @@ describe("voidInvoice", () => {
       status: "succeeded",
     }));
 
+    const res = (await call("voidInvoice", {
+      invoiceId: "inv_1",
+      reason: "x",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/refund it instead/i);
+    expect(invoices[0].status).toBe("OPEN");
+  });
+
+  it("still THROWS when Stripe cannot be asked — an unanswered question is not a refusal", async () => {
+    // The three void refusals above all sit behind paymentIntents.retrieve.
+    // If that call fails, nothing is known about the money, and the office must
+    // not be told a business fact about it — this has to stay an error.
+    invoices.push({
+      id: "inv_1",
+      status: "OPEN",
+      amountCents: 29900,
+      stripePaymentIntentId: "pi_x",
+    });
+    paymentIntentsRetrieve.mockImplementation(async () => {
+      throw new Error("Stripe API timeout");
+    });
+
     await expect(
       call("voidInvoice", { invoiceId: "inv_1", reason: "x" })
-    ).rejects.toThrow(/refund it instead/i);
+    ).rejects.toThrow(/stripe api timeout/i);
     expect(invoices[0].status).toBe("OPEN");
   });
 
@@ -601,6 +665,110 @@ describe("voidInvoice", () => {
     await expect(
       call("voidInvoice", { invoiceId: "inv_1", reason: "x" }, { groups: ["TECH"], sub: "s" })
     ).rejects.toThrow(/owner role required — this action moves money/i);
+  });
+});
+
+describe("refusals travel as data, outages still shout", () => {
+  /**
+   * A thrown Error out of this Lambda IS the crm-billing error alarm. These
+   * guards refuse well-formed requests from an authorized owner — no card on
+   * file, a plan someone already canceled, money already in motion — so they
+   * hand back words instead of paging anyone. What must NOT become words is a
+   * question that never got answered: a Stripe outage, a read that failed.
+   */
+
+  it("refuses a charge with no card on file, without paging anyone", async () => {
+    defaultPaymentMethod = null;
+
+    const res = (await call("chargeOneTimeJob", { jobId: "job1" })) as {
+      refused?: string;
+    };
+
+    expect(res.refused).toMatch(/no saved payment method/i);
+    expect(paymentIntentsCreate).not.toHaveBeenCalled();
+  });
+
+  it("start billing refuses a plan with no card on file", async () => {
+    defaultPaymentMethod = null;
+
+    const res = (await call("startSubscription", { servicePlanId: "p1" })) as {
+      refused?: string;
+    };
+
+    expect(res.refused).toMatch(/no saved payment method/i);
+    expect(subscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("start billing refuses a canceled plan", async () => {
+    plan = { id: "p1", customerId: "c1", status: "CANCELED", priceCents: 9900 };
+
+    const res = (await call("startSubscription", { servicePlanId: "p1" })) as {
+      refused?: string;
+    };
+
+    expect(res.refused).toMatch(/canceled/i);
+    expect(subscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("start billing THROWS when Stripe refuses the subscription — that is an outage", async () => {
+    // STRIPE_ERROR is the catch-all around the whole Stripe conversation. A
+    // throttle lands there, and a throttle reported to the office as "this
+    // plan cannot bill" is an outage filed as a business decision.
+    subscriptionsCreate.mockImplementation(async () => {
+      throw new Error("Stripe rate limit exceeded");
+    });
+
+    await expect(
+      call("startSubscription", { servicePlanId: "p1" })
+    ).rejects.toThrow(/rate limit/i);
+  });
+
+  it("start billing THROWS on a plan it cannot read — 'not found' is what a failed read looks like too", async () => {
+    // ServicePlan.get returns data: null whether the row is absent or Dynamo
+    // would not answer, so PLAN_NOT_FOUND cannot be told to anyone as a fact.
+    plan = null;
+
+    await expect(
+      call("startSubscription", { servicePlanId: "p1" })
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("deactivating a plan someone already canceled is refused, not an error", async () => {
+    plan = { id: "p1", customerId: "c1", status: "CANCELED", priceCents: 9900 };
+
+    const res = (await call("pausePlan", { servicePlanId: "p1" })) as {
+      refused?: string;
+    };
+
+    expect(res.refused).toMatch(/canceled/i);
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("pausing a live plan still works", async () => {
+    plan = {
+      id: "p1",
+      customerId: "c1",
+      status: "ACTIVE",
+      priceCents: 9900,
+      stripeSubscriptionId: "sub_1",
+    };
+
+    const res = (await call("pausePlan", { servicePlanId: "p1" })) as {
+      paused?: boolean;
+      refused?: string;
+    };
+
+    expect(res.refused).toBeUndefined();
+    expect(res.paused).toBe(true);
+    expect(subscriptionsUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("still THROWS on a plan it cannot read, rather than refusing one that may exist", async () => {
+    plan = null;
+
+    await expect(call("pausePlan", { servicePlanId: "p1" })).rejects.toThrow(
+      /not found/i
+    );
   });
 });
 

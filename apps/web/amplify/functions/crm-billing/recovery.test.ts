@@ -65,9 +65,16 @@ const paymentIntentsCreate = vi.fn(async () => ({
   id: "pi_new",
   status: "succeeded",
 }));
+const paymentIntentsRetrieve = vi.fn(async (id: string) => ({
+  id,
+  status: "requires_payment_method",
+}));
 vi.mock("../shared/stripeClient", () => ({
   stripeClient: () => ({
-    paymentIntents: { create: paymentIntentsCreate },
+    paymentIntents: {
+      create: paymentIntentsCreate,
+      retrieve: paymentIntentsRetrieve,
+    },
     customers: {
       retrieve: async () => ({
         deleted: false,
@@ -119,6 +126,11 @@ beforeEach(() => {
   paymentIntentsCreate.mockImplementation(async () => ({
     id: "pi_new",
     status: "succeeded",
+  }));
+  paymentIntentsRetrieve.mockClear();
+  paymentIntentsRetrieve.mockImplementation(async (id: string) => ({
+    id,
+    status: "requires_payment_method",
   }));
   sendEmail.mockClear();
   notifyOffice.mockClear();
@@ -190,9 +202,59 @@ describe("settleInvoice — OFFLINE", () => {
       status: "VOID",
     });
 
+    // As DATA: a stale invoice list is not a system failure, and a thrown
+    // refusal here IS the crm-billing error alarm.
+    const res = (await call("settleInvoice", {
+      invoiceId: "inv_1",
+      method: "OFFLINE",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/only an open or failed invoice/i);
+    expect(invoices[0].status).toBe("VOID");
+  });
+
+  it("refuses an offline settle while a card or bank payment is in flight", async () => {
+    // Recording cash now marks it PAID; the debit then lands too and the
+    // customer has paid twice with nothing in the ledger to say so.
+    invoices.push({
+      id: "inv_1",
+      customerId: "cA",
+      amountCents: 4500,
+      status: "OPEN",
+      stripePaymentIntentId: "pi_clearing",
+    });
+    paymentIntentsRetrieve.mockImplementation(async () => ({
+      id: "pi_clearing",
+      status: "processing",
+    }));
+
+    const res = (await call("settleInvoice", {
+      invoiceId: "inv_1",
+      method: "OFFLINE",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/already in flight/i);
+    expect(invoices[0].status).toBe("OPEN");
+  });
+
+  it("still THROWS when the in-flight check itself cannot run", async () => {
+    // Not knowing whether money is moving is an outage, not an answer. A
+    // refusal returns cleanly and alarms on nothing; this must not.
+    invoices.push({
+      id: "inv_1",
+      customerId: "cA",
+      amountCents: 4500,
+      status: "OPEN",
+      stripePaymentIntentId: "pi_unknown",
+    });
+    paymentIntentsRetrieve.mockImplementation(async () => {
+      throw new Error("Stripe API timeout");
+    });
+
     await expect(
       call("settleInvoice", { invoiceId: "inv_1", method: "OFFLINE" })
-    ).rejects.toThrow(/only an open or failed invoice/i);
+    ).rejects.toThrow(/stripe api timeout/i);
+    expect(invoices[0].status).toBe("OPEN");
   });
 
   it("refuses a tech user — settling takes/records money, an owner action", async () => {
