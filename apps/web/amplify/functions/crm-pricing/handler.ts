@@ -12,6 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { dataClient } from "../shared/dataClient";
 import { listAll } from "../shared/pagination";
 import { opFieldName } from "../shared/opEvent";
+import { refusal, type Refusal } from "../shared/refusal";
 import { DEMAND_PRICING_MODEL } from "../shared/marketRate";
 import {
   extractLead,
@@ -169,7 +170,7 @@ async function wakePricingResearch(
 async function requestPricingResearch(
   args: Args,
   actor: string | null
-): Promise<{ ok: true; rateKey: string }> {
+): Promise<{ ok: true; rateKey: string } | Refusal> {
   const rateKey = String(args.rateKey ?? "").trim();
   const reasonCode = String(args.reasonCode ?? "").trim();
   const note = args.note?.trim() ?? "";
@@ -181,7 +182,16 @@ async function requestPricingResearch(
     throw new Error("Explain the market-review reason");
   }
   if (await readPricingRollback()) {
-    throw new Error(
+    // The office asked for research during a rollback the office itself
+    // applied. That is the interlock working, and it is one click from being
+    // resolved — it is not a crm-pricing failure and must not page anyone.
+    //
+    // Safe as data because readPricingRollback fails OPEN: its whole body is
+    // wrapped in a catch that yields null, so a read it could not complete
+    // lets the request THROUGH rather than inventing a rollback. The failure
+    // mode here is a request that should have been held, not a permanent
+    // false "paused" with nothing to alarm on.
+    return refusal(
       "AI research is paused while the catalog is rolled back — clear the rollback first"
     );
   }
@@ -198,7 +208,15 @@ async function requestPricingResearch(
   const serving = pickServingRow(rows, rateKey, null);
   if (!serving) throw new Error("This rate is not currently serving");
   if (serving.pinned) {
-    throw new Error("Unpin the office rate before requesting new AI research");
+    // An office-pinned rate is a deliberate human decision that AI research
+    // would overwrite, so the office un-pins first. Both halves of that
+    // sentence are people doing their jobs.
+    //
+    // The rows above are read with pageErrors: "ignore", so a dropped page can
+    // make a pinned row INVISIBLE — never make an unpinned one look pinned.
+    // That failure surfaces at the "not currently serving" throw above, which
+    // still alarms; it cannot arrive here as a false refusal.
+    return refusal("Unpin the office rate before requesting new AI research");
   }
   const location = townFromAreaKey(serving.areaKey);
   if (!location) throw new Error("The rate's service area could not be read");
