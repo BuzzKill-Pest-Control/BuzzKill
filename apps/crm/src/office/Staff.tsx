@@ -359,6 +359,8 @@ function RosterBadges({ row }: { row: StaffRosterRow }) {
 /** The persisted outcome the server hands back for a staff-access command —
  *  the screen shows THIS, never an assumed success (GL-14). */
 type StaffOpOutcome = {
+  /** A guard said no and nothing was changed — these are the words to show. */
+  refused?: string;
   outcome?: string;
   effects?: string | null;
   nextStep?: string | null;
@@ -419,6 +421,12 @@ function StaffActions({
       });
       if (res.errors?.length) throw new Error(res.errors[0].message);
       const data = opResult<StaffOpOutcome>(res);
+      // A refusal means nothing was changed, so it must be read BEFORE the
+      // outcome checks below — REFUSED is not COMPLETE, and it would otherwise
+      // render as a half-applied change offering to "resume" a change that
+      // never started. Throwing puts it on the same path as the refusals the
+      // server used to raise: shown as the error, with a fresh key.
+      if (data?.refused) throw new Error(data.refused);
       if (data?.inProgress) {
         setOpOutcome({ ...data, kind: "role" });
         return;
@@ -689,6 +697,11 @@ function InviteForm({ onDone }: { onDone: () => Promise<void> }) {
       technicianId: technicianId || undefined,
     });
     if (res.errors?.length) throw new Error(res.errors[0].message);
+    // A refusal is the server saying "no" in words meant for this screen (an
+    // inactive or lapsed technician, a record already linked) — surface it
+    // verbatim. Without this the envelope would read as a sent invite.
+    const refused = opResult<{ refused?: string }>(res)?.refused;
+    if (refused) throw new Error(refused);
     setDone(true);
   }, "Could not send the invite");
 

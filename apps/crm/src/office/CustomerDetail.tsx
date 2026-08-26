@@ -1094,8 +1094,10 @@ export default function CustomerDetail() {
                     onClick={() =>
                       void run(
                         "invite",
-                        async () =>
-                          unwrap(
+                        async () => {
+                          // A refusal envelope must never read as a sent
+                          // invite — surface the server's words instead.
+                          const res = opResult<{ refused?: string }>(
                             await api().mutations.adminCreateUser({
                               email: customer.email!,
                               name: customer.contactName ?? customer.displayName,
@@ -1103,7 +1105,9 @@ export default function CustomerDetail() {
                               customerId: customer.id,
                               resend: Boolean(customer.portalUserSub),
                             })
-                          ),
+                          );
+                          if (res?.refused) throw new Error(res.refused);
+                        },
                         `Portal invite sent to ${customer.email}`
                       )
                     }

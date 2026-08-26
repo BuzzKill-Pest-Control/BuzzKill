@@ -50,6 +50,7 @@ import {
 } from "../shared/ownedWork";
 import { disposeStaleDrafts } from "../shared/jobAssignment";
 import { forEachPage, listAll } from "../shared/pagination";
+import { Refused, refusal, refusalFrom } from "../shared/refusal";
 import { todayEastern } from "../shared/dates";
 import { callerEmail, callerIsOwner, callerSub } from "../shared/authz";
 import {
@@ -1081,11 +1082,27 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     }
     // Active + present, current licence (GL-17: from the licence records, with
     // the legacy fields honored only until records exist).
+    //
+    // These are refusals a well-meaning office screen can reach — a licence
+    // lapses on its own, a roster list goes stale — so they come back as
+    // {refused} for the screen to show, not as a thrown (alarmed) error. Only
+    // a licence check that could not be COMPLETED still throws.
     if (!tech.active) {
-      throw new Error(`${tech.name} is inactive and cannot hold a technician login`);
+      return refusal(`${tech.name} is inactive and cannot hold a technician login`);
     }
-    if (!(await licenseFactsFor(tech)).current) {
-      throw new Error(
+    const licenceFacts = await licenseFactsFor(tech);
+    if (!licenceFacts.current) {
+      // GL-17 fails CLOSED, so a licence-records READ FAILURE is indistinguish-
+      // able from a lapse at `current` alone. It must not become a refusal: a
+      // refusal returns cleanly, and the office would chase paperwork for a
+      // licensed technician while the outage ran unseen. Throw — the alarm is
+      // for exactly this.
+      if (licenceFacts.source === "ERROR") {
+        throw new Error(
+          `${tech.name}'s licence records could not be read just now — try again in a moment. The login can't be created until the licence check succeeds.`
+        );
+      }
+      return refusal(
         `${tech.name} has no current applicator licence on record — record one before inviting their login.`
       );
     }
@@ -1093,7 +1110,7 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     // different person's login, linking it here would make two logins one
     // identity — the shared-identity case GL-14 forbids.
     if (tech.userSub && tech.email && tech.email.toLowerCase() !== email) {
-      throw new Error(
+      return refusal(
         `${tech.name} is already linked to the login ${tech.email}. Offboard that login first, or pick a technician that isn't linked yet — one technician record, one login.`
       );
     }
@@ -1119,11 +1136,16 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     // login on UsernameExistsException, which for a group would graft the whole
     // portfolio onto whoever already signs in with that email. Refuse until the
     // office explicitly confirms the reuse, and name who the email is today.
+    // The refusal is an envelope, not a throw: this is a working office flow
+    // (the screen offers "reuse" / "different email"), not a Lambda failure.
     if (!args.confirmReuse) {
       const existing = await describeExistingLoginForEmail(email);
       if (existing)
-        throw new Error(
-          `${email} already signs in as ${existing}. Giving this group that login would also let it see this group's whole portfolio. Reuse that login for the group, or use a different email.`
+        return refusal(
+          `${email} already signs in as ${existing}. Giving this group that login would also let it see this group's whole portfolio. Reuse that login for the group, or use a different email.`,
+          // Tells the screen this refusal is resolvable by re-sending with
+          // confirmReuse, unlike a plain refusal.
+          { offerReuse: true }
         );
     }
   }
@@ -2558,21 +2580,46 @@ async function changeStaffRoles(
     if (want.includes("TECH") && !have.includes("TECH")) {
       const client = await dataClient();
       // Point read: userSub maps to at most one technician — one page cannot truncate.
-      const { data: techs } =
+      const { data: techs, errors: techErrors } =
         await client.models.Technician.listTechnicianByUserSub({
           userSub: target.sub,
         });
+      // A failed read also arrives as an empty result, and "no rows" is about
+      // to be reported as "this login isn't linked to a technician record" —
+      // a sentence about the data that would be false. Fail loudly instead.
+      if (techErrors?.length) {
+        throw new Error(
+          `Could not read the technician linked to ${target.email}: ${techErrors
+            .map((e) => e.message)
+            .join("; ")}`
+        );
+      }
+      // The same three refusals adminCreateUser makes on the invite path, and
+      // the same reasoning: an owner picking "Technician" for a login that was
+      // never linked, or whose licence lapsed, is being told "no" by a working
+      // guard. Refused (not Error) so the catch below returns it as words for
+      // the Staff screen — the ledger still records REFUSED either way.
       const tech = techs?.[0];
       if (!tech) {
-        throw new Error(
+        throw new Refused(
           `Can't grant the technician role to ${target.email}: this login isn't linked to a technician record. Link it first with an invite (which binds a login to a licensed technician atomically).`
         );
       }
       if (!tech.active) {
-        throw new Error(`${tech.name} is inactive and cannot hold the technician role`);
+        throw new Refused(`${tech.name} is inactive and cannot hold the technician role`);
       }
-      if (!(await licenseFactsFor(tech)).current) {
-        throw new Error(
+      const licenceFacts = await licenseFactsFor(tech);
+      if (!licenceFacts.current) {
+        // GL-17 fails CLOSED: a records READ FAILURE looks exactly like a lapse
+        // at `current`. A plain Error (not Refused) so it escapes the catch
+        // below and still alarms — otherwise an outage would be filed as a
+        // licence problem in the staff-access ledger and page nobody.
+        if (licenceFacts.source === "ERROR") {
+          throw new Error(
+            `${tech.name}'s licence records could not be read just now — try again in a moment. The technician role can't be granted until the licence check succeeds.`
+          );
+        }
+        throw new Refused(
           `${tech.name} has no current applicator licence on record — record one before granting the technician role.`
         );
       }
@@ -2793,6 +2840,12 @@ async function changeStaffRoles(
         },
         fence
       );
+      // A guard saying "no" to an authorized owner is the product working:
+      // hand the words back for the screen to show. Anything else that threw
+      // before the first write is a real failure and still escapes to the
+      // alarm, which is what keeps the alarm worth reading.
+      const refused = refusalFrom(err);
+      if (refused) return { email, outcome: "REFUSED", ...refused };
       throw err;
     }
     // Failed after mutation began (e.g. the Cognito read-back itself threw).

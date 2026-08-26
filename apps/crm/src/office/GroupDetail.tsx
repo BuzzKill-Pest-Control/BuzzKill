@@ -1,6 +1,13 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, listAll, unwrap, type Customer, type CustomerGroup } from "../lib/api";
+import {
+  api,
+  listAll,
+  opResult,
+  unwrap,
+  type Customer,
+  type CustomerGroup,
+} from "../lib/api";
 import { useAsync, useKeyedAction } from "../lib/useAsync";
 import { toMessage } from "../lib/asyncCore";
 import {
@@ -102,25 +109,25 @@ export default function GroupDetail() {
           "Add a contact email to the group before inviting a login."
         );
       }
-      try {
-        unwrap(
-          await api().mutations.adminCreateUser({
-            email: group.contactEmail,
-            name: group.contactName ?? group.name,
-            roles: ["CUSTOMER"],
-            groupId: group.id,
-            confirmReuse,
-          })
-        );
-      } catch (err) {
-        // The collision guard is recoverable — offer reuse instead of failing.
-        const msg =
-          err instanceof Error ? err.message : "Could not invite group login";
-        if (msg.includes("already signs in as")) {
-          setReusePrompt(msg);
+      // The collision guard comes back as a refusal envelope, not an error:
+      // the email already signing in is a choice for the office, not a failure.
+      // offerReuse marks the one refusal this screen can resolve by re-sending
+      // with confirmReuse; any other refusal is shown as-is.
+      const res = opResult<{ refused?: string; offerReuse?: boolean }>(
+        await api().mutations.adminCreateUser({
+          email: group.contactEmail,
+          name: group.contactName ?? group.name,
+          roles: ["CUSTOMER"],
+          groupId: group.id,
+          confirmReuse,
+        })
+      );
+      if (res?.refused) {
+        if (res.offerReuse) {
+          setReusePrompt(res.refused);
           return;
         }
-        throw err;
+        throw new Error(res.refused);
       }
       setReusePrompt(null);
       reload();

@@ -6,7 +6,6 @@ import {
   saveTechnicianLicense,
   setLicenseStatus,
   STAFF_OFFBOARD_REASONS,
-  unwrap,
   type Technician,
   type TechnicianLicenseRecord,
 } from "../lib/api";
@@ -535,7 +534,10 @@ function TechForm({
     }
     if (sendInvite && technicianId) {
       try {
-        unwrap(
+        // A refusal (inactive, lapsed licence, already linked) comes back as an
+        // envelope rather than an error — treat it as the invite failing, so
+        // the "saved, but the invite failed" wording below still applies.
+        const invited = opResult<{ refused?: string }>(
           await api().mutations.adminCreateUser({
             email: email.trim(),
             name: name.trim(),
@@ -543,6 +545,7 @@ function TechForm({
             technicianId,
           })
         );
+        if (invited?.refused) throw new Error(invited.refused);
       } catch (err) {
         // The technician exists; only the login invite failed. Say
         // exactly that, so retrying (which reuses the record) is the
