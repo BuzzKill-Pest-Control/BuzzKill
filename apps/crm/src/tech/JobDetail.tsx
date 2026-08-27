@@ -826,6 +826,11 @@ function ScopePrepExits({ job, onDone }: { job: Job; onDone: () => Promise<void>
               note: note.trim() || undefined,
             });
       if (res.errors?.length) throw new Error(res.errors[0].message);
+      // The visit was completed or canceled from the office side while this
+      // screen was open — a refusal, not a failure. Without this the sheet
+      // closes and the technician believes the outcome was recorded.
+      const recorded = opResult<{ refused?: string }>(res);
+      if (recorded?.refused) throw new Error(recorded.refused);
       await onDone();
     } catch (err) {
       throw asOfflineError(
