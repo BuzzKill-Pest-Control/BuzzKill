@@ -666,9 +666,21 @@ export async function reconcileVisitChanges() {
   let completed = 0;
   let stillPending = 0;
   let failed = 0;
+  let refused = 0;
   for (const id of ids) {
     try {
       const outcome = await resumeVisitChange(stripe, id, { auto: true });
+      // A refusal is a command that can NEVER finish — a stored reschedule
+      // whose visit has since gone terminal. Counted apart from both "pending"
+      // (which implies another sweep will get it) and "errored" (which implies
+      // something is broken), so a wedged command stays visible as itself.
+      if ("refused" in outcome) {
+        refused++;
+        console.warn(
+          `reconcileVisitChanges: ${id} cannot be resumed — ${outcome.refused}`
+        );
+        continue;
+      }
       const done =
         outcome.outcome === "COMPLETE" ||
         ("alreadyCanceled" in outcome && outcome.alreadyCanceled === true);
@@ -679,9 +691,9 @@ export async function reconcileVisitChanges() {
       console.error(`reconcileVisitChanges: could not resume ${id}`, err);
     }
   }
-  if (stillPending > 0 || failed > 0) {
+  if (stillPending > 0 || failed > 0 || refused > 0) {
     console.warn(
-      `reconcileVisitChanges: ${completed} completed, ${stillPending} still pending, ${failed} errored of ${ids.length} open command(s)`
+      `reconcileVisitChanges: ${completed} completed, ${stillPending} still pending, ${refused} unresumable, ${failed} errored of ${ids.length} open command(s)`
     );
   }
   return {
@@ -689,6 +701,7 @@ export async function reconcileVisitChanges() {
     open: ids.length,
     completed,
     stillPending,
+    refused,
     failed,
   };
 }

@@ -3786,7 +3786,10 @@ function RescheduleForm({
   const dateChanged = date !== (job.scheduledDate ?? "");
 
   const save = useAction(async () => {
-    const data = opResult<VisitRescheduleOutcome>(
+    // Read the refusal before the PARTIAL branch below: a refusal has no
+    // `outcome` at all, so it would fall straight through to onDone() and the
+    // form would close as though the visit had moved.
+    const data = opResultUnlessRefused<VisitRescheduleOutcome>(
       await rescheduleVisit({
         jobId: job.id,
         scheduledDate: date || undefined,

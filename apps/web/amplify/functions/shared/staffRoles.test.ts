@@ -7,6 +7,7 @@ import {
   normalizeRoles,
   staffRolesIn,
 } from "./staffRoles";
+import { refusalFrom } from "./refusal";
 
 describe("normalizeRoles", () => {
   it("trims, upper-cases, drops blanks, and dedupes", () => {
@@ -69,6 +70,26 @@ describe("assertOwnerRemains", () => {
         targetKeepsOwner: false,
       })
     ).toThrow(/last active owner/);
+  });
+
+  it("blocks it as a REFUSAL, so the ledger records it and the alarm stays quiet", () => {
+    // The only loudness available here is the crm-admin error alarm, which
+    // means "this function is broken". Nothing is broken and nothing has been
+    // touched — the handlers' catch turns this into a REFUSED command row with
+    // these words in it, which is the durable record that was actually wanted.
+    let caught: unknown;
+    try {
+      assertOwnerRemains({
+        targetLabel: "solo@buzzkill.com",
+        otherUsableOwners: 0,
+        targetKeepsOwner: false,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    const asRefusal = refusalFrom(caught);
+    expect(asRefusal?.refused).toMatch(/last active owner/);
   });
 });
 

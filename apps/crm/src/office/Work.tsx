@@ -6,6 +6,7 @@ import {
   listWorkEvents,
   listWorkItems,
   opResult,
+  opResultUnlessRefused,
   updateOwnedWork,
   type BookingRequest,
   type WorkEvent,
@@ -346,7 +347,11 @@ export default function WorkQueue() {
         return;
       }
       await runOn(item, "Could not resume the visit change", async () => {
-        const res = opResult<{ outcome?: string }>(
+        // A stored reschedule whose visit has since gone terminal can never be
+        // applied; the server says so in words rather than throwing. Surface
+        // them — a refusal has no `outcome`, so it would otherwise pass the
+        // check below and the case would silently look resumed.
+        const res = opResultUnlessRefused<{ outcome?: string }>(
           await api().mutations.resumeVisitChange({ jobId: item.relatedId })
         );
         if (!res) throw new Error("The resume did not run");

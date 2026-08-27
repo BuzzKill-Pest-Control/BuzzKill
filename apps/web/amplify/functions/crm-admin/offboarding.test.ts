@@ -946,9 +946,25 @@ describe("changeStaffRoles (GL-14)", () => {
       email: "solo@x.com",
       groups: ["OWNER"],
     });
-    await expect(
-      call("changeStaffRoles", { email: "solo@x.com", roles: ["TECH"] })
-    ).rejects.toThrow(/last active owner/i);
+    // As words, with a REFUSED row in the command ledger behind them. The
+    // instinct was to keep this one loud, but the only loudness on offer is
+    // the crm-admin error alarm, which means "this function is broken" — and
+    // nothing here is broken or touched. The ledger row is the durable record.
+    const res = (await call("changeStaffRoles", {
+      email: "solo@x.com",
+      roles: ["TECH"],
+    })) as { refused?: string; outcome?: string };
+
+    expect(res.refused).toMatch(/last active owner/i);
+    expect(res.outcome).toBe("REFUSED");
+    expect(
+      [...staffCommands.values()].some(
+        (row) =>
+          row.outcome === "REFUSED" && /last active owner/i.test(String(row.lastError))
+      )
+    ).toBe(true);
+    // Still an owner, still in the group.
+    expect(pool.get("solo@x.com")!.groups).toContain("OWNER");
   });
 
   it("allows demoting an owner when a second owner exists", async () => {
@@ -1079,11 +1095,21 @@ describe("offboardStaff (GL-14)", () => {
       email: "solo@x.com",
       groups: ["OWNER"],
     });
-    await expect(
-      call("offboardStaff", { email: "solo@x.com" })
-    ).rejects.toThrow(/last active owner/i);
+    const res = (await call("offboardStaff", { email: "solo@x.com" })) as {
+      refused?: string;
+      outcome?: string;
+    };
+
+    expect(res.refused).toMatch(/last active owner/i);
+    expect(res.outcome).toBe("REFUSED");
     // The refusal did not disable anyone.
     expect(sentTypes()).not.toContain("Disable");
+    expect(
+      [...staffCommands.values()].some(
+        (row) =>
+          row.outcome === "REFUSED" && /last active owner/i.test(String(row.lastError))
+      )
+    ).toBe(true);
   });
 
   it("offboards an owner when another owner remains", async () => {

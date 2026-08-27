@@ -2969,6 +2969,15 @@ async function offboardStaff(
         },
         fence
       );
+      // The last-active-owner guard raises a Refused, and it raises it before a
+      // single Cognito call — the command row above already records the refusal
+      // and its reason, which is the durable account of "someone tried to
+      // offboard the last owner" that a CloudWatch page was standing in for.
+      // Hand the words back instead. Anything else that threw is a real failure
+      // and still escapes to the alarm, as does this same guard's cousin when
+      // the owner-serial mutex could not be taken.
+      const refused = refusalFrom(err);
+      if (refused) return { email, outcome: "REFUSED", ...refused };
       throw err;
     }
     // Stopped after access changes began. killLogin already opened (and

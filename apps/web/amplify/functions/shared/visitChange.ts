@@ -12,6 +12,7 @@ import { isMidMerge, mergeCounterpartCustomerId } from "./customerMerge";
 import { emailShell, sendEmail } from "./email";
 import { openOwnedWork, resolveOwnedWork } from "./ownedWork";
 import { listAll } from "./pagination";
+import { refusal, type Refusal } from "./refusal";
 import { refundInvoice, refundableRemaining } from "./refund";
 import { assertTechnicianCompliance } from "./compliance";
 import { todayEastern } from "./dates";
@@ -437,7 +438,7 @@ export async function cancelVisit(
     reason?: string | null;
     actor: VisitChangeActor;
   }
-): Promise<VisitCancelOutcome> {
+): Promise<VisitCancelOutcome | Refusal> {
   const client = await dataClient();
   const { data: job } = await client.models.Job.get({ id: args.jobId });
   if (!job) throw new Error(`Job ${args.jobId} not found`);
@@ -446,7 +447,12 @@ export async function cancelVisit(
   // the STORED outcome from the audit ledger — never a fabricated SENT/COMPLETE.
   if (job.status === "CANCELED") return storedCancelOutcome(job.id, args.decision);
   if (!CHANGEABLE.has(job.status)) {
-    throw new Error(
+    // The cancel sheet already gates on the preview's `changeable`, so getting
+    // here means the visit reached a terminal state between the preview and
+    // the confirm — the technician completed it, most likely. The office needs
+    // that sentence; nobody needs a page. Returned before the claim is taken,
+    // so nothing is half-built.
+    return refusal(
       `This visit is ${job.status.toLowerCase().replace(/_/g, " ")} — it can't be canceled here. Only a scheduled or unscheduled visit can be canceled.`
     );
   }
@@ -1338,12 +1344,18 @@ function inProgressCancelOutcome(
  * VISIT_CHANGE_RECOVERY case prescribes and the entry the reconcile sweep calls.
  * Idempotent: an already-canceled visit returns its stored outcome and clears the
  * command. `auto` (the sweep) respects the attempt cap and next-attempt time.
+ *
+ * Can answer with a refusal, from the reschedule delegation below: a stored
+ * reschedule intent whose visit has since gone terminal can never be applied,
+ * and the person pressing Resume needs to read that rather than be handed a
+ * page. It is passed through rather than swallowed, so the words reach the
+ * screen and the sweep can count it apart from a real error.
  */
 export async function resumeVisitChange(
   stripe: Stripe,
   jobId: string,
   opts: { auto?: boolean } = {}
-): Promise<VisitCancelOutcome | VisitRescheduleOutcome> {
+): Promise<VisitCancelOutcome | VisitRescheduleOutcome | Refusal> {
   const client = await dataClient();
   const { data: job } = await client.models.Job.get({ id: jobId });
   if (!job) throw new Error(`Job ${jobId} not found`);
@@ -1469,12 +1481,16 @@ export async function rescheduleVisit(args: {
   routeOrder?: number | null;
   reason?: string | null;
   actor: VisitChangeActor;
-}): Promise<VisitRescheduleOutcome> {
+}): Promise<VisitRescheduleOutcome | Refusal> {
   const client = await dataClient();
   const { data: job } = await client.models.Job.get({ id: args.jobId });
   if (!job) throw new Error(`Job ${args.jobId} not found`);
   if (!CHANGEABLE.has(job.status)) {
-    throw new Error(
+    // Same race as cancel, same answer: a visit that finished while the form
+    // was open is news for the office, not an invocation error. (The `!job`
+    // check above stays a throw — Job.get returns data: null for a row that is
+    // absent AND for a read that failed, so it cannot be stated as a fact.)
+    return refusal(
       `This visit is ${job.status.toLowerCase().replace(/_/g, " ")} — only a scheduled or unscheduled visit can be rescheduled.`
     );
   }

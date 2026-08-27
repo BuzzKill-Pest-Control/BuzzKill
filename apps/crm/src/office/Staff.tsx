@@ -461,6 +461,11 @@ function StaffActions({
       });
       if (res.errors?.length) throw new Error(res.errors[0].message);
       const data = opResult<StaffOpOutcome>(res);
+      // Read BEFORE the outcome branches, exactly as the role change does: the
+      // last-active-owner refusal comes back with outcome REFUSED, which is not
+      // COMPLETE, and would otherwise render the recovery panel offering to
+      // "resume" an offboarding that never touched the login.
+      if (data?.refused) throw new Error(data.refused);
       if (data?.inProgress) {
         setOpOutcome({ ...data, kind: "offboard" });
         return;

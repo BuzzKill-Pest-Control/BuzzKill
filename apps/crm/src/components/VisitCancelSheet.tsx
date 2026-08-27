@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   cancelVisit,
   opResult,
+  opResultUnlessRefused,
   previewVisitChange,
   VISIT_CANCEL_REASONS,
   type CancelDecision,
@@ -54,7 +55,12 @@ export default function VisitCancelSheet({
   // not send a second cancel-and-refund for the same visit.
   const cancel = useAction(async () => {
     if (!jobId) return;
-    const res = opResult<VisitCancelOutcome>(
+    // The refusal check must come before setOutcome: a refusal carries no
+    // `outcome` and no `message`, so it would render as an EMPTY result panel
+    // and call onDone() — the screen reporting a cancellation it was just told
+    // did not happen. This sheet's preview already gates on `changeable`, so a
+    // refusal here means the visit went terminal since the preview loaded.
+    const res = opResultUnlessRefused<VisitCancelOutcome>(
       await cancelVisit({
         jobId,
         decision,
