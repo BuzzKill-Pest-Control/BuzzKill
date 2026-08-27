@@ -4,6 +4,7 @@ import {
   api,
   listAll,
   opResult,
+  opResultUnlessRefused,
   unwrap,
   type Customer,
   type CustomerGroup,
@@ -135,7 +136,9 @@ export default function GroupDetail() {
 
   const move = (customerId: string, groupId: string | null) =>
     runOn(customerId, "Could not update member", async () => {
-      unwrap(
+      // Moving a member while another group change is mid-flight is refused in
+      // words; without this the row would re-render as moved.
+      opResultUnlessRefused(
         await api().mutations.setCustomerGroup({
           customerId,
           groupId: groupId ?? undefined,

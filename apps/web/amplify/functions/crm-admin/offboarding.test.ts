@@ -214,6 +214,9 @@ const workItems = new Map<string, Record<string, unknown>>();
 const staffCommands = new Map<string, Record<string, unknown>>();
 /** The owner-change mutex row(s) (OwnerChangeSerial). */
 const ownerSerial = new Map<string, Record<string, unknown>>();
+/** Force the owner-change mutex to be UNREADABLE, so a test can prove an
+ *  outage there is never reported as "another owner change is running". */
+let ownerSerialReadFails = false;
 const leadLifecycleClaims = new Map<string, Record<string, unknown>>();
 /** Immutable lead activity rows written by the offboarding lead hand-over. */
 const leadActivities: Record<string, unknown>[] = [];
@@ -388,13 +391,15 @@ const fakeDataClient = {
     },
     OwnerChangeSerial: {
       create: async (row: Record<string, unknown> & { id: string }) => {
+        if (ownerSerialReadFails) return { data: null, errors: [{ message: "store down" }] };
         if (ownerSerial.has(row.id)) return { data: null };
         ownerSerial.set(row.id, { ...row });
         return { data: ownerSerial.get(row.id) };
       },
-      get: async ({ id }: { id: string }) => ({
-        data: ownerSerial.get(id) ?? null,
-      }),
+      get: async ({ id }: { id: string }) =>
+        ownerSerialReadFails
+          ? { data: null, errors: [{ message: "store down" }] }
+          : { data: ownerSerial.get(id) ?? null },
       delete: async ({ id }: { id: string }) => {
         const existed = ownerSerial.get(id) ?? null;
         ownerSerial.delete(id);
@@ -528,6 +533,7 @@ beforeEach(() => {
   workItems.clear();
   staffCommands.clear();
   ownerSerial.clear();
+  ownerSerialReadFails = false;
   leadLifecycleClaims.clear();
   leadActivities.length = 0;
   technicianUpdateThrows = false;
@@ -1958,17 +1964,43 @@ describe("GL-14 — the durable access-change command", () => {
       holder: "someone-else",
       leaseUntil: new Date(Date.now() + 60_000).toISOString(),
     });
-    await expect(
-      call("offboardStaff", {
-        email: "owner2@x.com",
-        idempotencyKey: "owner-race-key",
-      })
-    ).rejects.toThrow(/another owner change/i);
+    const res = (await call("offboardStaff", {
+      email: "owner2@x.com",
+      idempotencyKey: "owner-race-key",
+    })) as { refused?: string; outcome?: string };
+
+    // A colleague mid-change is a fact, so it arrives as words — the mutex was
+    // READ and its lease is live. Contrast the store-unreadable case below.
+    expect(res.refused).toMatch(/another owner change/i);
+    expect(res.outcome).toBe("REFUSED");
     // Nothing moved: no disable, no group removal.
     expect(sentTypes()).not.toContain("Disable");
     expect(sentTypes()).not.toContain("RemoveFromGroup");
     // The command records the refusal terminally.
     expect(staffCommands.get("owner-race-key")!.stage).toBe("FAILED");
+  });
+
+  it("but a mutex it cannot READ still THROWS — an outage must not pose as a colleague", async () => {
+    // The trap this whole workstream is about. acquireOwnerSerial used to
+    // answer a plain false for both "someone holds it" and "the store would
+    // not answer"; as a refusal, an outage would have told the office to wait
+    // and retry, indefinitely, with nothing to alarm on.
+    finLogin();
+    pool.set("owner2@x.com", {
+      username: "owner2@x.com",
+      sub: "owner-2",
+      email: "owner2@x.com",
+      groups: ["OWNER"],
+    });
+    ownerSerialReadFails = true;
+
+    await expect(
+      call("offboardStaff", {
+        email: "owner2@x.com",
+        idempotencyKey: "owner-outage-key",
+      })
+    ).rejects.toThrow(/could not be read/i);
+    expect(sentTypes()).not.toContain("Disable");
   });
 
   it("counts a failed future-job unassign and keeps the offboard PARTIAL with an owned case", async () => {

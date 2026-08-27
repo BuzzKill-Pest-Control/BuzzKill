@@ -184,7 +184,9 @@ export default function WorkQueue() {
       );
       if (!evidence) return;
       await runOn(item, "Could not lift the suppression", async () => {
-        const result = opResult<{ lifted: boolean; message: string }>(
+        // A refusal carries no `message`, so the alert below would have said
+        // "undefined" — and the suppression would still be in force.
+        const result = opResultUnlessRefused<{ lifted: boolean; message: string }>(
           await liftEmailSuppression({ email, reasonCode: reason, evidence })
         );
         if (!result) throw new Error("The suppression lift did not complete");

@@ -313,15 +313,55 @@ describe("staff access command protocol under contention", () => {
   });
 
   it("owner serial: expired holder's release cannot unlock the new holder", async () => {
-    expect(await acquireOwnerSerial("holder-A")).toBe(true);
+    expect(await acquireOwnerSerial("holder-A")).toEqual({ ok: true });
     // Expire A's lease by hand, then B takes over.
     rows.OwnerChangeSerial.get("owner-serial")!.leaseUntil = PAST;
-    expect(await acquireOwnerSerial("holder-B")).toBe(true);
+    expect(await acquireOwnerSerial("holder-B")).toEqual({ ok: true });
     // A releases late — B must still hold the mutex.
     await releaseOwnerSerial("holder-A");
     expect(rows.OwnerChangeSerial.get("owner-serial")?.holder).toBe("holder-B");
-    // And a third acquire while B is live still refuses.
-    expect(await acquireOwnerSerial("holder-C")).toBe(false);
+    // And a third acquire while B is live still refuses — as HELD, the
+    // knowable answer, which is what lets the caller say so in words instead
+    // of alarming.
+    expect(await acquireOwnerSerial("holder-C")).toEqual({
+      ok: false,
+      reason: "HELD",
+    });
+  });
+
+  it("owner serial: a stale lease it cannot SEIZE is UNKNOWN, never someone else's", async () => {
+    // The whole point of the split. Both of these leave the mutex un-taken,
+    // and before the split both said the same thing — so a CAS layer with no
+    // table (the deployed-but-not-wired failure this codebase has actually
+    // shipped) was indistinguishable from a colleague mid-change, and "wait a
+    // moment, then retry" was the office's only signal during the outage.
+    rows.OwnerChangeSerial.set("owner-serial", {
+      id: "owner-serial",
+      holder: "dead-holder",
+      leaseUntil: PAST,
+    });
+
+    // A real racer took the stale lease first: knowable, and HELD.
+    _setLockStoreForTests({
+      conditionalUpdate: async () => ({ ok: false, reason: "LOST" }),
+      conditionalDelete: async () => "LOST",
+    });
+    expect(await acquireOwnerSerial("holder-A")).toEqual({
+      ok: false,
+      reason: "HELD",
+    });
+
+    // The CAS layer itself has no working path: nothing is known about who
+    // holds anything, and the atomicLock contract is explicit that this must
+    // never be read as "someone else holds the resource".
+    _setLockStoreForTests({
+      conditionalUpdate: async () => ({ ok: false, reason: "UNSUPPORTED" }),
+      conditionalDelete: async () => "UNSUPPORTED",
+    });
+    expect(await acquireOwnerSerial("holder-A")).toMatchObject({
+      ok: false,
+      reason: "UNKNOWN",
+    });
   });
 });
 

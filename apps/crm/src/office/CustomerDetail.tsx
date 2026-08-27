@@ -2245,7 +2245,10 @@ export default function CustomerDetail() {
             // Safe contact/address/note edit only (GL-09) — raw Customer.update
             // is closed to the browser, so protected lifecycle fields (status,
             // Stripe ids, access groups, paid state) can't be changed from here.
-            unwrap(
+            // A refusal (a mistyped address, a record a merge has since moved
+            // on) comes back as a successful response. Read it, or the sheet
+            // closes and reloads as though the edit had saved.
+            opResultUnlessRefused(
               await api().mutations.updateCustomerContact({
                 customerId: customer.id,
                 displayName: v.displayName.trim(),
@@ -2376,7 +2379,9 @@ export default function CustomerDetail() {
           groups={groups}
           currentGroupId={customer.groupId}
           onPick={async (groupId, reason) => {
-            unwrap(
+            // Another group change mid-flight refuses in words — surface them
+            // rather than closing the sheet on a move that did not happen.
+            opResultUnlessRefused(
               await api().mutations.setCustomerGroup({
                 reason,
                 customerId: customer.id,
