@@ -4261,7 +4261,9 @@ function JobPacketForm({
   const started = Boolean(job.startedAt);
 
   const save = useAction(async () => {
-    opResult(
+    // A packet edit refused because the visit closed under this sheet must not
+    // read as a saved packet.
+    opResultUnlessRefused(
       await api().mutations.updateJobPacket({
         jobId: job.id,
         accessInstructions: packet.accessInstructions.trim() || undefined,

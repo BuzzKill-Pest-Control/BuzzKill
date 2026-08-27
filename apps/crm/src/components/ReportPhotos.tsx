@@ -55,7 +55,14 @@ export default function ReportPhotos({
         reportId: report.id,
         contentType: file.type || "image/jpeg",
       });
-      const target = opResult<{ key: string; uploadUrl: string }>(res);
+      const target = opResult<{
+        key: string;
+        uploadUrl: string;
+        refused?: string;
+      }>(res);
+      // A finalized report refuses the upload in words; without this the
+      // technician would get the generic "Could not get an upload URL".
+      if (target?.refused) throw new Error(target.refused);
       if (!target?.uploadUrl) throw new Error("Could not get an upload URL");
       const put = await fetch(target.uploadUrl, {
         method: "PUT",

@@ -42,6 +42,9 @@ let emailLogRows: Record<string, unknown>[] = [];
 let workItemCreateFails = false;
 
 const capacityFixture = capacityFixtureModels();
+/** Force the approved-product catalog page to fail, so a test can prove an
+ *  incomplete catalog is never reported as "your product isn't approved". */
+let catalogPageFails = false;
 /** Seasonal service plans and the one-treatment-per-month obligation ledger. */
 const plans = new Map<string, Record<string, unknown>>();
 const obligations = new Map<string, Record<string, unknown>>();
@@ -156,7 +159,10 @@ const fakeDataClient = {
       }),
     },
     Product: {
-      list: async () => ({ data: catalog }),
+      list: async () =>
+        catalogPageFails
+          ? { data: [], errors: [{ message: "catalog page read failed" }] }
+          : { data: catalog },
     },
     ServiceReportAmendment: {
       get: async ({ id }: { id: string }) => ({
@@ -289,6 +295,22 @@ const call = (
   } as never);
 };
 
+/**
+ * Assert the server said NO — in words, with no invocation error behind them.
+ *
+ * A guard that refuses a technician's half-filled form or the office's stale
+ * sheet is the product working; thrown out of the Lambda it was the crm-docs
+ * error alarm instead. These operations now answer with { refused }, so the
+ * assertion is on the envelope rather than on a rejection.
+ */
+const expectRefusal = async (
+  pending: Promise<unknown>,
+  pattern: RegExp
+): Promise<void> => {
+  const res = (await pending) as { refused?: string };
+  expect(res?.refused).toMatch(pattern);
+};
+
 /** A report that satisfies every rule, so each test can break exactly one. */
 const validReport = (over: Partial<Report> = {}): Report => ({
   id: "rep_1",
@@ -335,6 +357,7 @@ beforeEach(() => {
   packetEvents = [];
   emailLogRows = [];
   workItemCreateFails = false;
+  catalogPageFails = false;
   process.env.DOCS_BUCKET = "docs";
   technician = {
     name: "Marco Reyes",
@@ -732,9 +755,10 @@ describe("dispatch packet capture (GL-12)", () => {
   it("will not edit the packet of a closed visit — it is part of the record", async () => {
     jobs[0].status = "COMPLETED";
 
-    await expect(
-      call("updateJobPacket", { jobId: "j1", hazardNotes: "too late" }, ["OWNER"])
-    ).rejects.toThrow(/closed|record/i);
+    await expectRefusal(
+      call("updateJobPacket", { jobId: "j1", hazardNotes: "too late" }, ["OWNER"]),
+      /closed|record/i
+    );
   });
 });
 
@@ -790,6 +814,8 @@ describe("no access — the honest exit", () => {
   });
 
   it("refuses a reason it does not know rather than recording a blank one", async () => {
+    // NOT converted: the reason comes from a fixed list the app renders, so an
+    // off-list code is a broken client, not a technician being told no.
     await expect(
       call("reportNoAccess", { jobId: "j1", reason: "COULDNT_BE_BOTHERED" })
     ).rejects.toThrow(/unknown no-access reason/i);
@@ -809,9 +835,10 @@ describe("no access — the honest exit", () => {
   it("refuses to overwrite a completed job", async () => {
     jobs[0].status = "COMPLETED";
 
-    await expect(
-      call("reportNoAccess", { jobId: "j1", reason: "NOBODY_HOME" })
-    ).rejects.toThrow(/already completed/i);
+    await expectRefusal(
+      call("reportNoAccess", { jobId: "j1", reason: "NOBODY_HOME" }),
+      /already completed/i
+    );
   });
 });
 
@@ -839,6 +866,13 @@ describe("the finalize gate", () => {
     technician.licenseNumber = null;
     reports.push(validReport());
 
+    // NOT converted, deliberately. This guard reads the Technician ROW, and
+    // Technician.get answers data: null for a row that is absent AND for a read
+    // that failed — the finalize path then calls the compliance check with
+    // `technician ?? {}`, so an unreadable technician produces exactly this
+    // "needs an applicator license number" message. Until that read can tell
+    // the two apart, the sentence is not safe to say out loud, and it stays an
+    // error where the alarm can see it.
     await expect(
       call("finalizeServiceReport", { reportId: "rep_1" })
     ).rejects.toThrow(/applicator license number/i);
@@ -867,9 +901,10 @@ describe("the finalize gate", () => {
     // This used to finalize and email happily.
     reports.push(validReport({ productsUsed: JSON.stringify([]) }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/add the products you applied/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /add the products you applied/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -890,9 +925,10 @@ describe("the finalize gate", () => {
   it("refuses a report that claims inspection-only and lists products", async () => {
     reports.push(validReport({ inspectionOnly: true }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/untick one or the other/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /untick one or the other/i
+    );
   });
 
   it("refuses a product with no EPA number", async () => {
@@ -902,9 +938,10 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/needs its EPA registration number/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /needs its EPA registration number/i
+    );
   });
 
   it("refuses an EPA number that is not one", async () => {
@@ -916,9 +953,10 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/isn't a valid EPA registration number/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /isn't a valid EPA registration number/i
+    );
   });
 
   it.each(["432-1514", "432-1514-4321", "1234567-12345"])(
@@ -954,9 +992,10 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/how much Suspend was applied/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /how much Suspend was applied/i
+    );
   });
 
   it("refuses a product with no label application rate", async () => {
@@ -968,17 +1007,19 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/label application rate or dilution/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /label application rate or dilution/i
+    );
   });
 
   it("refuses without a re-entry interval — the occupant has to be told", async () => {
     reports.push(validReport({ reEntryIntervalHours: null }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/re-entry interval/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /re-entry interval/i
+    );
   });
 
   it("accepts a re-entry interval of zero, which is a real answer (zero-minimum label)", async () => {
@@ -994,34 +1035,38 @@ describe("the finalize gate", () => {
 
   it("refuses a report re-entry below the product's label minimum (GL-15 fail-closed)", async () => {
     reports.push(validReport({ reEntryIntervalHours: 0 }));
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/below .*label minimum/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /below .*label minimum/i
+    );
     expect(reports[0].status).not.toBe("FINALIZED");
   });
 
   it("refuses without a location", async () => {
     reports.push(validReport({ geoLat: null, geoLng: null }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/capture the location/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /capture the location/i
+    );
   });
 
   it("refuses an impossible coordinate — 0,0 is not an address", async () => {
     reports.push(validReport({ geoLat: 0, geoLng: 0 }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/real point on the map/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /real point on the map/i
+    );
   });
 
   it("refuses a location with no capture time or accuracy — it isn't proof", async () => {
     reports.push(validReport({ geoCapturedAt: null }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/proof you were there|time or its accuracy/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /proof you were there|time or its accuracy/i
+    );
   });
 
   it("flags an imprecise location for review but never blocks the technician", async () => {
@@ -1088,9 +1133,10 @@ describe("the finalize gate", () => {
     // Valid reading, but from yesterday: it cannot prove presence at today's visit.
     reports.push(validReport({ geoCapturedAt: "2026-07-15T13:30:00Z" }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/outside the time you were on site/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /outside the time you were on site/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1106,27 +1152,30 @@ describe("the finalize gate", () => {
   it("refuses without saying what was done", async () => {
     reports.push(validReport({ servicesPerformed: "   " }));
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/say what was done/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /say what was done/i
+    );
   });
 
   it("refuses to resurrect a canceled job as completed", async () => {
     jobs[0].status = "CANCELED";
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/was canceled/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /was canceled/i
+    );
   });
 
   it("refuses a report on a job the technician couldn't access", async () => {
     jobs[0].status = "NO_ACCESS";
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/did not happen/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /did not happen/i
+    );
   });
 
   it("refuses a job that was never started — the record needs a real start time", async () => {
@@ -1134,9 +1183,10 @@ describe("the finalize gate", () => {
     jobs[0].startedAt = null;
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/never started/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /never started/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1148,9 +1198,10 @@ describe("the finalize gate", () => {
     jobs[0].applicationEndAt = null;
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/never ended/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /never ended/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1175,9 +1226,24 @@ describe("the finalize gate", () => {
       })
     );
 
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /isn't an approved product|approved product in the catalog|added to the product log/i
+    );
+    expect(reports[0].status).toBe("DRAFT");
+  });
+
+  it("but a catalog it could not READ still throws — 'not approved' would send the technician to ask for a product the office already added", async () => {
+    // The reason the catalog read was changed from pageErrors "ignore" to
+    // "throw" in the same commit that made this refusal words. Ignored, a
+    // dropped page produces an EMPTY approved list and therefore this exact
+    // sentence about a product that is sitting in the catalog.
+    reports.push(validReport());
+    catalogPageFails = true;
+
     await expect(
       call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/isn't an approved product|approved product in the catalog|added to the product log/i);
+    ).rejects.toThrow(/catalog page read failed/i);
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1185,9 +1251,10 @@ describe("the finalize gate", () => {
     catalog[0].labelApproved = false;
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/approved product|product log/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /approved product|product log/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1195,9 +1262,10 @@ describe("the finalize gate", () => {
     catalog[0].active = false;
     reports.push(validReport());
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/approved product|product log/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /approved product|product log/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1212,9 +1280,10 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/approved product|product log/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /approved product|product log/i
+    );
   });
 
   it("refuses a rate that isn't the approved label rate — free text can't authorize a strength", async () => {
@@ -1228,9 +1297,10 @@ describe("the finalize gate", () => {
       })
     );
 
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/approved label rate|label rate/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /approved label rate|label rate/i
+    );
     expect(reports[0].status).toBe("DRAFT");
   });
 
@@ -1879,6 +1949,54 @@ describe("terminal visits are immutable — rebooking makes a new linked attempt
   });
 });
 
+describe("the technician's own screens refuse in words", () => {
+  it("refuses a photo upload onto a finalized report", async () => {
+    // saveServiceReportDraft and setReportPhotos already answered this in
+    // words; the upload-url path was the one still throwing, so tapping "add
+    // photo" on a report that finalized a moment ago paged the owner.
+    reports.push(validReport({ status: "FINALIZED" }));
+
+    await expectRefusal(
+      call("getReportPhotoUploadUrl", {
+        reportId: "rep_1",
+        contentType: "image/jpeg",
+      }),
+      /finalized/i
+    );
+  });
+
+  it("still THROWS on an image type it cannot store — that is the app sending something it never offers", async () => {
+    reports.push(validReport());
+
+    await expect(
+      call("getReportPhotoUploadUrl", {
+        reportId: "rep_1",
+        contentType: "image/tiff",
+      })
+    ).rejects.toThrow(/unsupported image type/i);
+  });
+
+  it("refuses an acknowledgement pressed by the office on the technician's behalf", async () => {
+    // NOT the authorization boundary: a TECH who is not the assignee never
+    // reaches this guard, because assertCanActOnJobId already refused them
+    // upstream with its deliberately opaque message. What reaches it is an
+    // OWNER — who passes that check unconditionally — clicking Acknowledge for
+    // someone else. The sentence exists to be read by exactly that person, and
+    // it is the whole point of GL-12 that they cannot press it.
+    // The stop belongs to another technician; the caller is an owner (whose
+    // linked technician record is t1).
+    jobs[0] = { ...jobs[0], technicianId: "t-someone-else", packetVersion: 2 };
+
+    await expectRefusal(
+      call("acknowledgePacket", { jobId: "j1", version: 2 }, ["OWNER"], {
+        email: "office@x.com",
+      }),
+      /only the assigned technician/i
+    );
+    expect(jobs[0].packetAckVersion ?? 0).toBe(0);
+  });
+});
+
 describe("GL-15 — finalize is single-winner, verified, and durable", () => {
   // Start from a fully-stamped job, exactly like the finalize-gate suite.
   beforeEach(() => {
@@ -1904,9 +2022,10 @@ describe("GL-15 — finalize is single-winner, verified, and durable", () => {
   it("refuses finalization when the product has no label rate on file (fail closed)", async () => {
     catalog[0] = { ...catalog[0], defaultRate: null };
     reports.push(validReport());
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/no approved label rate on file/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /no approved label rate on file/i
+    );
     expect(reports[0].status).not.toBe("FINALIZED");
   });
 
@@ -1929,9 +2048,10 @@ describe("GL-15 — finalize is single-winner, verified, and durable", () => {
         ]),
       })
     );
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/outside the label range/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /outside the label range/i
+    );
   });
 
   it("enforces pest applicability when the label rule encodes it", async () => {
@@ -1940,9 +2060,10 @@ describe("GL-15 — finalize is single-winner, verified, and durable", () => {
       labelRulesJson: JSON.stringify({ allowedPests: ["ants", "spiders"] }),
     };
     reports.push(validReport({ targetPests: "ants, termites" }));
-    await expect(
-      call("finalizeServiceReport", { reportId: "rep_1" })
-    ).rejects.toThrow(/isn't labeled for: termites/i);
+    await expectRefusal(
+      call("finalizeServiceReport", { reportId: "rep_1" }),
+      /isn't labeled for: termites/i
+    );
   });
 
   it("marks provider acceptance ACCEPTED, never DELIVERED, and records the SENDING intent first", async () => {
@@ -2086,7 +2207,8 @@ describe("GL-12 — the honest one-tap exits and the versioned packet", () => {
     expect(String(packetEvents[0].changedFields)).toContain("hazardNotes");
 
     // Start refuses until the technician acknowledges the new version.
-    await expect(call("startJob", { jobId: "j1" })).rejects.toThrow(
+    await expectRefusal(
+      call("startJob", { jobId: "j1" }),
       /packet changed .*acknowledge/i
     );
     await call("acknowledgePacket", { jobId: "j1", version: 2 });
@@ -2103,6 +2225,9 @@ describe("GL-12 — the honest one-tap exits and the versioned packet", () => {
       packetVersion: 1,
       propertyClass: "RESIDENTIAL",
     };
+    // NOT converted: a material packet change mid-visit with no recorded
+    // manager reason is a required field the office screen supplies, so its
+    // absence is a broken client rather than a person being told no.
     await expect(
       call(
         "updateJobPacket",

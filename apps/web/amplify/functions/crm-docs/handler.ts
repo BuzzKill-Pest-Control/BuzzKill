@@ -3216,7 +3216,9 @@ async function updateJobPacket(
     job.status === "PREP_MISSING" ||
     job.status === "CANCELED"
   ) {
-    throw new Error(
+    // The office had the packet open when the technician closed the visit.
+    // A stale sheet, not a fault.
+    return refusal(
       "This visit is closed — its packet is part of the record and cannot be edited"
     );
   }
@@ -3355,7 +3357,14 @@ async function acknowledgePacket(
   if (!job) throw new Error(`Job ${jobId} not found`);
   const tech = await technicianForCaller(identity);
   if (!tech || job.technicianId !== tech.id) {
-    throw new Error(
+    // Ownership, so worth stating the judgment: this is not the opaque
+    // authorization boundary assertCanActOnJob defends (which stays a throw,
+    // and whose message deliberately says nothing). It is the friendly
+    // explanation written for the person who reaches it by accident — the
+    // office reassigned the stop while the packet was open on a phone. The
+    // roster read behind `tech` pages with pageErrors: "throw", so a failed
+    // read cannot arrive here as "you are not the assignee".
+    return refusal(
       "Only the assigned technician can acknowledge their packet — the point is that THEY read it."
     );
   }
@@ -3520,7 +3529,7 @@ const GEO_REVIEW_DISTANCE_M = 1609;
  * technician in a basement or a dead-zone cannot GPS their way out of it, so
  * those are handled by flagLocationForReview as owned work, never a block.
  */
-function assertLocationIsPresence(
+function locationNotPresence(
   report: {
     geoLat?: number | null;
     geoLng?: number | null;
@@ -3528,9 +3537,9 @@ function assertLocationIsPresence(
     geoCapturedAt?: string | null;
   },
   job: { startedAt?: string | null; applicationEndAt?: string | null }
-) {
+): Refusal | null {
   if (report.geoLat == null || report.geoLng == null) {
-    throw new Error("Capture the location on site before sending the report");
+    return refusal("Capture the location on site before sending the report");
   }
   if (
     !Number.isFinite(report.geoLat) ||
@@ -3539,23 +3548,23 @@ function assertLocationIsPresence(
     Math.abs(report.geoLng) > 180 ||
     (report.geoLat === 0 && report.geoLng === 0)
   ) {
-    throw new Error(
+    return refusal(
       "The captured location isn't a real point on the map — capture it again on site"
     );
   }
   if (report.geoCapturedAt == null || report.geoAccuracyM == null) {
-    throw new Error(
+    return refusal(
       "Re-capture the location on site — this reading is missing its time or its accuracy, so it can't stand as proof you were there"
     );
   }
   if (!Number.isFinite(report.geoAccuracyM) || report.geoAccuracyM <= 0) {
-    throw new Error(
+    return refusal(
       "The location reading has no real accuracy — capture it again on site"
     );
   }
   const capturedMs = Date.parse(report.geoCapturedAt);
   if (Number.isNaN(capturedMs)) {
-    throw new Error(
+    return refusal(
       "The location reading's timestamp is unreadable — capture it again on site"
     );
   }
@@ -3567,10 +3576,11 @@ function assertLocationIsPresence(
     (capturedMs < startMs - GEO_CAPTURE_GRACE_MS ||
       capturedMs > endMs + GEO_CAPTURE_GRACE_MS)
   ) {
-    throw new Error(
+    return refusal(
       "The location was captured outside the time you were on site — re-capture it during the visit so the record proves you were there"
     );
   }
+  return null;
 }
 
 /**
@@ -3686,7 +3696,20 @@ async function flagLocationForReview(input: {
   }
 }
 
-function assertReportIsARecord(
+/**
+ * Why this report is not yet a record, or null when it is.
+ *
+ * Every sentence here is written to a technician standing on a driveway with a
+ * phone: add the products, set the re-entry interval, press Start job first.
+ * That is a form being checked, and a form being checked is not a Lambda
+ * failure — thrown, each of these was the crm-docs error alarm going off
+ * because somebody left a field blank.
+ *
+ * Everything it reads is already in hand (the report row and the job row the
+ * caller fetched), so no failed read can reach these branches and masquerade
+ * as a missing field.
+ */
+function reportNotARecord(
   report: {
     inspectionOnly?: boolean | null;
     productsUsed?: unknown;
@@ -3702,14 +3725,14 @@ function assertReportIsARecord(
     startedAt?: string | null;
     applicationEndAt?: string | null;
   }
-) {
+): Refusal | null {
   if (job.status === "CANCELED") {
-    throw new Error(
+    return refusal(
       "This job was canceled — finalizing a report against it would resurrect it as completed"
     );
   }
   if (job.status === "NO_ACCESS") {
-    throw new Error(
+    return refusal(
       "This job is marked as no access — a report would be a record of an application that did not happen"
     );
   }
@@ -3718,62 +3741,64 @@ function assertReportIsARecord(
   // the server invented is not a record of when the application happened; it is
   // a record of when someone pressed send. Refuse rather than substitute.
   if (!job.startedAt) {
-    throw new Error(
+    return refusal(
       "This job was never started — press Start job first, so the record carries the application's real start time, then complete the report"
     );
   }
   if (!job.applicationEndAt) {
-    throw new Error(
+    return refusal(
       "The application was never ended — the record needs the real time you finished on site, not the moment this report was sent"
     );
   }
   if (!report.servicesPerformed?.trim()) {
-    throw new Error("Say what was done before sending the report");
+    return refusal("Say what was done before sending the report");
   }
-  assertLocationIsPresence(report, job);
+  const badLocation = locationNotPresence(report, job);
+  if (badLocation) return badLocation;
 
   const products = parseProducts(report.productsUsed);
 
   if (report.inspectionOnly) {
     if (products.length) {
-      throw new Error(
+      return refusal(
         "This is marked inspection-only but lists products applied — untick one or the other"
       );
     }
-    return;
+    return null;
   }
 
   // Zero products used to finalize and email happily. A pesticide record with
   // no pesticide on it is either a false record or an inspection, and the
   // system should know which.
   if (!products.length) {
-    throw new Error(
+    return refusal(
       "Add the products you applied, or tick “inspection only — no product applied”"
     );
   }
   for (const p of products) {
     const name = p.name?.trim();
-    if (!name) throw new Error("A product row is missing its name");
+    if (!name) return refusal("A product row is missing its name");
     if (!p.epaNumber?.trim()) {
-      throw new Error(`${name} needs its EPA registration number`);
+      return refusal(`${name} needs its EPA registration number`);
     }
     if (!EPA_REGISTRATION_RE.test(p.epaNumber.trim())) {
-      throw new Error(
+      return refusal(
         `“${p.epaNumber}” isn't a valid EPA registration number for ${name} — it looks like 432-1234`
       );
     }
     if (!p.quantity?.trim()) {
-      throw new Error(`How much ${name} was applied?`);
+      return refusal(`How much ${name} was applied?`);
     }
     if (!p.rate?.trim()) {
-      throw new Error(`Record the label application rate or dilution for ${name}`);
+      return refusal(`Record the label application rate or dilution for ${name}`);
     }
   }
   if (report.reEntryIntervalHours == null) {
-    throw new Error(
+    return refusal(
       "Set the re-entry interval — the occupant has to be told when it is safe to go back in"
     );
   }
+  return null;
 }
 
 type CatalogProduct = {
@@ -3805,10 +3830,10 @@ type CatalogProduct = {
  * that was added but never label-approved is refused here — not silently
  * finalized onto the document a customer keeps and an inspector may read.
  */
-function assertProductsAreApproved(
+function productsNotApproved(
   products: { name?: string | null; epaNumber?: string | null }[],
   catalog: CatalogProduct[]
-): void {
+): Refusal | null {
   const approved = catalog.filter((c) => c.active && c.labelApproved);
   for (const p of products) {
     const name = p.name?.trim() ?? "";
@@ -3819,11 +3844,17 @@ function assertProductsAreApproved(
         (c.name?.trim().toLowerCase() ?? "") === name.toLowerCase()
     );
     if (!match) {
-      throw new Error(
+      // Words, and safe to say them, but ONLY because the caller now pages the
+      // catalog with pageErrors: "throw". Read with a dropped page, this
+      // sentence would tell a technician that a product the office approved
+      // months ago is not in the catalog, and send them to ask for something
+      // that is already there.
+      return refusal(
         `“${name}” (EPA ${epa || "—"}) isn't an approved product in the catalog. A product has to be reviewed and added to the product log by the office before it can go on a service report — free-text details can't authorize a pesticide record. Ask the office to add it, then pick it here.`
       );
     }
   }
+  return null;
 }
 
 /**
@@ -3836,7 +3867,7 @@ function assertProductsAreApproved(
  * reEntryHours); the validation logic is shared/compliance's
  * assertApplicationWithinLabel, pure and unit-tested.
  */
-function assertProductsWithinLabelRules(
+function productsOutsideLabel(
   products: {
     name?: string | null;
     epaNumber?: string | null;
@@ -3846,7 +3877,7 @@ function assertProductsWithinLabelRules(
   catalog: CatalogProduct[],
   report: { reEntryIntervalHours?: number | null; targetPests?: string | null },
   job: { serviceType?: string | null }
-): void {
+): Refusal | null {
   const approved = catalog.filter((c) => c.active && c.labelApproved);
   for (const p of products) {
     const name = p.name?.trim() ?? "";
@@ -3856,20 +3887,28 @@ function assertProductsWithinLabelRules(
         (c.epaNumber?.trim() ?? "") === epa &&
         (c.name?.trim().toLowerCase() ?? "") === name.toLowerCase()
     );
-    // Unmatched rows are already refused by assertProductsAreApproved.
+    // Unmatched rows are already refused by productsNotApproved.
     if (!match) continue;
-    assertApplicationWithinLabel({
-      productName: name,
-      recordedQuantity: p.quantity,
-      recordedRate: p.rate,
-      reportReEntryHours: report.reEntryIntervalHours,
-      reportPests: report.targetPests,
-      jobServiceType: job.serviceType,
-      catalogDefaultRate: match.defaultRate,
-      catalogReEntryHours: match.reEntryHours,
-      rules: parseLabelRules(match.labelRulesJson),
-    });
+    // shared/compliance's assertApplicationWithinLabel is a pure leaf — no
+    // I/O — so everything it raises is a named label fact for the technician
+    // to fix, never an infrastructure failure wearing a business message.
+    try {
+      assertApplicationWithinLabel({
+        productName: name,
+        recordedQuantity: p.quantity,
+        recordedRate: p.rate,
+        reportReEntryHours: report.reEntryIntervalHours,
+        reportPests: report.targetPests,
+        jobServiceType: job.serviceType,
+        catalogDefaultRate: match.defaultRate,
+        catalogReEntryHours: match.reEntryHours,
+        rules: parseLabelRules(match.labelRulesJson),
+      });
+    } catch (err) {
+      return refusal(err instanceof Error ? err.message : String(err));
+    }
   }
+  return null;
 }
 
 /** Re-fetch a finalized report's stored PDF for a resumed delivery. A missing
@@ -4369,7 +4408,8 @@ async function finalizeServiceReport(reportId: string) {
     // The gate was in React only. finalizeServiceReport checked nothing — not
     // products, not an EPA number, not a quantity, not the job's state — so any
     // caller could finalize an empty report on any job and email it.
-    assertReportIsARecord(report, job);
+    const notARecord = reportNotARecord(report, job);
+    if (notARecord) return notARecord;
 
     // Every product must be an office-approved catalog product AND carry the
     // approved label rate — not a free-text row (or strength) a technician typed
@@ -4378,10 +4418,18 @@ async function finalizeServiceReport(reportId: string) {
     if (productsUsed.length) {
       const approved = await listAll(
         (nextToken) => client.models.Product.list({ limit: 1000, nextToken }),
-        { pageErrors: "ignore" }
+        // Was "ignore". A dropped page here USED to mean an approved product
+        // was reported missing and the finalize threw, which at least alarmed.
+        // Now that the same condition answers in words, an incomplete catalog
+        // would quietly tell a technician to go and ask the office for a
+        // product the office already added. The refusal below is only honest
+        // if the catalog behind it is whole, so a failed page is an error.
+        { pageErrors: "throw" }
       );
-      assertProductsAreApproved(productsUsed, approved);
-      assertProductsWithinLabelRules(productsUsed, approved, report, job);
+      const notApproved = productsNotApproved(productsUsed, approved);
+      if (notApproved) return notApproved;
+      const offLabel = productsOutsideLabel(productsUsed, approved, report, job);
+      if (offLabel) return offLabel;
     }
 
     // assertReportIsARecord has already refused any report whose job is missing
@@ -5070,7 +5118,9 @@ async function startJob(jobId: string) {
   // GL-12: a packet change since assignment must reach the technician BEFORE
   // work starts — the app shows the change; acknowledging it unblocks Start.
   if ((job.packetVersion ?? 1) > 1 && (job.packetAckVersion ?? 0) < (job.packetVersion ?? 1)) {
-    throw new Error(
+    // GL-12 working: the office changed the packet and the technician has not
+    // read it yet. The app's next screen IS the fix.
+    return refusal(
       "The job packet changed since it was assigned — review the change in the packet and tap Acknowledge before starting."
     );
   }
@@ -5457,12 +5507,14 @@ async function reportNoAccess(args: {
     return { jobId: args.jobId, status: "NO_ACCESS", alreadyReported: true };
   }
   if (job.status === "COMPLETED") {
-    throw new Error(
+    // Two taps, or a visit the office closed from its end while the phone was
+    // on the honest-exit screen. The record stands; the technician is told so.
+    return refusal(
       "This job is already completed — if that was a mistake, tell the office rather than overwriting it"
     );
   }
   if (job.status === "CANCELED") {
-    throw new Error("This job was canceled — nothing to report against it");
+    return refusal("This job was canceled — nothing to report against it");
   }
 
   const nowIso = new Date().toISOString();
@@ -5596,12 +5648,14 @@ async function reportVisitNotPerformed(
     return { jobId: args.jobId, status: kind, alreadyReported: true };
   }
   if (job.status === "COMPLETED") {
-    throw new Error(
+    // Two taps, or a visit the office closed from its end while the phone was
+    // on the honest-exit screen. The record stands; the technician is told so.
+    return refusal(
       "This job is already completed — if that was a mistake, tell the office rather than overwriting it"
     );
   }
   if (job.status === "CANCELED") {
-    throw new Error("This job was canceled — nothing to report against it");
+    return refusal("This job was canceled — nothing to report against it");
   }
 
   const nowIso = new Date().toISOString();
@@ -5735,7 +5789,11 @@ async function getReportPhotoUploadUrl(reportId: string, contentType: string) {
   });
   if (!report) throw new Error(`Report ${reportId} not found`);
   if (report.status === "FINALIZED") {
-    throw new Error("Report is finalized — photos can no longer be added");
+    // The same refusal saveServiceReportDraft and setReportPhotos already
+    // make (394e7e3) — this upload-url path was the one left throwing, so a
+    // technician tapping "add photo" on a report that finalized a moment ago
+    // still paged the owner.
+    return refusal("Report is finalized — photos can no longer be added");
   }
   const key = `reports/${report.customerId}/photos/${reportId}/${Date.now()}-${randomBytes(4).toString("hex")}.${ext}`;
   const uploadUrl = await getSignedUrl(

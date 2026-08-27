@@ -6,7 +6,6 @@ import {
   api,
   opResult,
   technicianJob,
-  unwrap,
   type Customer,
   type Job,
   type Product as CatalogProduct,
@@ -409,6 +408,11 @@ export default function TechJob() {
       version: j.packetVersion ?? 1,
     });
     if (res.errors?.length) throw new Error(res.errors[0].message);
+    // A refusal (the office reassigned this stop while the packet was open)
+    // comes back as a successful response — without this the screen would
+    // simply reload and say nothing at all.
+    const ack = opResult<{ refused?: string }>(res);
+    if (ack?.refused) throw new Error(ack.refused);
     await load();
   }, "Could not acknowledge");
 
@@ -419,6 +423,11 @@ export default function TechJob() {
       // there is no browser-supplied timestamp to rewrite.
       const res = await api().mutations.startJob({ jobId: j.id });
       if (res.errors?.length) throw new Error(res.errors[0].message);
+      // The packet-changed refusal is the whole point of GL-12: the technician
+      // has to be TOLD to read the change. Silently reloading would leave them
+      // tapping Start on a button that appears to do nothing.
+      const started = opResult<{ refused?: string }>(res);
+      if (started?.refused) throw new Error(started.refused);
       await load();
     } catch (err) {
       throw asOfflineError(
@@ -1066,7 +1075,10 @@ function NoAccessCard({
   const submit = useAction(async () => {
     if (!reason) return;
     try {
-      unwrap(
+      // Read the refusal BEFORE clearDraft below: a refused exit (the visit
+      // was already completed or canceled) changed nothing, and wiping the
+      // draft on the way past would throw away the technician's words.
+      const res = opResult<{ refused?: string }>(
         await api().mutations.reportNoAccess({
           jobId: job.id,
           reason,
@@ -1074,6 +1086,7 @@ function NoAccessCard({
           photoKey: photoKey ?? undefined,
         })
       );
+      if (res?.refused) throw new Error(res.refused);
       // The visit is over and no report will be filed for it — a lingering
       // draft would only restore stale words into a future rebooked visit.
       clearDraft(job.id, localStorage, ownerSub);
@@ -1507,6 +1520,13 @@ function ReportForm({
       }
       const res = await api().mutations.finalizeServiceReport({ reportId: id });
       if (res.errors?.length) throw new Error(res.errors[0].message);
+      // MUST precede markDelivered. Every finalize refusal is a field the
+      // technician still has to fill in, and markDelivered CLEARS THE LOCAL
+      // DRAFT — so reading it late would delete the report off the phone and
+      // report it sent, on a report that was never finalized. That is worse
+      // than the page this replaces.
+      const finalized = opResult<{ refused?: string }>(res);
+      if (finalized?.refused) throw new Error(finalized.refused);
       markDelivered(gen);
       await onChanged();
     } catch (err) {
