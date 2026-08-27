@@ -121,7 +121,10 @@ export default function WorkQueue() {
   const claim = useCallback(
     async (item: WorkItem) => {
       await runOn(item, "Could not claim work", async () => {
-        const result = opResult<{ workItemId: string }>(
+        // "Already claimed by X", "someone else got it just now", "this case is
+        // already resolved" — a queue two people are working from. Read the
+        // refusal or the row silently reloads as though it were now theirs.
+        const result = opResultUnlessRefused<{ workItemId: string }>(
           await updateOwnedWork({ workItemId: item.id, action: "CLAIM" })
         );
         if (!result) throw new Error("The work update did not complete");
@@ -136,7 +139,7 @@ export default function WorkQueue() {
   const release = useCallback(
     async (item: WorkItem) => {
       await runOn(item, "Could not release work", async () => {
-        const result = opResult<{ workItemId: string }>(
+        const result = opResultUnlessRefused<{ workItemId: string }>(
           await updateOwnedWork({ workItemId: item.id, action: "RELEASE" })
         );
         if (!result) throw new Error("The work update did not complete");
@@ -151,7 +154,10 @@ export default function WorkQueue() {
   // presses used to mean the customer got the notice twice.
   const resendExact = async (item: WorkItem) => {
     await runOn(item, "Could not resend", async () => {
-      const result = opResult(
+      // The named refusals (unknown outcome, attachments) must reach the office
+      // verbatim: without this they collapse into the generic sentence below,
+      // which says nothing about WHY and nothing about what to do instead.
+      const result = opResultUnlessRefused(
         await api().mutations.resendEmailLog({ emailLogId: item.relatedId! })
       ) as { resent?: boolean } | null;
       if (!result?.resent) {

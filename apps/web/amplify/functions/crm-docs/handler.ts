@@ -768,13 +768,17 @@ async function resendEmailLogExact(emailLogId: string) {
   if (!models.EmailLog) throw new Error("The email log is unavailable");
   const { data: row } = await models.EmailLog.get({ id: emailLogId });
   if (!row) throw new Error("That email record was not found");
+  // Both are the office pressing Resend on a row the queue offers, and being
+  // told why this particular message cannot go again. The row itself was read
+  // successfully (the `!row` throw above owns that case), so both sentences are
+  // facts about the message rather than guesses.
   if (row.deliveryStatus === "SENDING") {
-    throw new Error(
+    return refusal(
       "This email's outcome is UNKNOWN (its provider call never settled) — verify with the provider or the customer before resending, or it may arrive twice."
     );
   }
   if (row.hasAttachments || !row.bodyHtml) {
-    throw new Error(
+    return refusal(
       "This message carried attachments (or its body was too large to store), so it can't be resent verbatim — re-generate it from its source screen."
     );
   }
@@ -795,7 +799,7 @@ async function submitPortalRequest(opts: {
   jobId?: string | null;
   preferredDate?: string | null;
   message?: string | null;
-}): Promise<{ reference: string }> {
+}): Promise<{ reference: string } | Refusal> {
   if (!PORTAL_REQUEST_KINDS.has(opts.kind)) {
     throw new Error("Pick a request type");
   }
@@ -814,7 +818,11 @@ async function submitPortalRequest(opts: {
       throw new Error("That visit doesn't belong to this account");
     }
     if (job.status !== "SCHEDULED" && job.status !== "UNSCHEDULED") {
-      throw new Error("That visit can't be rescheduled — call the office and we'll help");
+      // A customer on a portal page rendered before the visit was completed or
+      // canceled. The sentence is already written for them — it should not
+      // also page the owner. (The ownership check above stays a throw: it is
+      // the boundary that stops one account probing another's visit ids.)
+      return refusal("That visit can't be rescheduled — call the office and we'll help");
     }
   } else if (!opts.message?.trim()) {
     throw new Error("Tell us what you need help with");
@@ -1480,7 +1488,9 @@ export async function updateOwnedWork(args: {
   const now = new Date().toISOString();
 
   if (args.action === "CLAIM") {
-    if (item.status !== "OPEN") throw new Error("Resolved work cannot be claimed");
+    // The queue is a snapshot; somebody closed this case while it was on
+    // screen. Every refusal in this action is that same stale list.
+    if (item.status !== "OPEN") return refusal("Resolved work cannot be claimed");
     if (item.ownerSub && item.ownerSub === args.actorSub) {
       // Idempotent: already the claimer.
       return { workItemId: item.id, status: "OPEN", ownerEmail: actorEmail };
@@ -1498,8 +1508,11 @@ export async function updateOwnedWork(args: {
         { kind: "fieldMissingOrNull", field: "ownerSub" },
       ]
     );
+    // LOST is a real racer winning the guarded write — a colleague, not an
+    // outage. (UNSUPPORTED falls through to the branch below, which decides
+    // from the row it actually read.)
     if (!guarded.ok && guarded.reason === "LOST") {
-      throw new Error(
+      return refusal(
         item.ownerSub
           ? `This case is already claimed by ${item.ownerEmail}. Ask them to release it, or an owner to reassign it.`
           : "Someone else claimed this case just now — refresh the queue."
@@ -1509,7 +1522,7 @@ export async function updateOwnedWork(args: {
       // UNSUPPORTED (no CAS wiring): the pre-checked plain write, with the
       // steal refusal enforced from the read above.
       if (item.ownerSub) {
-        throw new Error(
+        return refusal(
           `This case is already claimed by ${item.ownerEmail}. Ask them to release it, or an owner to reassign it.`
         );
       }
@@ -1561,12 +1574,14 @@ export async function updateOwnedWork(args: {
     // GL-18 R9: a routine employee can hand a claimed case back to the shared
     // queue (or an owner can release anyone's) — completing ordinary work
     // never depends on the original claimer or an OWNER close.
-    if (item.status !== "OPEN") throw new Error("Resolved work cannot be released");
+    if (item.status !== "OPEN") return refusal("Resolved work cannot be released");
     if (!item.ownerSub) {
       return { workItemId: item.id, status: "OPEN", ownerEmail: item.ownerEmail };
     }
     if (item.ownerSub !== args.actorSub && !args.actorIsOwner) {
-      throw new Error(
+      // Not a boundary being defended — the message names the colleague to ask,
+      // which is what you write for someone who arrived here reasonably.
+      return refusal(
         `Only ${item.ownerEmail} (or an owner) can release this case.`
       );
     }
@@ -1843,8 +1858,11 @@ async function prepareLeadQuote(customerId: string) {
   if (errors?.length || !lead || lead.status !== "LEAD") {
     throw new Error("Open lead not found.");
   }
+  // The lead row itself was read successfully — the `errors?.length` check
+  // above owns the failed-read case — so each of these is a fact about the
+  // lead that the office can go and fix, one screen away.
   if (lead.doNotContact || lead.lostReason) {
-    throw new Error("Reopen this lead before starting a quote.");
+    return refusal("Reopen this lead before starting a quote.");
   }
   const missing = [
     ["email", lead.email],
@@ -1857,13 +1875,13 @@ async function prepareLeadQuote(customerId: string) {
     .filter(([, value]) => !String(value ?? "").trim())
     .map(([label]) => label);
   if (missing.length) {
-    throw new Error(
+    return refusal(
       `Add the lead's ${missing.join(", ")} before building the quote.`
     );
   }
   const state = String(lead.serviceState).trim().toUpperCase();
   if (!new Set(["MA", "RI"]).has(state)) {
-    throw new Error("Online quoting is available only for MA and RI addresses.");
+    return refusal("Online quoting is available only for MA and RI addresses.");
   }
   const token = await ensureBookingLinkToken(client, {
     id: lead.id,

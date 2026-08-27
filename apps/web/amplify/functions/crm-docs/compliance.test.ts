@@ -212,6 +212,9 @@ const fakeDataClient = {
       listEmailLogByRelatedId: async ({ relatedId }: { relatedId: string }) => ({
         data: emailLogRows.filter((l) => l.relatedId === relatedId),
       }),
+      get: async ({ id }: { id: string }) => ({
+        data: emailLogRows.find((l) => l.id === id) ?? null,
+      }),
     },
   },
 };
@@ -1949,6 +1952,45 @@ describe("terminal visits are immutable — rebooking makes a new linked attempt
   });
 });
 
+describe("resending a stored message", () => {
+  it("refuses a row whose outcome nobody knows, rather than risking a second copy", async () => {
+    // GL-03: a provider call that never settled might have delivered. The
+    // office is told to check first — a real instruction, not a fault.
+    emailLogRows = [
+      { id: "log-1", deliveryStatus: "SENDING", bodyHtml: "<p>hi</p>" },
+    ];
+
+    await expectRefusal(
+      call("resendEmailLog", { emailLogId: "log-1" }, ["OWNER"]),
+      /outcome is unknown/i
+    );
+  });
+
+  it("refuses a row it cannot reproduce verbatim", async () => {
+    emailLogRows = [
+      {
+        id: "log-1",
+        deliveryStatus: "FAILED",
+        bodyHtml: "<p>hi</p>",
+        hasAttachments: true,
+      },
+    ];
+
+    await expectRefusal(
+      call("resendEmailLog", { emailLogId: "log-1" }, ["OWNER"]),
+      /can't be resent verbatim/i
+    );
+  });
+
+  it("still THROWS for a row it could not read — absent and unreadable look the same", async () => {
+    emailLogRows = [];
+
+    await expect(
+      call("resendEmailLog", { emailLogId: "log-1" }, ["OWNER"])
+    ).rejects.toThrow(/email record was not found/i);
+  });
+});
+
 describe("the technician's own screens refuse in words", () => {
   it("refuses a photo upload onto a finalized report", async () => {
     // saveServiceReportDraft and setReportPhotos already answered this in
@@ -2510,6 +2552,22 @@ describe("GL-11 — portal requests are durable cases, never untracked calls", (
         ["CUSTOMER", "cus-OTHER"]
       )
     ).rejects.toThrow(/account you manage/);
+  });
+
+  it("refuses a reschedule of a visit that is no longer live — in words, to the customer", async () => {
+    // This is the CUSTOMER's own screen, rendered before the visit completed.
+    // The sentence was already written for them; it should not also have been
+    // the crm-docs error alarm.
+    jobs[0].status = "COMPLETED";
+
+    await expectRefusal(
+      call(
+        "submitPortalRequest",
+        { customerId: "c1", kind: "RESCHEDULE", jobId: "j1" },
+        ["CUSTOMER", "cus-c1"]
+      ),
+      /can't be rescheduled/i
+    );
   });
 
   it("a reschedule must name the customer's OWN live visit", async () => {
