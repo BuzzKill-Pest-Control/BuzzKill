@@ -67,6 +67,7 @@ import {
   resumePlanCancellation,
 } from "../shared/planCancellation";
 import { resumeVisitChange, STOPS_PER_TECH } from "../shared/visitChange";
+import { refusal, type Refusal } from "../shared/refusal";
 import {
   dayEligibility,
   liveClaimsOn,
@@ -2268,7 +2269,9 @@ async function createOfficeJob(args: Args) {
     if (plan.seasonal && args.scheduledDate) {
       const monthKey = args.scheduledDate.slice(0, 7);
       if (!isServiceMonth(plan, monthKey)) {
-        throw new Error(
+        // The office picked a date; the plan says that month has no routine
+        // treatment. Both parties are working correctly.
+        return refusal(
           "This plan's treatments run April–October. Pick an in-season month — November–March has no routine treatment (the plan still bills monthly year-round)."
         );
       }
@@ -2285,12 +2288,19 @@ async function createOfficeJob(args: Args) {
         customerId,
       });
       if (!monthClaim.ok) {
-        throw new Error(
-          monthClaim.unavailable
-            ? "The seasonal-month ledger can't be verified right now — nothing was changed. Try again in a moment."
-            : monthClaim.status === "SATISFIED"
-              ? `This plan's ${monthKey} treatment already happened — a seasonal plan gets exactly one treatment per month. Pick the next month instead.`
-              : `This plan already has its ${monthKey} visit scheduled — a seasonal plan gets exactly one treatment per month. Pick a different month, or reschedule the existing visit.`
+        // The ledger being unverifiable is NOT one of the two business
+        // answers — nothing is known about the month, so it keeps throwing.
+        // The claim already draws this line; it just used to arrive at the
+        // same destination as the other two.
+        if (monthClaim.unavailable) {
+          throw new Error(
+            "The seasonal-month ledger can't be verified right now — nothing was changed. Try again in a moment."
+          );
+        }
+        return refusal(
+          monthClaim.status === "SATISFIED"
+            ? `This plan's ${monthKey} treatment already happened — a seasonal plan gets exactly one treatment per month. Pick the next month instead.`
+            : `This plan already has its ${monthKey} visit scheduled — a seasonal plan gets exactly one treatment per month. Pick a different month, or reschedule the existing visit.`
         );
       }
     }
@@ -2349,12 +2359,21 @@ async function createOfficeJob(args: Args) {
   return { jobId: created.id };
 }
 
-function assertJobCanBeScheduled(job: { status?: string | null }) {
+/**
+ * Why a visit cannot be moved, or null when it can.
+ *
+ * Returns rather than throws: every one of these is the office finding out
+ * that the day moved on — the technician finished the stop, or started it, or
+ * a no-access record already exists — from a board that was rendered before it
+ * happened. The Schedule screen even pre-checks the same statuses, so reaching
+ * here is precisely the stale-board case. None of it is crm-docs failing.
+ */
+function jobNotSchedulable(job: { status?: string | null }): Refusal | null {
   if (job.status === "COMPLETED") {
-    throw new Error("A completed job stays on the record and cannot be rescheduled");
+    return refusal("A completed job stays on the record and cannot be rescheduled");
   }
   if (job.status === "IN_PROGRESS") {
-    throw new Error("This job is in progress — call the technician instead of changing its route");
+    return refusal("This job is in progress — call the technician instead of changing its route");
   }
   // A no-access or canceled visit is a terminal record: its reason, time,
   // note, and door photo are evidence that the attempt happened. Reusing the
@@ -2366,10 +2385,11 @@ function assertJobCanBeScheduled(job: { status?: string | null }) {
     job.status === "PREP_MISSING" ||
     job.status === "CANCELED"
   ) {
-    throw new Error(
+    return refusal(
       "This visit reached a terminal outcome and cannot be reused — rebook it to create a new linked visit"
     );
   }
+  return null;
 }
 
 /**
@@ -2554,7 +2574,8 @@ async function updateJobSchedule(
   };
 
   if (operation === "ASSIGN") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     if (!args.technicianId || !args.routeId || !args.scheduledDate) {
       throw new Error("Assignment requires a technician, route, and service date");
     }
@@ -2577,7 +2598,9 @@ async function updateJobSchedule(
     });
     if (!technician) throw new Error(`Technician ${args.technicianId} not found`);
     if (!technician.active) {
-      throw new Error(
+      // A roster the board rendered before someone was deactivated. The office
+      // picks a different technician; nothing failed.
+      return refusal(
         `${technician.name ?? "This technician"} is inactive and cannot be assigned regulated work`
       );
     }
@@ -2594,13 +2617,27 @@ async function updateJobSchedule(
           );
         }
         if (facts.source === "LEGACY") {
-          // No records yet — the legacy check names the exact missing fact.
-          assertTechnicianCompliance(technician, {
-            requireActive: true,
-            workDate: args.scheduledDate,
-          });
+          // No records yet — the legacy check names the exact missing fact,
+          // and it is the SAME conversation as the refusal below (one office
+          // click, one technician, one lapsed or missing licence), so it gets
+          // the same answer. Safe to convert a throw wholesale here because
+          // shared/compliance.ts is a pure leaf: it does no I/O, so everything
+          // it raises is a named licence fact, never an infrastructure failure
+          // wearing a business message.
+          try {
+            assertTechnicianCompliance(technician, {
+              requireActive: true,
+              workDate: args.scheduledDate,
+            });
+          } catch (err) {
+            return refusal(err instanceof Error ? err.message : String(err));
+          }
         }
-        throw new Error(
+        // Safe as words because the branch above already split off
+        // source === "ERROR": GL-17 fails CLOSED, so a licence-records read
+        // that fell over is indistinguishable from a lapse at `current` alone,
+        // and reaching here means the records were actually read.
+        return refusal(
           `${technician.name ?? "This technician"} has no current applicator licence on record for ${args.scheduledDate} — record a current licence (or pick another technician) before assigning regulated work`
         );
       }
@@ -2610,10 +2647,24 @@ async function updateJobSchedule(
     // gets driven — never a fixed HQ constant. An unavailable base (PTO,
     // closure, weekend, or unverifiable availability facts) fails the
     // assignment closed.
-    const assignBase = await techBaseFor(technician.id, args.scheduledDate);
+    // Read through dayEligibility rather than techBaseFor, which collapses to
+    // `string | null` and so cannot say WHY the base is missing. It matters
+    // here for the first time: every read behind this fails CLOSED, so an
+    // unreadable closure calendar produces exactly the same null as a real day
+    // off, and "isn't available on that date" is a confident sentence about
+    // nothing during an outage — with no alarm, because a refusal returns
+    // cleanly. PTO/closure/weekend refuse; unverifiable throws.
+    const assignDay = await dayEligibility(args.scheduledDate);
+    const assignBase =
+      assignDay.techs.find((t) => t.id === technician.id)?.baseAddress ?? null;
     if (!assignBase) {
-      throw new Error(
-        `${technician.name ?? "This technician"} isn't available on ${args.scheduledDate} (PTO, closure, weekend, or unverifiable availability facts) — pick another technician or day.`
+      if (assignDay.unverifiable) {
+        throw new Error(
+          `${args.scheduledDate}'s availability facts could not be read, so ${technician.name ?? "this technician"}'s availability is unknown and nothing was assigned — try again in a moment. (${assignDay.reasons.join(" ")})`
+        );
+      }
+      return refusal(
+        `${technician.name ?? "This technician"} isn't available on ${args.scheduledDate} (PTO, closure, or weekend) — pick another technician or day.`
       );
     }
     const routeProof = await proveRoutable(
@@ -2850,7 +2901,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "UNASSIGN") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     // GL-04: unassigning ENDS the technician-day hold ASSIGN reserved.
     // The write clears the assignment and restamps pending-assignment pool
     // facts in the SAME update; the old hold is released from the pre-update
@@ -2902,7 +2954,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "REORDER") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     if (args.routeOrder == null || !args.otherJobId || args.otherRouteOrder == null) {
       throw new Error("Reordering requires both stops and their positions");
     }
@@ -2910,7 +2963,8 @@ async function updateJobSchedule(
     if (!other || !job.routeId || other.routeId !== job.routeId) {
       throw new Error("Stops can only be reordered on the same route");
     }
-    assertJobCanBeScheduled(other);
+    const otherNotSchedulable = jobNotSchedulable(other);
+    if (otherNotSchedulable) return otherNotSchedulable;
     const [first, second] = await Promise.all([
       client.models.Job.update({ id: job.id, routeOrder: args.routeOrder }),
       client.models.Job.update({ id: other.id, routeOrder: args.otherRouteOrder }),
@@ -2928,7 +2982,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "CANCEL") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     // The cancel WRITE comes first and clears the capacity stamps in the same
     // update; the releases below read the pre-update row. A retried cancel
     // re-reads a job with no stamps and releases nothing — exactly once. The
@@ -2979,7 +3034,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "RESCHEDULE") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     const date = args.scheduledDate || null;
     const dateChanged = date !== (job.scheduledDate ?? null);
 

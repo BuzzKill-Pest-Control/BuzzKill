@@ -42,6 +42,9 @@ let emailLogRows: Record<string, unknown>[] = [];
 let workItemCreateFails = false;
 
 const capacityFixture = capacityFixtureModels();
+/** Seasonal service plans and the one-treatment-per-month obligation ledger. */
+const plans = new Map<string, Record<string, unknown>>();
+const obligations = new Map<string, Record<string, unknown>>();
 
 const fakeDataClient = {
   models: {
@@ -98,6 +101,30 @@ const fakeDataClient = {
       get: async ({ id }: { id: string }) => ({
         data: routes.find((r) => r.id === id) ?? null,
       }),
+    },
+    ServicePlan: {
+      get: async ({ id }: { id: string }) => ({ data: plans.get(id) ?? null }),
+    },
+    TreatmentObligation: {
+      get: async ({ id }: { id: string }) => ({
+        data: obligations.get(id) ?? null,
+      }),
+      create: async (input: Record<string, unknown> & { id: string }) => {
+        if (obligations.has(input.id)) return { data: null };
+        obligations.set(input.id, { ...input });
+        return { data: obligations.get(input.id) };
+      },
+      update: async (patch: Record<string, unknown> & { id: string }) => {
+        const row = obligations.get(patch.id);
+        if (!row) return { data: null, errors: [{ message: "no row" }] };
+        Object.assign(row, patch);
+        return { data: { ...row } };
+      },
+      delete: async ({ id }: { id: string }) => {
+        const existed = obligations.get(id) ?? null;
+        obligations.delete(id);
+        return { data: existed };
+      },
     },
     ServiceReport: {
       get: async ({ id }: { id: string }) => ({
@@ -294,7 +321,7 @@ beforeEach(() => {
       CapacityDay: capacityFixture.maps.capacityDays,
       CapacityClaim: capacityFixture.maps.capacityClaims,
       TechDayStops: capacityFixture.maps.techDayStops,
-      TreatmentObligation: new Map(),
+      TreatmentObligation: obligations,
       // A live get-only view over the test's job array: guarded publishes
       // mutate the same row objects the fake models serve.
       Job: {
@@ -303,6 +330,8 @@ beforeEach(() => {
     })
   );
   finalizeClaims.clear();
+  plans.clear();
+  obligations.clear();
   packetEvents = [];
   emailLogRows = [];
   workItemCreateFails = false;
@@ -386,20 +415,109 @@ describe("regulated assignment", () => {
     technician.licenseNumber = null;
     routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
 
-    await expect(
-      call(
-        "updateJobSchedule",
-        {
-          jobId: "j1",
-          operation: "ASSIGN",
-          technicianId: "t1",
-          routeId: "r1",
-          routeOrder: 1,
-          scheduledDate: "2026-07-20",
-        },
-        ["OWNER"]
-      )
-    ).rejects.toThrow(/license number/i);
+    // The legacy licence path answers in words like the records path beside
+    // it: one office click, one technician, one missing licence fact.
+    const res = (await call(
+      "updateJobSchedule",
+      {
+        jobId: "j1",
+        operation: "ASSIGN",
+        technicianId: "t1",
+        routeId: "r1",
+        routeOrder: 1,
+        scheduledDate: "2026-07-20",
+      },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/license number/i);
+    expect(jobs[0].status).toBe("UNSCHEDULED");
+  });
+
+  it("refuses an inactive technician in words, not as an invocation error", async () => {
+    // The board renders a roster; someone gets deactivated; the office clicks.
+    // Nothing failed, and this used to page the owner.
+    jobs[0].status = "UNSCHEDULED";
+    technician.active = false;
+    routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
+
+    const res = (await call(
+      "updateJobSchedule",
+      {
+        jobId: "j1",
+        operation: "ASSIGN",
+        technicianId: "t1",
+        routeId: "r1",
+        routeOrder: 1,
+        scheduledDate: "2026-07-20",
+      },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/inactive/i);
+    expect(jobs[0].status).toBe("UNSCHEDULED");
+  });
+
+  it("refuses a day the technician has off — a fact about the day", async () => {
+    jobs[0].status = "UNSCHEDULED";
+    routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
+    capacityFixture.maps.closures.set("2026-07-20", {
+      id: "2026-07-20",
+      reason: "Independence Day observed",
+    });
+
+    const res = (await call(
+      "updateJobSchedule",
+      {
+        jobId: "j1",
+        operation: "ASSIGN",
+        technicianId: "t1",
+        routeId: "r1",
+        routeOrder: 1,
+        scheduledDate: "2026-07-20",
+      },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/isn't available/i);
+    expect(jobs[0].status).toBe("UNSCHEDULED");
+  });
+
+  it("but a day whose availability facts CANNOT BE READ still throws — 'not available' would be a sentence about nothing", async () => {
+    // Every read behind availability fails CLOSED, so an unreadable closure
+    // calendar produces exactly the same empty day as a real day off. As a
+    // refusal that would tell the office a licensed, working technician has
+    // the day off — cleanly, with nothing to alarm on.
+    jobs[0].status = "UNSCHEDULED";
+    routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
+    // Same object fakeDataClient.models holds (Object.assign copies the model
+    // references), but reached through the fixture, which is typed.
+    const closureModel = capacityFixture.models.CompanyClosure as {
+      get: unknown;
+    };
+    const realGet = closureModel.get;
+    closureModel.get = async () => {
+      throw new Error("Dynamo unavailable");
+    };
+
+    try {
+      await expect(
+        call(
+          "updateJobSchedule",
+          {
+            jobId: "j1",
+            operation: "ASSIGN",
+            technicianId: "t1",
+            routeId: "r1",
+            routeOrder: 1,
+            scheduledDate: "2026-07-20",
+          },
+          ["OWNER"]
+        )
+      ).rejects.toThrow(/could not be read/i);
+    } finally {
+      closureModel.get = realGet;
+    }
     expect(jobs[0].status).toBe("UNSCHEDULED");
   });
 
@@ -1682,14 +1800,16 @@ describe("terminal visits are immutable — rebooking makes a new linked attempt
     jobs = [noAccessJob()];
     routes = [{ id: "r1", technicianId: "t1", date: "2026-07-25" }];
 
-    await expect(
-      call(
-        "updateJobSchedule",
-        { jobId: "j1", operation: "ASSIGN", technicianId: "t1", routeId: "r1", routeOrder: 1, scheduledDate: "2026-07-25" },
-        ["OWNER"]
-      )
-    ).rejects.toThrow(/terminal record|rebook/i);
+    // In words: the Schedule board pre-checks the same statuses off the board
+    // it last rendered, so reaching this guard means the visit went terminal
+    // while that board sat open — a stale screen, not a crm-docs fault.
+    const res = (await call(
+      "updateJobSchedule",
+      { jobId: "j1", operation: "ASSIGN", technicianId: "t1", routeId: "r1", routeOrder: 1, scheduledDate: "2026-07-25" },
+      ["OWNER"]
+    )) as { refused?: string };
 
+    expect(res.refused).toMatch(/terminal record|rebook/i);
     // The terminal record survives completely.
     expect(jobs[0]).toMatchObject({
       status: "NO_ACCESS",
@@ -1703,9 +1823,13 @@ describe("terminal visits are immutable — rebooking makes a new linked attempt
   it("refuses to unassign a canceled visit — terminal records don't move", async () => {
     jobs = [{ id: "j1", customerId: "c1", type: "ONE_TIME", serviceType: "General pest", status: "CANCELED", routeId: "r1", technicianId: "t1" }];
 
-    await expect(
-      call("updateJobSchedule", { jobId: "j1", operation: "UNASSIGN" }, ["OWNER"])
-    ).rejects.toThrow(/terminal record|rebook/i);
+    const res = (await call(
+      "updateJobSchedule",
+      { jobId: "j1", operation: "UNASSIGN" },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/terminal record|rebook/i);
     expect(jobs[0].status).toBe("CANCELED");
   });
 
@@ -2075,6 +2199,108 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
       )
     ).rejects.toThrow(/doesn't match a catalog service/);
     expect(jobs).toHaveLength(before);
+  });
+
+  it("refuses an out-of-season month for a seasonal plan, in words", async () => {
+    // GL-17: the seasonal promise is a promise, and the office reads a
+    // calendar. Picking December for an April–October plan is a person and a
+    // rule disagreeing, not crm-docs failing.
+    plans.set("p_seasonal", {
+      id: "p_seasonal",
+      customerId: "c1",
+      seasonal: true,
+      planName: "Mosquito & tick",
+    });
+    const before = jobs.length;
+
+    const res = (await call(
+      "createOfficeJob",
+      {
+        customerId: "c1",
+        serviceType: "General pest control",
+        serviceCode: "GENERAL_PEST",
+        servicePlanId: "p_seasonal",
+        propertyClass: "RESIDENTIAL",
+        scheduledDate: "2026-12-10",
+      },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/April–October/);
+    expect(jobs).toHaveLength(before);
+  });
+
+  it("refuses a month that already holds this plan's visit", async () => {
+    plans.set("p_seasonal", {
+      id: "p_seasonal",
+      customerId: "c1",
+      seasonal: true,
+      planName: "Mosquito & tick",
+    });
+    obligations.set("p_seasonal#2026-07", {
+      id: "p_seasonal#2026-07",
+      servicePlanId: "p_seasonal",
+      monthKey: "2026-07",
+      status: "SCHEDULED",
+      jobId: "some-other-job",
+    });
+    const before = jobs.length;
+
+    const res = (await call(
+      "createOfficeJob",
+      {
+        customerId: "c1",
+        serviceType: "General pest control",
+        serviceCode: "GENERAL_PEST",
+        servicePlanId: "p_seasonal",
+        propertyClass: "RESIDENTIAL",
+        scheduledDate: "2026-07-22",
+      },
+      ["OWNER"]
+    )) as { refused?: string };
+
+    expect(res.refused).toMatch(/exactly one treatment per month/);
+    expect(jobs).toHaveLength(before);
+  });
+
+  it("but an unverifiable month ledger still THROWS — the mutex is the whole promise", async () => {
+    // Without a working CAS path the DUE → SCHEDULED transition is a
+    // read-then-write race two schedulers both pass, so the claim refuses
+    // with `unavailable`. That is not one of the two business answers: as a
+    // refusal it would read as "this month is taken" and quietly hide the
+    // fact that exclusivity was never actually enforced.
+    plans.set("p_seasonal", {
+      id: "p_seasonal",
+      customerId: "c1",
+      seasonal: true,
+      planName: "Mosquito & tick",
+    });
+    obligations.set("p_seasonal#2026-07", {
+      id: "p_seasonal#2026-07",
+      servicePlanId: "p_seasonal",
+      monthKey: "2026-07",
+      status: "DUE",
+      jobId: null,
+    });
+    _setLockStoreForTests({
+      conditionalUpdate: async () => ({ ok: false, reason: "UNSUPPORTED" }),
+      conditionalDelete: async () => "UNSUPPORTED",
+    });
+
+    await expect(
+      call(
+        "createOfficeJob",
+        {
+          customerId: "c1",
+          serviceType: "General pest control",
+          serviceCode: "GENERAL_PEST",
+          servicePlanId: "p_seasonal",
+          propertyClass: "RESIDENTIAL",
+          scheduledDate: "2026-07-22",
+        },
+        ["OWNER"]
+      )
+    ).rejects.toThrow(/can't be verified right now/i);
   });
 
   it("\"Something else…\" opens an owned catalog decision and creates NO job", async () => {

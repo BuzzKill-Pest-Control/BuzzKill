@@ -2340,7 +2340,10 @@ export default function CustomerDetail() {
         <JobForm
           plans={plans}
           onSubmit={async (v) => {
-            const result = opResult<{
+            // A refused seasonal month has neither catalogDecisionOpened nor a
+            // job behind it, so it would fall through both branches below and
+            // the sheet would close on a visit that was never created.
+            const result = opResultUnlessRefused<{
               catalogDecisionOpened?: boolean;
               message?: string;
             }>(

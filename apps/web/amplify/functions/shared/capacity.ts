@@ -150,6 +150,19 @@ export type DayEligibility = {
   /** Empty ⇒ the date sells nothing; `reasons` says exactly why. */
   techs: EligibleTech[];
   reasons: string[];
+  /**
+   * True when at least one of those reasons is "a read did not succeed" rather
+   * than a fact about the day. Every read here fails CLOSED — never sell
+   * capacity blind — which is right for selling, but it means an empty `techs`
+   * carries two very different meanings, and `reasons` states them only in
+   * prose. A caller that wants to TELL SOMEONE a technician is unavailable
+   * needs to know which it is: said out loud during an outage, "not available
+   * that day" is a confident sentence about nothing.
+   *
+   * Set conservatively — one unreadable technician marks the whole day — so
+   * the mistake it makes is being loud when it could have been quiet.
+   */
+  unverifiable?: true;
 };
 
 type TechRow = {
@@ -236,8 +249,12 @@ export async function dayEligibilityMap(
   dates: string[]
 ): Promise<Map<string, DayEligibility>> {
   const out = new Map<string, DayEligibility>();
+  // Every closedAll case is a read that did not succeed, so the whole window is
+  // unverifiable rather than genuinely empty.
   const closedAll = (why: string) => {
-    for (const date of dates) out.set(date, { techs: [], reasons: [why] });
+    for (const date of dates) {
+      out.set(date, { techs: [], reasons: [why], unverifiable: true });
+    }
     return out;
   };
   if (!(await capacityModelsReady())) {
@@ -292,6 +309,7 @@ export async function dayEligibilityMap(
           reasons: [
             "The closure calendar could not be read — selling capacity blind is not allowed.",
           ],
+          unverifiable: true,
         });
         continue;
       }
@@ -338,12 +356,14 @@ export async function dayEligibilityMap(
           reasons: [
             "The availability exceptions could not be read — selling capacity blind is not allowed.",
           ],
+          unverifiable: true,
         });
         continue;
       }
     }
     const reasons: string[] = [];
     const eligible: EligibleTech[] = [];
+    let unverifiable = false;
     for (const t of active) {
       if (onPto.has(t.id)) {
         reasons.push(`${t.name ?? t.id} is on PTO.`);
@@ -354,6 +374,10 @@ export async function dayEligibilityMap(
         reasons.push(
           `${t.name ?? t.id}'s licence records could not be read (fail closed).`
         );
+        // One technician's unreadable records mark the whole day. It is the
+        // conservative direction: a caller about to say "unavailable" out loud
+        // will say "could not check" instead, which is the true statement.
+        unverifiable = true;
         continue;
       }
       if (!licenseFactsFromRecords(records, t, date).current) {
@@ -369,7 +393,11 @@ export async function dayEligibilityMap(
     if (eligible.length === 0) {
       reasons.push("No eligible technician — the day sells nothing.");
     }
-    out.set(date, { techs: eligible, reasons });
+    out.set(date, {
+      techs: eligible,
+      reasons,
+      ...(unverifiable ? { unverifiable: true as const } : {}),
+    });
   }
   return out;
 }
