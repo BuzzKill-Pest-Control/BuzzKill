@@ -115,54 +115,49 @@ import { normalizePhone } from "./leadIdentity";
 import {
   entryForLabel,
   planNameFor,
-  SERVICE_CATALOG_VERSION,
-} from "./serviceCatalog";
+  SERVICE_CATALOG_VERSION, catalogEntry } from "./serviceCatalog";
 import { formatMoney, formatMonthly } from "./money";
+import { COMPANY, SITE_HOSTNAME, SITE_ORIGIN, companyAddressLines } from "./company";
+import { documentLicenseLine } from "./credentials";
+import { GENERAL_PLAN_COVERED_PESTS, coveredPestsFor } from "./coverage";
+import { CALLBACK_POLICY_TEXT } from "./callbackPolicy";
 const s3 = new S3Client();
 
 // Derived from the single shared constant (R17) — the policy in the signed
-// agreement must be the rule /cancel enforces, not a copy that can drift.
-const CANCEL_POLICY_TEXT = `CANCELLATION POLICY. Cancel more than ${CANCEL_FULL_REFUND_DAYS} days before your appointment for a full refund. Cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the appointment are not refundable.`;
+// agreement must be the rule /cancel enforces, not a copy that can drift, and
+// it is worded exactly as the checkout terms the customer accepted ("whole
+// days", bookingTerms.ts).
+const CANCEL_POLICY_TEXT = `CANCELLATION POLICY. Cancel more than ${CANCEL_FULL_REFUND_DAYS} whole days before your appointment for a full refund. Cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the appointment are not refundable.`;
 
 // Company identity printed on the service-agreement masthead. Sourced from the
-// website (Footer + Licensed & Insured page). The license shown is BuzzKill's
-// Massachusetts commercial pesticide certification — the state these bookings
-// serve.
-const AGREEMENT_COMPANY = {
-  name: "BuzzKill Pest Control",
-  addressLines: ["420 Lakeside Ave, Suite 104", "Marlborough, MA 01752"],
-  phone: "(508) 258-9294",
-  email: "info@pestbuzzkill.com",
-  website: "pestbuzzkill.com",
-  license: "CC-0060592",
-};
+// shared company record and the Licensed & Insured page: the public name, the
+// contracting entity beneath it, and the published credentials for both states
+// these bookings serve (MA commercial certification, RI company registration).
+/** Masthead identity for the agreement: the credential line depends on the
+ *  state the work is in (Massachusetts prints the Category 41 certification;
+ *  Rhode Island adds the company registration). */
+function agreementCompanyFor(serviceState?: string | null) {
+  return {
+    name: COMPANY.name,
+    legalName: COMPANY.legalName,
+    addressLines: [...companyAddressLines()],
+    phone: COMPANY.phone.pretty,
+    email: COMPANY.email.address,
+    website: SITE_HOSTNAME,
+    license: documentLicenseLine({ state: serviceState }),
+  };
+}
 
-// The pests the plan covers, drawn as the covered grid on the agreement.
-// Excludes wood-destroying organisms (termites, carpenter ants) and bed bugs
-// (BuzzKill does not service them) — never add either here.
-const AGREEMENT_COVERED_PESTS = [
-  "American Roach",
-  "Argentine Ants",
-  "Box Elders",
-  "Centipedes",
-  "Clover Mites",
-  "Crickets",
-  "Earwigs",
-  "Hornets",
-  "Mice / Rats",
-  "Millipedes",
-  "Odorous Ants",
-  "Oriental Roaches",
-  "Silverfish",
-  "Sow Bugs",
-  "Spiders",
-  "Wasps",
-];
+// Plan coverage (the agreement grid) lives in ./coverage.ts, keyed by the
+// catalog service id; re-exported here for existing importers.
+export { GENERAL_PLAN_COVERED_PESTS, coveredPestsFor };
+
 
 // "How year-round protection works" note, shown above pricing on recurring
-// plans. BuzzKill's phone number is the retreat contact.
-const AGREEMENT_PROTECTION_NOTE =
-  "The first treatment around your home is what is called an 'initial flush out'. This special treatment attempts to gain control over existing pest populations. Your first regular treatment should follow within 30-45 days of the initial treatment to help break up egg cycles. Insects are immune to treatments while in their egg shells and our products must be active to catch pests as they hatch.\n\nInitially you may see a slight increase in pest activity as pest populations are disrupted. Within a few weeks you should see this activity drastically decline as our products take effect. Over time, these pest levels will continually decrease as regular services are performed. Regular treatments are critical in maintaining protective barriers and preventing infestations from reoccurring. If you see more than the occasional pest around your home, please call (508) 258-9294 at any time for a complimentary retreat!";
+// plans. It promises only what the plan delivers: the cadence is the plan's
+// own, results are hedged, and the re-treat is the covered callback (portal
+// or phone) on an active plan. The phone number comes from the company record.
+const AGREEMENT_PROTECTION_NOTE = `The first treatment around your property is what we call an initial flush out. This special treatment attempts to gain control over existing pest populations. Your first regular treatment follows on your plan's schedule to help break up egg cycles. Insect eggs are largely protected from treatments, so our products need to stay active to catch pests as they hatch.\n\nInitially you may see a slight increase in pest activity as pest populations are disrupted. Activity typically declines over the following weeks as the products take effect, and regular service helps keep pest pressure down over time. Results vary with conditions such as sanitation, weather and construction. Regular treatments help maintain the protective barrier and reduce the chance of pests returning. ${CALLBACK_POLICY_TEXT} Request one from your customer portal or by calling ${COMPANY.phone.pretty}.`;
 
 const MONTH_ABBR = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -791,6 +786,8 @@ type BookingRecord = {
   phone?: string | null;
   street?: string | null;
   city?: string | null;
+  /** Catalog service id stored at quote time (decides coverage and documents). */
+  service?: string | null;
   state?: string | null;
   zip?: string | null;
   quoteJson?: unknown;
@@ -802,6 +799,11 @@ type BookingRecord = {
   leadCustomerId?: string | null;
   stripeCustomerId?: string | null;
   stripePaymentIntentId?: string | null;
+  /** R17: the BOOKING_TERMS_VERSION the customer ticked at /book, named on
+   *  the agreement's acceptance line. */
+  tcVersion?: string | null;
+  /** The exact terms text accepted at /book, stored with tcVersion. */
+  tcText?: string | null;
   // Progress checkpoints written as finalization proceeds, so a resumed run
   // reuses the records a prior attempt already created instead of re-deriving
   // (and possibly duplicating) them. customerId is the load-bearing one: a
@@ -1269,7 +1271,9 @@ async function finalizeClaimed(
   // GL-01: the catalog entry this sale means — recorded immutably (id +
   // catalog version) on the plan and job so later catalog edits never
   // re-define old work. The label resolver covers every historical string.
-  const catalogService = entryForLabel(serviceLabel);
+  // The stored catalog id decides the service; the label is only a fallback for
+  // rows written before the id was recorded.
+  const catalogService = (booking.service ? catalogEntry(booking.service) : null) ?? entryForLabel(serviceLabel);
 
   // 1. Customer (ACTIVE — they've paid). A lead already in the CRM with this
   // email (Thumbtack paste, funnel CONTACT) CONVERTS instead of duplicating:
@@ -1863,11 +1867,11 @@ async function finalizeClaimed(
   // 4. T&C acceptance becomes the signed agreement + PDF on file.
   const signedAtIso = new Date().toISOString();
   const bodyText = [
-    `SERVICE AGREEMENT. BuzzKill Pest Control will provide: ${serviceLabel} at ${[booking.street, booking.city, booking.state, booking.zip].filter(Boolean).join(", ")} ${booking.selectedDate ? `on ${booking.selectedDate}` : `with the first treatment in ${firstTreatmentMonthLabel()}; BuzzKill will contact the customer to agree the exact day`}.`,
+    `SERVICE AGREEMENT. ${COMPANY.legalName} ("${COMPANY.name}") will provide: ${serviceLabel} at ${[booking.street, booking.city, booking.state, booking.zip].filter(Boolean).join(", ")} ${booking.selectedDate ? `on ${booking.selectedDate}` : `with the first treatment in ${firstTreatmentMonthLabel()}; BuzzKill will contact the customer to agree the exact day`}.`,
     booking.recurring && stored.recurringOffer
       ? booking.selectedDate
-        ? `RECURRING PLAN. After the initial visit, service continues ${stored.recurringOffer.frequency.toLowerCase()} at ${formatMonthly(stored.recurringOffer.monthlyCents)}nth, billed automatically. Cancel anytime.`
-        : `RECURRING PLAN. Billing starts today at ${formatMonthly(stored.recurringOffer.monthlyCents)}nth, billed monthly year-round. Treatments run April through October (one per month); the first treatment will be scheduled for ${firstTreatmentMonthLabel()}. Cancel anytime.`
+        ? `RECURRING PLAN. After the initial visit, service continues ${stored.recurringOffer.frequency.toLowerCase()} at ${formatMoney(stored.recurringOffer.monthlyCents)}/month, billed automatically once the plan starts after the first completed visit. There is no minimum term; the plan may be canceled at any time.`
+        : `RECURRING PLAN. Billing starts today at ${formatMoney(stored.recurringOffer.monthlyCents)}/month, billed monthly year-round. Treatments run April through October (one per month); the first treatment will be scheduled for ${firstTreatmentMonthLabel()}. There is no minimum term; the plan may be canceled at any time.`
       : null,
     invoiceMode
       ? `PAYMENT. ${formatMoney(booking.amountCents ?? 0)} invoiced at booking on ${invoiceMode.terms.replace(/_/g, " ").toLowerCase()} terms, due ${invoiceMode.dueDate}. An invoice with payment instructions is emailed separately.`
@@ -1875,7 +1879,12 @@ async function finalizeClaimed(
         ? `PAYMENT. ${formatMoney(booking.amountCents ?? 0)} authorized by bank debit (ACH) at booking; the debit may take several business days to settle. If it does not settle before the visit, the visit is canceled and the customer notified; if it fails after service, the amount is an outstanding balance.`
         : `PAYMENT. ${formatMoney(booking.amountCents ?? 0)} paid online at booking.`,
     CANCEL_POLICY_TEXT,
-    "ACCEPTANCE. The customer accepted these terms and the cancellation policy via checkbox at online checkout; that acceptance is recorded as the electronic signature below.",
+    // What the customer actually accepted at /book is the per-offer terms text via
+    // the one checkbox — say exactly that, and no more.
+    `ACCEPTANCE. At online checkout the customer ticked "I have read and accept the booking & cancellation terms."${booking.tcVersion ? ` (booking terms version ${booking.tcVersion})` : ""}. That acceptance is recorded below.`,
+    // The exact terms the customer read, stored on the booking at acceptance,
+    // so this agreement quotes them verbatim.
+    booking.tcText ? `ACCEPTED TERMS (version ${booking.tcVersion ?? "unknown"}).\n${booking.tcText}` : null,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1886,7 +1895,8 @@ async function finalizeClaimed(
   const amountToday = booking.amountCents ?? 0;
   const offer = booking.recurring ? stored.recurringOffer ?? null : null;
 
-  // A 12-month subscription calendar (recurring plans only): the first cell is
+  // A twelve-cell price calendar (recurring plans only), a preview of the next
+  // year of billing and not a commitment: the first cell is
   // what was charged today, the rest the monthly plan price.
   const scheduleStart = new Date();
   const scheduleMonths = offer
@@ -1907,29 +1917,40 @@ async function finalizeClaimed(
       })
     : null;
 
+  // The authorization is a record of what the customer accepted at online
+  // checkout, written in the third person (nobody signed this sentence) and
+  // naming the contracting entity. It states only the checkout terms: today's
+  // charge or invoice, and the plan's monthly amount on the plan's own start
+  // rule (RECURRING PLAN above) until the plan is canceled — never extra
+  // services or a written-revocation requirement the checkout never showed.
   const paymentAuthText = invoiceMode
     ? offer
-      ? `BuzzKill Pest Control will invoice me ${formatMoney(amountToday)} at booking (${invoiceMode.terms.replace(/_/g, " ").toLowerCase()}, due ${invoiceMode.dueDate}), and bill ${formatMoney(offer.monthlyCents)} per month for my recurring plan and any additional services I approve. This authorization stays in effect until I cancel my plan or revoke it in writing. Please retain a copy for your records.`
-      : `BuzzKill Pest Control will invoice me ${formatMoney(amountToday)} for the service booked (${invoiceMode.terms.replace(/_/g, " ").toLowerCase()}, due ${invoiceMode.dueDate}). Please retain a copy for your records.`
+      ? `At online checkout the customer chose to be invoiced. ${COMPANY.legalName} will invoice ${formatMoney(amountToday)} at booking (${invoiceMode.terms.replace(/_/g, " ").toLowerCase()}, due ${invoiceMode.dueDate}) and, once the plan starts as described under RECURRING PLAN above, will bill ${formatMoney(offer.monthlyCents)} per month for the recurring plan until the plan is canceled. Please retain a copy for your records.`
+      : `At online checkout the customer chose to be invoiced. ${COMPANY.legalName} will invoice ${formatMoney(amountToday)} for the service booked (${invoiceMode.terms.replace(/_/g, " ").toLowerCase()}, due ${invoiceMode.dueDate}). Please retain a copy for your records.`
     : offer
-      ? `I authorize BuzzKill Pest Control to charge the payment method on file ${formatMoney(amountToday)} today at booking${pending ? " by bank debit (ACH)" : ""}, and to automatically charge ${formatMoney(offer.monthlyCents)} per month for my recurring plan and any additional services I approve. This authorization stays in effect until I cancel my plan or revoke it in writing. Please retain a copy for your records.`
-      : `I authorize BuzzKill Pest Control to charge the payment method on file ${formatMoney(amountToday)} for the service booked${pending ? " by bank debit (ACH)" : ""}. Please retain a copy for your records.`;
+      ? `At online checkout the customer authorized ${COMPANY.legalName} to charge the payment method on file ${formatMoney(amountToday)} today${pending ? " by bank debit (ACH)" : ""} and, once the plan starts as described under RECURRING PLAN above, ${formatMoney(offer.monthlyCents)} per month for the recurring plan until the plan is canceled. Please retain a copy for your records.`
+      : `At online checkout the customer authorized ${COMPANY.legalName} to charge the payment method on file ${formatMoney(amountToday)} for the service booked${pending ? " by bank debit (ACH)" : ""}. Please retain a copy for your records.`;
 
   const pdf = await renderAgreementPdf({
     agreementId: booking.id,
     title: "BuzzKill Service Agreement — Online Booking",
     bodyText,
-    company: AGREEMENT_COMPANY,
+    company: agreementCompanyFor(booking.state),
+    serviceState: booking.state,
     customerName: booking.name,
     customerEmail: booking.email,
     customerPhone: booking.phone ?? undefined,
     customerAddress: [booking.street, booking.city, booking.state, booking.zip]
       .filter(Boolean)
       .join(", "),
-    coveredPests: AGREEMENT_COVERED_PESTS,
+    // The covered grid is a plan promise, read from the catalog service sold:
+    // one-time jobs get no grid, the mosquito plan lists mosquitoes only, the
+    // mosquito-and-tick plan mosquitoes and ticks only, general plans the
+    // common lineup.
+    coveredPests: coveredPestsFor(catalogService?.id, Boolean(offer)),
     protectionNote: offer ? AGREEMENT_PROTECTION_NOTE : undefined,
     schedule: scheduleMonths
-      ? { title: "Monthly Pest Control Service Subscription", months: scheduleMonths }
+      ? { title: "Monthly Pest Control Service Subscription (cancel at any time; next 12 months shown)", months: scheduleMonths }
       : undefined,
     initial: {
       title: invoiceMode
@@ -1939,7 +1960,6 @@ async function finalizeClaimed(
           : "Initial Service",
       rows: [
         { label: "Service Charge", amountCents: amountToday },
-        { label: "Tax (0%)", amountCents: 0, muted: true },
         {
           label: invoiceMode ? "Invoiced" : offer ? "Charged Today" : "Total",
           amountCents: amountToday,
@@ -1952,13 +1972,13 @@ async function finalizeClaimed(
           title: "Recurring Service",
           rows: [
             { label: "Monthly Service", amountCents: offer.monthlyCents },
-            { label: "Tax (0%)", amountCents: 0, muted: true },
             { label: "Recurring Total", amountCents: offer.monthlyCents, total: true },
           ],
         }
       : undefined,
     paymentAuthText,
-    initialTermMonths: offer ? 12 : undefined,
+    // No initial term: every plan sold online may be canceled at any time, and
+    // the agreement must never print a commitment the checkout never showed.
     signerName: booking.name,
     signerEmail: booking.email,
     signatureDataUrl: null,
@@ -2246,7 +2266,7 @@ async function deliverBookingComms(
   // the common redelivery of a fully-finalized booking.
   if (booking.confirmationSentAt && booking.officeAlertSentAt) return;
 
-  const marketingUrl = process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com";
+  const marketingUrl = process.env.MARKETING_URL ?? SITE_ORIGIN;
   const customerId = booking.customerId ?? undefined;
 
   let serviceLabel: string;
@@ -2321,7 +2341,7 @@ async function deliverBookingComms(
           booking.selectedDate ? "Your visit is booked" : "Your plan is active",
           `<p>Hi ${booking.name},</p>
        <p><strong>${serviceLabel}</strong><br/>
-       ${booking.selectedDate ? `${booking.selectedDate}` : `First treatment in ${firstTreatmentMonthLabel()} — we'll contact you to confirm the exact day`}<br/>
+       ${booking.selectedDate ? `${booking.selectedDate}` : `First treatment in ${firstTreatmentMonthLabel()}. We'll contact you to confirm the exact day`}<br/>
        ${[booking.street, booking.city, booking.state].filter(Boolean).join(", ")}</p>
        <p>${
          invoiced
@@ -2329,14 +2349,14 @@ async function deliverBookingComms(
                booking.recurring && recurringOffer
                  ? booking.selectedDate
                    ? `, and your ${recurringOffer.frequency.toLowerCase()} plan (${formatMonthly(recurringOffer.monthlyCents)}) starts after this first visit`
-                   : ` — that's your first month. Your plan bills ${formatMonthly(recurringOffer.monthlyCents)} year-round, with treatments April through October`
+                   : `. That's your first month. Your plan bills ${formatMonthly(recurringOffer.monthlyCents)} year-round, with treatments April through October`
                  : ""
              }`
            : `Payment of <strong>${formatMoney(booking.amountCents ?? 0)}</strong> is confirmed${
                booking.recurring && recurringOffer
                  ? booking.selectedDate
                    ? `, and your ${recurringOffer.frequency.toLowerCase()} plan (${formatMonthly(recurringOffer.monthlyCents)}) starts after this first visit`
-                   : ` — that's your first month. Your plan bills ${formatMonthly(recurringOffer.monthlyCents)} year-round, with treatments April through October`
+                   : `. That's your first month. Your plan bills ${formatMonthly(recurringOffer.monthlyCents)} year-round, with treatments April through October`
                  : ""
              }`
        }.${pdfKey && pdf ? " Your service agreement is attached." : ""}</p>
@@ -2346,7 +2366,7 @@ async function deliverBookingComms(
        <p>Your customer portal sign-in link is on its way in a separate email — your visits, service reports, and receipts live there.</p>`
            : ""
        }
-       <p style="color:#666;font-size:13px;">Need to cancel? Use this link: ${marketingUrl}/cancel?token=${booking.cancelToken} — more than ${CANCEL_FULL_REFUND_DAYS} days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable.</p>`
+       <p style="color:#666;font-size:13px;">Need to cancel? Use this link: ${marketingUrl}/cancel?token=${booking.cancelToken}. More than ${CANCEL_FULL_REFUND_DAYS} whole days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable.</p>`
         ),
       });
     } catch (err) {
@@ -2497,7 +2517,7 @@ async function deliverPendingComms(
 ): Promise<void> {
   if (booking.pendingConfirmationSentAt && booking.officeAlertSentAt) return;
 
-  const marketingUrl = process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com";
+  const marketingUrl = process.env.MARKETING_URL ?? SITE_ORIGIN;
   const customerId = booking.customerId ?? undefined;
 
   let serviceLabel: string;
@@ -2558,17 +2578,17 @@ async function deliverPendingComms(
             "Your visit is scheduled — payment processing",
             `<p>Hi ${booking.name},</p>
        <p><strong>${serviceLabel}</strong><br/>
-       ${booking.selectedDate ? `${booking.selectedDate}` : `First treatment in ${firstTreatmentMonthLabel()} — we'll contact you to confirm the exact day`}<br/>
+       ${booking.selectedDate ? `${booking.selectedDate}` : `First treatment in ${firstTreatmentMonthLabel()}. We'll contact you to confirm the exact day`}<br/>
        ${[booking.street, booking.city, booking.state].filter(Boolean).join(", ")}</p>
-       <p>Your payment of <strong>${formatMoney(booking.amountCents ?? 0)}</strong> by ${methodLabel ?? "bank transfer"} is <strong>still processing</strong> — a bank debit can take a few business days${booking.processingExpectedBy ? ` (expected by ${booking.processingExpectedBy})` : ""}. ${booking.selectedDate ? "Your visit is scheduled" : "Your enrollment is locked in"} and <strong>you don't need to do anything</strong>. Please don't pay again.</p>
+       <p>Your payment of <strong>${formatMoney(booking.amountCents ?? 0)}</strong> by ${methodLabel ?? "bank transfer"} is <strong>still processing</strong>. A bank debit can take a few business days${booking.processingExpectedBy ? ` (expected by ${booking.processingExpectedBy})` : ""}. ${booking.selectedDate ? "Your visit is scheduled" : "Your enrollment is locked in"} and <strong>you don't need to do anything</strong>. Please don't pay again.</p>
        <p>We'll email you the moment the payment clears${
          booking.recurring && recurringOffer
            ? booking.selectedDate
              ? `, and your ${recurringOffer.frequency.toLowerCase()} plan (${formatMonthly(recurringOffer.monthlyCents)}) starts after this first visit`
              : `, and your plan bills ${formatMonthly(recurringOffer.monthlyCents)} year-round with treatments April through October`
            : ""
-       }. If the payment doesn't go through, we'll let you know right away with what to do next.${pdfKey && pdf ? " Your service agreement is attached." : ""}</p>
-       <p style="color:#666;font-size:13px;">Need to cancel? Use this link: ${marketingUrl}/cancel?token=${booking.cancelToken} — more than ${CANCEL_FULL_REFUND_DAYS} days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable.</p>`
+       }. If the payment doesn't go through, we'll email you what to do next.${pdfKey && pdf ? " Your service agreement is attached." : ""}</p>
+       <p style="color:#666;font-size:13px;">Need to cancel? Use this link: ${marketingUrl}/cancel?token=${booking.cancelToken}. More than ${CANCEL_FULL_REFUND_DAYS} whole days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable.</p>`
           ),
         });
       } catch (err) {

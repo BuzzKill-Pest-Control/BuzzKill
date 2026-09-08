@@ -222,6 +222,9 @@ vi.mock("../shared/marketRate", async (importOriginal) => ({
 const { handler, replyUsesOnlyAllowedAmounts, templateReply } = await import(
   "./handler"
 );
+// The rollback read memoizes for 5s inside the container; a test that sets one
+// has to make it visible without waiting the cache out.
+const { _resetRollbackMemoForTests } = await import("../shared/marketRate");
 
 const FUNNEL = "https://staging.d26qpsjewk0bee.amplifyapp.com/quote";
 
@@ -258,6 +261,10 @@ const baseExtraction = {
 
 beforeEach(() => {
   controlRows.clear();
+  // Clearing the row is not enough: readPricingRollback memoizes for 5s, which
+  // is forever in test time, so a rollback set by one test would still be in
+  // force for the next.
+  _resetRollbackMemoForTests();
   marketRows.length = 0;
   coverageRows.clear();
   lambdaInvokes.length = 0;
@@ -974,11 +981,43 @@ describe("explicit staff market research — exactly one existing rate", () => {
   it("refuses to research over an office-pinned rate", async () => {
     marketRows[0].pinned = true;
 
-    await expect(
-      request({ rateKey, reasonCode: "MARGIN_REVIEW" })
-    ).rejects.toThrow(/Unpin the office rate/i);
+    // As DATA. A pinned rate is a decision the office made and can undo in one
+    // click; thrown, this told CloudWatch that crm-pricing had failed.
+    const res = await request({ rateKey, reasonCode: "MARGIN_REVIEW" });
+
+    expect(String(res.refused)).toMatch(/Unpin the office rate/i);
     expect(coverageRows.size).toBe(0);
     expect(lambdaInvokes).toHaveLength(0);
+  });
+
+  it("refuses while the catalog is rolled back, and spends no research", async () => {
+    controlRows.set("catalog-rollback", {
+      id: "catalog-rollback",
+      rollbackVersionId: "cv-good",
+      rollbackReason: "BAD_PROMPT_RESULT — tripled HOA rates",
+    });
+    versionRows.set("cv-good", {
+      id: "cv-good",
+      manifestJson: JSON.stringify({ [rateKey]: "mr-live" }),
+    });
+    _resetRollbackMemoForTests();
+
+    const res = await request({ rateKey, reasonCode: "MARGIN_REVIEW" });
+
+    expect(String(res.refused)).toMatch(/clear the rollback first/i);
+    expect(coverageRows.size).toBe(0);
+    expect(lambdaInvokes).toHaveLength(0);
+  });
+
+  it("a rate that is not serving still THROWS — that is also what a failed read looks like", async () => {
+    // The rows are paged with pageErrors: "ignore", so a dropped page can make
+    // a live rate look absent. "Not serving" therefore cannot be handed to the
+    // office as a fact; it stays an error, where the alarm can see it.
+    marketRows.length = 0;
+
+    await expect(
+      request({ rateKey, reasonCode: "MARGIN_REVIEW" })
+    ).rejects.toThrow(/not currently serving/i);
   });
 
   it("requires a controlled business reason and an explanation for OTHER", async () => {

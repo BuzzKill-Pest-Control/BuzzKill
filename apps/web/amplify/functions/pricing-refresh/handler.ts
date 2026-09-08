@@ -1,4 +1,5 @@
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
+import { SITE_ORIGIN } from "../shared/company";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { dataClient } from "../shared/dataClient";
 import { listAll } from "../shared/pagination";
@@ -308,6 +309,8 @@ type ReadyBooking = {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  /** The catalog service id the request was quoted for. */
+  service?: string | null;
 };
 
 const lambdaClient = new LambdaClient({});
@@ -449,7 +452,10 @@ async function buildRateReadyQuotePdf(
       customerEmail: priced.email ?? null,
       customerPhone: priced.phone ?? null,
       serviceAddress: address || null,
+      serviceState: priced.state ?? null,
       serviceLabel: snap.serviceLabel,
+      // Coverage pictures come from the stored catalog id, never the label.
+      serviceId: priced.service ?? null,
       // Plan-only quotes (mosquito / community) carry no one-time option.
       oneTimeCents: snap.planOnly ? null : (snap.baseCents ?? null),
       plan: snap.recurringOffer ?? null,
@@ -489,7 +495,7 @@ async function deliverRateReadyEmails(
   nonce: string,
   mode: "UNREADY_ONLY" | "READY_ONLY"
 ): Promise<{ sent: number }> {
-  const quoteBase = `${process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com"}/quote`;
+  const quoteBase = `${process.env.MARKETING_URL ?? SITE_ORIGIN}/quote`;
   const client = await dataClient();
   let sent = 0;
   for (;;) {
@@ -540,13 +546,13 @@ async function deliverRateReadyEmails(
     }
     const ok = await sendEmail({
       to: entry.email,
-      subject: "Your exact prices are ready — pick your day",
+      subject: "Your exact prices are ready. Pick your day",
       template: "booking-rate-ready",
       relatedId: entry.bookingRequestId,
       attachments,
       html: emailShell(
         "Your exact prices are ready",
-        `<p>When you asked for a quote, we were still researching pricing for your area — that's done now.</p>
+        `<p>When you asked for a quote, we were still researching pricing for your area. That's done now.</p>
          <p>Open your saved request to see the exact price and every available day. Pick the day that works and book online in about a minute.</p>
          <p style="margin:20px 0;"><a href="${quoteUrl}" style="background:#72E000;color:#0A0A0A;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700;">Open my exact quote</a></p>
          <p style="color:#666;font-size:13px;">Prefer to talk it through? Just reply to this email.</p>`

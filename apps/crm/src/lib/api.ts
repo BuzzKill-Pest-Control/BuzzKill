@@ -1082,3 +1082,27 @@ export function opResult<T>(result: {
   }
   return data as T;
 }
+
+/**
+ * `opResult`, with a server refusal raised as the message to show.
+ *
+ * A guard that tells an authorized person "no" returns `{ refused }` rather
+ * than throwing, so a working conversation stops paging the owner (see
+ * amplify/functions/shared/refusal.ts). The cost is that the screen is now
+ * handed a SUCCESSFUL response that means the opposite of success — and the
+ * refusal has to be read before every other branch, or "nothing happened"
+ * renders as "done", which is worse than the alarm we removed.
+ *
+ * Throwing puts those words back on the path the thrown refusal used to take:
+ * shown to the person, with nothing claimed to have happened. Screens that
+ * want to render a refusal themselves (an offer to retry differently, say)
+ * read `.refused` off `opResult` instead.
+ */
+export function opResultUnlessRefused<T>(result: {
+  data: unknown;
+  errors?: { message: string }[];
+}): T | null {
+  const data = opResult<T & { refused?: string }>(result);
+  if (data?.refused) throw new Error(data.refused);
+  return data as T | null;
+}

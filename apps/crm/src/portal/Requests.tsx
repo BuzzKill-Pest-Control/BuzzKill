@@ -3,6 +3,7 @@ import {
   api,
   listAll,
   opResult,
+  opResultUnlessRefused,
   type CallbackRequest,
   type Customer,
   type Job,
@@ -178,7 +179,11 @@ export default function PortalRequests() {
           : `Callback received — reference ${res?.reference}. We'll respond within one business day and return no later than ${res?.promisedBy}.`
       );
     } else {
-      const res = opResult<{ reference: string }>(
+      // This is the CUSTOMER's screen. A refused reschedule (their visit was
+      // completed or canceled since the page loaded) read late would print
+      // "Request received — reference undefined" to a person who then waits
+      // for a call that is not coming.
+      const res = opResultUnlessRefused<{ reference: string }>(
         await api().mutations.submitPortalRequest({
           customerId,
           kind: mode,

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -25,7 +25,7 @@ const HAPPENING_CARDS = [
   {
     tag: "The Spider Problem",
     title: "Spiders are following something else.",
-    body: "Spiders rarely invade a home without a reason. If they're showing up in corners, basements, garages, or around windows, it's often because other insects are already providing a food source. Lasting spider control starts by eliminating what attracts them in the first place.",
+    body: "Spiders rarely invade a home without a reason. If they're showing up in corners, basements, garages, or around windows, it's often because other insects are already providing a food source. Lasting spider control starts by addressing what attracts them in the first place.",
     cta: "Ready to Get BuzzKilled?",
   },
   {
@@ -86,13 +86,13 @@ const PROTECT_STEPS = [
     method: "PROTECT",
     num: "03",
     title: "Protection that lasts beyond today.",
-    body: "We help reduce the conditions that attract pests so your home stays protected long after the visit.",
+    body: "We work to reduce the conditions that attract pests and help keep your home protected long after the visit.",
   },
 ];
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -100,7 +100,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -122,7 +122,7 @@ const RELATED_SERVICES = [
 const FAQS = [
   {
     q: "Are ant and spider treatments safe for children and pets?",
-    a: "Yes. Every treatment is applied with your family and pets in mind. Your technician will walk you through what to expect before every visit so there are no surprises.",
+    a: "Every treatment is applied by a licensed technician according to the product label and Massachusetts and Rhode Island regulations. Your technician will tell you what to expect and any steps to take for your family and pets before every visit so there are no surprises.",
   },
   {
     q: "How long does ant and spider treatment take?",
@@ -130,7 +130,7 @@ const FAQS = [
   },
   {
     q: "How soon will I stop seeing ants or spiders?",
-    a: "Most homeowners see significant reduction within a few days. Some activity right after treatment is normal. Pests contacting the product is a sign it is working.",
+    a: "Timing depends on the pest and the size of the colony. Some activity right after treatment is normal as pests contact the treated areas, and your technician will tell you what to expect.",
   },
   {
     q: "Why do ants keep coming back after DIY treatments?",
@@ -138,7 +138,7 @@ const FAQS = [
   },
   {
     q: "How often should my home receive pest control?",
-    a: "For most homes, a recurring program keeps pressure consistently low. One-time treatments are available, but recurring service delivers the best long-term results.",
+    a: "For most homes, a recurring program helps keep pest pressure low. One-time treatments are available, but recurring service delivers the best long-term results.",
   },
   {
     q: "Can BuzzKill remove both ants and spiders in the same visit?",
@@ -172,22 +172,6 @@ export default function AntsSpiders() {
 
   return (
     <>
-      <SEO
-        title="Ant Control & Removal Services — MA & RI"
-        description="Professional ant and spider control for homes across Massachusetts and Rhode Island. Pet-safe, licensed technicians, lasting results. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Ant Control & Removal Services",
-            "Professional ant and spider pest control for Massachusetts and Rhode Island homes. Pet-safe treatments, licensed technicians.",
-            "/services/general-pest",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/general-pest" },
-            { name: "Ant Control", url: "/services/general-pest" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

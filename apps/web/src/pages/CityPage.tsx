@@ -1,15 +1,15 @@
-import { useParams, Navigate, useNavigate } from "react-router-dom";
+import { Link, useParams, Navigate, useNavigate } from "react-router-dom";
 import { CITY_BY_SLUG } from "../data/cities";
 import FAQ from "../components/FAQ";
 import QuoteCTA from "../components/QuoteCTA";
-import SEO, { buildCitySchema, buildBreadcrumbSchema, buildFAQSchema } from "../components/SEO";
+import { cityFaqs } from "../data/faqs";
 
 export default function CityPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const city = slug ? CITY_BY_SLUG[slug] : undefined;
 
-  if (!city) return <Navigate to="/" replace />;
+  if (!city) return <Navigate to="/404" replace />;
 
   const { city: name, state, stateAbbr } = city;
   const fullLocation = `${name}, ${stateAbbr}`;
@@ -19,27 +19,8 @@ export default function CityPage() {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const cityFaqs = [
-    { q: `Do you service condos and HOAs in ${name}?`, a: `Yes! BuzzKill provides professional pest control for condominiums, HOAs, and multi-unit communities throughout ${name}, ${stateAbbr} and surrounding areas.` },
-    { q: "Is in-unit service required?", a: `No. In-unit service is optional and scheduled directly by ${name} unit owners. The HOA contract covers common areas only.` },
-    { q: `How do I get a quote for my ${name} property?`, a: "Use the instant quote below — enter your property details, see your price in seconds, and book online. Homes, condo/HOA communities, and commercial properties all price instantly. Or call us at 508-258-9294." },
-  ];
-
   return (
     <>
-      <SEO
-        title={`${name} Pest Control | HOA & Condo Service in ${stateAbbr}`}
-        description={`Professional HOA and condo pest control in ${name}, ${stateAbbr}. Common-area pest management for boards and property managers, with optional discounted in-unit service for ${name} condo owners.`}
-        jsonLd={[
-          buildCitySchema(name, stateAbbr, state, city.slug),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Pest Control", url: "/" },
-            { name: `${name}, ${stateAbbr}`, url: `/pest-control/${city.slug}` },
-          ]),
-          buildFAQSchema(cityFaqs),
-        ]}
-      />
       {/* Hero */}
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
@@ -48,11 +29,12 @@ export default function CityPage() {
             {name} Pest Control
           </h1>
           <p className="bk-body-lead">
-            BuzzKill Pest Control provides professional pest management for
-            condominiums, HOAs, and shared living communities in{" "}
-            <strong>{fullLocation}</strong>. We specialize in common-area pest
-            control for boards and property managers, with optional discounted
-            in-unit service for owners.
+            BuzzKill Pest Control is based in Marlborough, Massachusetts, and
+            provides professional pest management for condominiums, HOAs, and
+            shared living communities in <strong>{fullLocation}</strong>. We specialize in common-area pest
+            control for boards and property managers. Unit owners can add
+            optional in-unit service, with pricing that can be lower on days we
+            are already working nearby.
           </p>
           <div style={{ display: "flex", gap: 14, marginTop: 24, flexWrap: "wrap" }}>
             <button type="button" className="bk-btn bk-btn-primary" onClick={goToForm}>
@@ -61,7 +43,7 @@ export default function CityPage() {
             <button
               type="button"
               className="bk-btn bk-btn-outline"
-              onClick={() => navigate("/condo-services")}
+              onClick={() => navigate("/communities")}
             >
               HOA Services
             </button>
@@ -79,10 +61,13 @@ export default function CityPage() {
           <p className="bk-body-lead">
             Most pest issues in {name} condos and HOAs don't respect unit
             boundaries. That's why we focus on building-wide prevention and
-            consistent service—not one-off reactions. Our {state}-licensed
-            technicians understand the pest pressures unique to the{" "}
+            consistent service, not one-off reactions. BuzzKill is based in
+            Marlborough, Massachusetts, serves {name} under the {state}{" "}
+            credentials listed on our{" "}
+            <Link to="/licensed-insured">Licensed &amp; Insured</Link> page,
+            and plans every visit around the pest pressures common to the{" "}
             {stateAbbr === "MA"
-              ? "Greater Boston and MetroWest"
+              ? "Greater Boston, MetroWest, and Central Massachusetts"
               : "Rhode Island"}{" "}
             area.
           </p>
@@ -105,11 +90,12 @@ export default function CityPage() {
               </p>
             </div>
             <div className="bk-why-item">
-              <h3 className="bk-h4">{"In‑Unit Service for Owners"}</h3>
+              <h3 className="bk-h4">In-Unit Service for Owners</h3>
               <p className="bk-p">
-                Optional, discounted pest control for individual units—scheduled
-                and paid online when BuzzKill is already onsite in your {name}{" "}
-                community.
+                Optional pest control for individual units. {name} unit owners
+                can get their own instant quote and book online at any time,
+                with pricing that can be lower on days we are already working
+                nearby.
               </p>
             </div>
             <div className="bk-why-item">
@@ -134,16 +120,17 @@ export default function CityPage() {
           <ul className="bk-bullets">
             <li>
               Your {name} association receives consistent, scheduled pest
-              control for common areas—done professionally, with minimal
+              control for common areas, done professionally, with minimal
               disruption.
             </li>
             <li>
-              About a week before our visit, {name} unit owners can schedule and
-              pay online for discounted in-unit treatment.
+              {name} unit owners who want in-unit treatment can get their own
+              instant quote and book online at any time.
             </li>
             <li>
-              Everything is grouped onsite—owners get convenience and lower
-              pricing, and the community benefits from a building-wide approach.
+              Common-area service and any in-unit visits are handled by the same
+              local team, so the whole community benefits from a building-wide
+              approach.
             </li>
           </ul>
         </div>
@@ -164,7 +151,7 @@ export default function CityPage() {
               </p>
             </div>
             <div className="bk-why-item">
-              <h3 className="bk-h4">Safety-First Approach</h3>
+              <h3 className="bk-h4">Built for Occupied Homes</h3>
               <p className="bk-p">
                 Methods and products appropriate for occupied {name} homes.
                 We follow all label directions and {state} regulatory
@@ -186,27 +173,14 @@ export default function CityPage() {
       <FAQ
         eyebrow={fullLocation}
         title="FAQs"
-        items={[
-          {
-            q: `Do you service condos and HOAs in ${name}?`,
-            a: `Yes! BuzzKill provides professional pest control for condominiums, HOAs, and multi-unit communities throughout ${name}, ${stateAbbr} and surrounding areas.`,
-          },
-          {
-            q: "Is in-unit service required?",
-            a: `No. In-unit service is optional and scheduled directly by ${name} unit owners. The HOA contract covers common areas only.`,
-          },
-          {
-            q: `How do I get a quote for my ${name} property?`,
-            a: "Use the instant quote below — enter your property details, see your price in seconds, and book online. Homes, condo/HOA communities, and commercial properties all price instantly. Or call us at 508-258-9294.",
-          },
-        ]}
+        items={cityFaqs(city)}
       />
 
       {/* Instant quote CTA */}
       <QuoteCTA
         eyebrow={`Pest Control in ${fullLocation}`}
         title={`Get an Instant Quote for ${name}`}
-        intro={`Tell us about your ${name} property and see your price in seconds — then book online.`}
+        intro={`Tell us about your ${name} property, see your price in seconds, then book online.`}
       />
     </>
   );

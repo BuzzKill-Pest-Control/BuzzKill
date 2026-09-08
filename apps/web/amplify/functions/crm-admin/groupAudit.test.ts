@@ -18,6 +18,9 @@ process.env.AMPLIFY_AUTH_USERPOOL_ID = "pool-1";
 
 let cognitoGroups: string[] = [];
 let cognitoApplyFails = false;
+/** Force the durable-command scan to fail, so a test can prove an unreachable
+ *  command store is never reported as an ordinary "already running". */
+let commandStoreUnavailable = false;
 vi.mock("@aws-sdk/client-cognito-identity-provider", () => {
   const cmd = (type: string) =>
     class {
@@ -121,10 +124,13 @@ const fakeDataClient = {
         customerId,
       }: {
         customerId: string;
-      }) => ({
-        data: [...commands.values()].filter((c) => c.customerId === customerId),
-        nextToken: null,
-      }),
+      }) => {
+        if (commandStoreUnavailable) throw new Error("command store down");
+        return {
+          data: [...commands.values()].filter((c) => c.customerId === customerId),
+          nextToken: null,
+        };
+      },
     },
     ServicePlan: childCollection("ServicePlan"),
     Job: childCollection("Job"),
@@ -180,6 +186,7 @@ beforeEach(() => {
   workOpened.length = 0;
   cognitoGroups = [];
   cognitoApplyFails = false;
+  commandStoreUnavailable = false;
   childRows.clear();
   childRows.set("Invoice", [
     { id: "inv-1", customerId: "c1", accessGroups: ["cus-c1"] },
@@ -293,14 +300,58 @@ describe("setCustomerGroup — the durable verified command", () => {
 
   it("a DIFFERENT target is refused while a change is mid-flight", async () => {
     cognitoApplyFails = true;
+    // The PARTIAL is a genuine half-applied state — it keeps throwing, because
+    // something IS wrong and a person has to know.
     await expect(
       call({ customerId: "c1", groupId: "g1", reason: "First change" })
     ).rejects.toThrow(/PARTIALLY applied/);
     groups.set("g2", { id: "g2", name: "Other", accessGroups: ["grp-g2"] });
 
+    // The second office click, though, is the single-winner rule working, and
+    // it resolves by waiting — that comes back as words.
+    const res = (await call({
+      customerId: "c1",
+      groupId: "g2",
+      reason: "Second change",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/mid-flight/);
+  });
+
+  it("a stale command it cannot SEIZE because the CAS layer is broken also THROWS", async () => {
+    // The third way to arrive at "not claimed", and the subtle one: an OPEN
+    // command with an expired lease, and a conditional-write path that does
+    // not work. Before the split this returned IN_FLIGHT — which, now that
+    // IN_FLIGHT is answered in words, would have told the office to refresh
+    // and wait for a colleague who does not exist.
+    commands.set("cmd-stale", {
+      id: "cmd-stale",
+      customerId: "c1",
+      toGroupId: "g1",
+      fromGroupId: null,
+      stage: "REQUESTED",
+      requestedAt: new Date(Date.now() - 600_000).toISOString(),
+      leaseUntil: new Date(Date.now() - 60_000).toISOString(),
+      leaseNonce: "dead",
+    });
+    _setLockStoreForTests({
+      conditionalUpdate: async () => ({ ok: false, reason: "UNSUPPORTED" }),
+      conditionalDelete: async () => "UNSUPPORTED",
+    });
+
     await expect(
-      call({ customerId: "c1", groupId: "g2", reason: "Second change" })
-    ).rejects.toThrow(/mid-flight/);
+      call({ customerId: "c1", groupId: "g1", reason: "New manager" })
+    ).rejects.toThrow(/command store is unavailable/i);
+  });
+
+  it("but a command store that cannot be reached still THROWS — an untracked change is not allowed", async () => {
+    // The third branch of the same `if`, and the one that must never become
+    // words: nothing is known about what is or is not running.
+    commandStoreUnavailable = true;
+
+    await expect(
+      call({ customerId: "c1", groupId: "g1", reason: "New manager" })
+    ).rejects.toThrow(/command store is unavailable/i);
   });
 
   it("verification catches a surface that silently disagrees — PARTIAL, not COMPLETE", async () => {

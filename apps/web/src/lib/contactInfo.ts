@@ -1,14 +1,23 @@
 /**
- * The office's public contact details, in one place.
+ * The office's public contact details for the marketing site.
  *
  * Every public form ends with these two, clickable: a form is the slow path,
  * and someone who does not want to fill one in should never have to hunt for
- * the phone number or the inbox. The address is the same one the footer, the
- * schema.org markup, and the legal pages publish, so a visitor is never given
- * two different "real" addresses for the same company.
+ * the phone number or the inbox. The values come from the single company
+ * record (amplify/functions/shared/company.ts), the same one the footer, the
+ * legal pages, the JSON-LD graph, the emails, and the PDFs read, so a visitor
+ * is never given two different "real" addresses for the same company.
  */
-export const OFFICE_PHONE = "508-258-9294";
-export const OFFICE_PHONE_PRETTY = "(508) 258-9294";
-export const OFFICE_TEL = `tel:+1${OFFICE_PHONE.replace(/\D/g, "")}`;
-export const OFFICE_EMAIL = "info@pestbuzzkill.com";
-export const OFFICE_MAILTO = `mailto:${OFFICE_EMAIL}`;
+import {
+  COMPANY,
+  companyAddressLines,
+  companyAddressOneLine,
+} from "../../amplify/functions/shared/company";
+
+export const OFFICE_PHONE = COMPANY.phone.display;
+export const OFFICE_PHONE_PRETTY = COMPANY.phone.pretty;
+export const OFFICE_TEL = COMPANY.phone.href;
+export const OFFICE_EMAIL = COMPANY.email.address;
+export const OFFICE_MAILTO = COMPANY.email.href;
+export const OFFICE_ADDRESS_LINES = companyAddressLines();
+export const OFFICE_ADDRESS = companyAddressOneLine();

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   listAll,
-  opResult,
+  opResultUnlessRefused,
   unwrap,
   updateMarketRate,
   type MarketRate,
@@ -569,7 +569,11 @@ function RateForm({
   // budget, so the second click must not buy a second one.
   const researchAct = useAction(async () => {
     setError(null);
-    opResult(
+    // A refusal (the catalog is rolled back, the rate is office-pinned) comes
+    // back as a successful response with words in it. Read before onDone(),
+    // which closes this editor as though the research had been queued — the
+    // one thing that did not happen.
+    opResultUnlessRefused(
       await api().mutations.requestPricingResearch({
         rateKey: rate.rateKey,
         reasonCode: researchReason,

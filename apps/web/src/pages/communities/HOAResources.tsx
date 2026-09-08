@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 
 const FAMILIAR_ITEMS = [
   { img: "/images/hoa-01-complaints-increasing.png", text: "Resident complaints keep increasing." },
@@ -123,22 +122,6 @@ export default function HOAResources() {
 
   return (
     <>
-      <SEO
-        title="HOA & Board Resources — Community Pest Control MA & RI"
-        description="Proactive pest protection for HOA boards and property managers across Massachusetts and Rhode Island. Better decisions. Stronger communities."
-        jsonLd={[
-          buildServiceSchema(
-            "HOA & Board Pest Control Resources",
-            "Proactive pest protection programs for HOA boards and property managers across Massachusetts and Rhode Island.",
-            "/communities/hoa-resources",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home",                  url: "/" },
-            { name: "Communities",           url: "/communities" },
-            { name: "HOA & Board Resources", url: "/communities/hoa-resources" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

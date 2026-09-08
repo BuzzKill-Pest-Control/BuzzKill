@@ -1,6 +1,7 @@
 import { Link, NavLink } from "react-router-dom";
 import { useState } from "react";
 import { portalUrl } from "../lib/portal";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 
 type SubItem   = { label: string; to: string };
 type NavGroup  = { label: string; to: string; subItems?: SubItem[] };
@@ -62,51 +63,51 @@ const SERVICES_LINKS: NavGroup[] = [
 const RESIDENTIAL_SERVICES: NavGroup[] = [
   {
     label: "General Pest",
-    to: "/residential/general-pest",
+    to: "/services/general-pest",
     subItems: [
-      { label: "Ants & Spiders",      to: "/residential/general-pest" },
-      { label: "Cockroach Control",   to: "/residential/cockroach" },
-      { label: "Flea & Silverfish",   to: "/residential/flea-silverfish" },
-      { label: "Wasp / Hornet / Bee", to: "/residential/wasp-hornet-bee" },
+      { label: "Ants & Spiders",      to: "/services/general-pest" },
+      { label: "Cockroach Control",   to: "/services/cockroach" },
+      { label: "Flea & Silverfish",   to: "/services/flea-silverfish" },
+      { label: "Wasp / Hornet / Bee", to: "/services/wasp-hornet-bee" },
     ],
   },
   {
     label: "Rodent Control",
-    to: "/residential/rodent-control",
+    to: "/services/rodent-control",
     subItems: [
-      { label: "Mice & Rat Removal",   to: "/residential/rodent-control" },
-      { label: "Entry Point Sealing",  to: "/residential/rodent-control/entry-sealing" },
-      { label: "Attic Rodent Control", to: "/residential/rodent-control/attic" },
-      { label: "Attic Restoration",    to: "/residential/rodent-control/attic-restoration" },
+      { label: "Mice & Rat Removal",   to: "/services/rodent-control" },
+      { label: "Entry Point Sealing",  to: "/services/rodent-control/entry-sealing" },
+      { label: "Attic Rodent Control", to: "/services/rodent-control/attic" },
+      { label: "Attic Restoration",    to: "/services/rodent-control/attic-restoration" },
     ],
   },
   {
     label: "Mosquito & Tick",
-    to: "/residential/mosquito-tick",
+    to: "/services/mosquito-tick",
     subItems: [
-      { label: "Yard Mosquito Treatment", to: "/residential/mosquito-tick" },
-      { label: "Tick Yard Program",       to: "/residential/mosquito-tick/tick" },
+      { label: "Yard Mosquito Treatment", to: "/services/mosquito-tick" },
+      { label: "Tick Yard Program",       to: "/services/mosquito-tick/tick" },
     ],
   },
   {
     label: "Termite",
-    to: "/residential/termite",
+    to: "/services/termite",
     subItems: [
-      { label: "Termite Inspection",  to: "/residential/termite" },
-      { label: "Wood Boring Insects", to: "/residential/termite/wood-boring" },
+      { label: "Termite Inspection",  to: "/services/termite" },
+      { label: "Wood Boring Insects", to: "/services/termite/wood-boring" },
     ],
   },
   {
     label: "Wildlife",
-    to: "/residential/wildlife",
+    to: "/services/wildlife",
     subItems: [
-      { label: "Squirrel, Raccoon & Bat", to: "/residential/wildlife" },
+      { label: "Squirrel, Raccoon & Bat", to: "/services/wildlife" },
     ],
   },
 ];
 
 const ABOUT_LINKS: SubItem[] = [
-  { label: "Our Story",          to: "/" },
+  { label: "Our Story",          to: "/about" },
   { label: "Service Areas",      to: "/service-areas" },
   { label: "Licensed & Insured", to: "/licensed-insured" },
   { label: "Contact",            to: "/contact" },
@@ -146,11 +147,11 @@ export default function Header() {
       <div className="bk-topbar">
         <div className="bk-topbar-inner bk-topbar-inner--slim">
 
-          <a href="tel:+15082589294" className="bk-topbar-phone" data-track-id="topbar_phone">
+          <a href={OFFICE_TEL} className="bk-topbar-phone" data-track-id="topbar_phone">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.74 21 3 13.26 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.24 1.01l-2.21 2.21z"/>
             </svg>
-            <span>(508)&nbsp;258&#8209;9294</span>
+            <span>{OFFICE_PHONE_PRETTY}</span>
           </a>
 
           <a

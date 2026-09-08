@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -67,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -88,7 +88,7 @@ const TIPS = [
 ];
 
 const RELATED_SERVICES = [
-  { label: "Rodent Control", to: "/services/rodent-control", desc: "They don't wait. Neither should you." },
+  { label: "Wildlife Removal", to: "/services/wildlife", desc: "Humane wildlife removal and exclusion." },
   { label: "Cockroach Control", to: "/services/cockroach", desc: "If you see one, there's usually more nearby." },
   { label: "Mosquito & Tick Control", to: "/services/mosquito-tick", desc: "Take your yard back this season." },
   { label: "Wasp & Hornet Control", to: "/services/wasp-hornet-bee", desc: "Enjoy your backyard, not their nest." },
@@ -109,7 +109,7 @@ const FAQS = [
   },
   {
     q: "Is rodent control safe around pets?",
-    a: "Yes. Every treatment plan is designed with safety in mind.",
+    a: "Your technician places every product with pets in mind, follows the label and state rules, and tells you what to expect around treated areas.",
   },
   {
     q: "How long does rodent removal take?",
@@ -147,22 +147,6 @@ export default function RodentControl() {
 
   return (
     <>
-      <SEO
-        title="Rodent Control Services — MA & RI"
-        description="Professional rodent control for Massachusetts and Rhode Island homes. We remove mice and rats and help seal them out for good. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Rodent Control Services",
-            "Professional mouse and rat control for Massachusetts and Rhode Island homes, removing rodents and sealing entry points with licensed technicians.",
-            "/services/rodent-control",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/rodent-control" },
-            { name: "Rodent Control", url: "/services/rodent-control" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

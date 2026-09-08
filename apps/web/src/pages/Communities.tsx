@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import Hero from "../components/Hero";
 import FAQ from "../components/FAQ";
-import SEO, { buildServiceSchema, buildBreadcrumbSchema } from "../components/SEO";
 
 const WHO_CARDS = [
   {
@@ -151,21 +150,6 @@ export default function Communities() {
 
   return (
     <>
-      <SEO
-        title="Community Pest Control for HOAs & Condos — MA & RI"
-        description="Proactive pest control for condominiums, HOAs, and shared communities across Massachusetts and Rhode Island. Common-area programs with board-friendly reporting and optional in-unit service."
-        jsonLd={[
-          buildServiceSchema(
-            "Community & HOA Pest Control",
-            "Proactive pest control for condominiums, HOAs, and shared communities across Massachusetts and Rhode Island. Common-area programs with board-friendly reporting.",
-            "/communities",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Communities", url: "/communities" },
-          ]),
-        ]}
-      />
       {/* 1 — Hero */}
       <Hero
         announceBanner
@@ -192,7 +176,7 @@ export default function Communities() {
                 That's why BuzzKill works alongside boards and property managers to build a pest control program that fits the way your community operates.
               </p>
               <div style={{ marginTop: 28 }}>
-                <Link to="#community-services" className="bk-btn bk-btn-primary">Find the Right Solution</Link>
+                <a href="#community-services" className="bk-btn bk-btn-primary">Find the Right Solution</a>
               </div>
             </div>
             <div className="bk-com-story-visual">
@@ -217,7 +201,7 @@ export default function Communities() {
           <p className="bk-eyebrow bk-center">Who We Support</p>
           <h2 className="bk-h2 bk-center">Built Around Everyone Who Calls Your Community Home</h2>
           <div className="bk-center" style={{ marginBottom: 32 }}>
-            <Link to="#community-services" className="bk-btn bk-btn-primary">Explore Community Programs</Link>
+            <a href="#community-services" className="bk-btn bk-btn-primary">Explore Community Programs</a>
           </div>
           <div className="bk-com-who-carousel">
             <button className="bk-com-who-arrow" onClick={prevWho} aria-label="Previous">

@@ -1,8 +1,8 @@
 import { useState, useRef } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import Hero from "../../components/Hero";
 import FAQ from "../../components/FAQ";
-import SEO, { buildServiceSchema, buildBreadcrumbSchema } from "../../components/SEO";
 
 const LIFESTYLE_CARDS = [
   {
@@ -31,34 +31,34 @@ const SERVICE_CATEGORIES = [
   {
     label: "Inside Your Home",
     services: [
-      { name: "Ants & Spiders", to: "/residential/general-pest" },
-      { name: "Cockroaches", to: "/residential/cockroach" },
-      { name: "Fleas & Silverfish", to: "/residential/flea-silverfish" },
+      { name: "Ants & Spiders", to: "/services/general-pest" },
+      { name: "Cockroaches", to: "/services/cockroach" },
+      { name: "Fleas & Silverfish", to: "/services/flea-silverfish" },
     ],
   },
   {
     label: "Around Your Home",
     services: [
-      { name: "Wasps, Hornets & Bees", to: "/residential/wasp-hornet-bee" },
-      { name: "Mosquitoes", to: "/residential/mosquito-tick" },
-      { name: "Ticks", to: "/residential/mosquito-tick/tick" },
+      { name: "Wasps, Hornets & Bees", to: "/services/wasp-hornet-bee" },
+      { name: "Mosquitoes", to: "/services/mosquito-tick" },
+      { name: "Ticks", to: "/services/mosquito-tick/tick" },
     ],
   },
   {
     label: "Rodent Protection",
     services: [
-      { name: "Mice & Rat Removal", to: "/residential/rodent-control" },
-      { name: "Entry Point Sealing", to: "/residential/rodent-control/entry-sealing" },
-      { name: "Attic Rodent Control", to: "/residential/rodent-control/attic" },
-      { name: "Attic Restoration", to: "/residential/rodent-control/attic-restoration" },
+      { name: "Mice & Rat Removal", to: "/services/rodent-control" },
+      { name: "Entry Point Sealing", to: "/services/rodent-control/entry-sealing" },
+      { name: "Attic Rodent Control", to: "/services/rodent-control/attic" },
+      { name: "Attic Restoration", to: "/services/rodent-control/attic-restoration" },
     ],
   },
   {
     label: "Structural Protection",
     services: [
-      { name: "Termite Inspection", to: "/residential/termite" },
-      { name: "Wood Boring Insects", to: "/residential/termite/wood-boring" },
-      { name: "Wildlife Removal", to: "/residential/wildlife" },
+      { name: "Termite Inspection", to: "/services/termite" },
+      { name: "Wood Boring Insects", to: "/services/termite/wood-boring" },
+      { name: "Wildlife Removal", to: "/services/wildlife" },
     ],
   },
 ];
@@ -141,7 +141,7 @@ const SEASONAL_TIPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -160,7 +160,7 @@ const WHY_ITEMS = [
   {
     icon: "/images/why-guarantee.png",
     title: "We Stand Behind Our Work",
-    body: "If covered pests return during your service guarantee, so do we.",
+    body: CALLBACK_POLICY_TEXT,
   },
   {
     icon: "/images/why-communication.png",
@@ -172,11 +172,11 @@ const WHY_ITEMS = [
 const RESIDENTIAL_FAQS = [
   {
     q: "How often should residential pest control be scheduled?",
-    a: "For most homes, recurring quarterly or seasonal service provides the most consistent protection. One-time treatments are available, but a routine program keeps pest pressure consistently low throughout the year.",
+    a: "For most homes, recurring quarterly or seasonal service provides the most consistent protection. One-time treatments are available, but a routine program helps keep pest pressure low throughout the year.",
   },
   {
     q: "Are treatments safe for children and pets?",
-    a: "Yes. Every BuzzKill treatment is thoughtfully applied with your family and pets in mind. Your technician will walk you through what to expect before every visit so there are no surprises.",
+    a: "Every BuzzKill treatment is applied according to the product label and Massachusetts or Rhode Island regulations, and only where it is needed. Your technician will walk you through any preparation needed and how soon you can return to normal activity, so there are no surprises for your family or pets.",
   },
   {
     q: "Can I get an Instant Quote online?",
@@ -211,21 +211,6 @@ export default function Residential() {
 
   return (
     <>
-      <SEO
-        title="Residential Pest Control for MA & RI Homes"
-        description="Professional residential pest control for homes across Massachusetts and Rhode Island. Family and pet-safe treatments for ants, rodents, termites, mosquitoes, wildlife, and more. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Residential Pest Control",
-            "Professional residential pest control for homes across Massachusetts and Rhode Island. Family and pet-safe treatments for ants, rodents, termites, mosquitoes, and wildlife.",
-            "/residential",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Residential", url: "/residential" },
-          ]),
-        ]}
-      />
       {/* 1 — Hero */}
       <Hero
         announceBanner
@@ -314,7 +299,7 @@ export default function Residential() {
       <section className="bk-section bk-section-cream">
         <div className="bk-container">
           <p className="bk-eyebrow bk-center">Sound Familiar?</p>
-          <h2 className="bk-h2 bk-center">What Homeowners Tell Us Every Week</h2>
+          <h2 className="bk-h2 bk-center">What Homeowners Tell Us</h2>
           <p className="bk-body-lead bk-center">You are not alone. These are some of the most common things homeowners tell us before they call.</p>
           <div className="bk-carousel-wrap">
             <button
@@ -360,7 +345,7 @@ export default function Residential() {
           <p className="bk-eyebrow bk-center">The BuzzKill Method</p>
           <h2 className="bk-h2 bk-center">How BuzzKill Protects Your Home</h2>
           <p className="bk-body-lead bk-center" style={{ maxWidth: 540, margin: "0 auto 48px" }}>
-            Every successful visit follows the same three steps.
+            Every BuzzKill visit follows our three steps.
           </p>
           <div className="bk-method-track">
             {[

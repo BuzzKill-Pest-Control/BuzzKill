@@ -1,4 +1,5 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
+import { SITE_ORIGIN } from "../shared/company";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { dataClient } from "../shared/dataClient";
 import {
@@ -145,10 +146,10 @@ function composeQuoteReply(args: {
     .join(" or ");
   const where = args.town ? ` in ${args.town}` : "";
   return [
-    `Hi ${args.name.split(" ")[0]} — thanks for reaching out.`,
-    `For your property${where}, we can take care of this for ${money(args.priceCents)}.`,
+    `Hi ${args.name.split(" ")[0]}, thanks for reaching out.`,
+    `For your property${where}, our price for this service is ${money(args.priceCents)}.`,
     when ? `We have ${when} open.` : "",
-    `You can lock in a time here: ${args.bookingUrl}`,
+    `You can lock in a day here: ${args.bookingUrl}`,
   ]
     .filter(Boolean)
     .join(" ");
@@ -244,7 +245,7 @@ export async function autoQuoteLead(
     };
   }
 
-  const bookingUrl = `${process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com"}/quote?b=${quote.bookingId ?? ""}`;
+  const bookingUrl = `${process.env.MARKETING_URL ?? SITE_ORIGIN}/quote?b=${quote.bookingId ?? ""}`;
   const replyText = composeQuoteReply({
     name: displayName,
     town: input.city ?? null,

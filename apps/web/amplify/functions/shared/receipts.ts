@@ -142,10 +142,10 @@ export async function sendPostCancellationChargeNotice(opts: {
       customerId: opts.customerId,
       relatedId: opts.invoiceId ?? undefined,
       html: emailShell(
-        "A charge posted after your cancellation — we're refunding it",
+        "A charge posted after your cancellation, and we're refunding it",
         `<p>Hi ${escapeHtml(greetingName)},</p>
          <p>A payment of <strong>${money(opts.amountCents)}</strong> went through after you'd already cancelled your plan. That shouldn't have happened, and <strong>we're refunding it in full</strong>.</p>
-         <p>You don't need to do anything — the refund goes back to your original payment method. If you have any questions, just reply to this email or give us a call.</p>`
+         <p>You don't need to do anything. The refund goes back to your original payment method. If you have any questions, just reply to this email or give us a call.</p>`
       ),
     });
   } catch (err) {
@@ -277,7 +277,7 @@ export async function sendRefundNotice(opts: {
         `<p>Hi ${escapeHtml(greetingName)},</p>
          <p>A refund of <strong>${money(opts.amountCents)}</strong> for ${escapeHtml(about)} ${
            opts.sentToStripe
-             ? "is on its way back to your original payment method — cards usually see it in 3–5 business days; bank payments can take a little longer."
+             ? "is on its way back to your original payment method. Cards usually show it within 5 to 10 business days, and bank payments can take a little longer."
              : "has been issued."
          }</p>
          <p style="color:#666;font-size:13px;">Questions about this refund? Just reply to this email or give us a call.</p>`

@@ -140,7 +140,7 @@ describe("the finalize email renders the cancellation constant (R17)", () => {
     expect(confirmation).toBeDefined();
     expect(confirmation!.html).toContain("/cancel?token=tok-1");
     expect(confirmation!.html).toContain(
-      `more than ${CANCEL_FULL_REFUND_DAYS} days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable`
+      `More than ${CANCEL_FULL_REFUND_DAYS} whole days out is a full refund; ${CANCEL_FULL_REFUND_DAYS} days or less is non-refundable`
     );
   });
 
@@ -152,7 +152,7 @@ describe("the finalize email renders the cancellation constant (R17)", () => {
     });
 
     expect(pdfBodies[0]).toContain(
-      `Cancel more than ${CANCEL_FULL_REFUND_DAYS} days before your appointment for a full refund. Cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the appointment are not refundable.`
+      `Cancel more than ${CANCEL_FULL_REFUND_DAYS} whole days before your appointment for a full refund. Cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the appointment are not refundable.`
     );
   });
 });

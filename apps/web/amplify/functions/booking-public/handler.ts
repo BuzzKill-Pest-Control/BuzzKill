@@ -2,6 +2,7 @@ import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
+import { COMPANY } from "../shared/company";
 import { type ExtractionMapping } from "../shared/leadExtraction";
 import { randomUUID } from "node:crypto";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
@@ -64,8 +65,10 @@ import {
 import { releaseCapacityClaim } from "../shared/capacity";
 import { releaseMonthForJob } from "../shared/obligations";
 import {
-  BOOKING_TERMS_TEXT,
   BOOKING_TERMS_VERSION,
+  INVOICE_NET_TERMS,
+  bookingTermsFor,
+  bookingTermsPayload,
   CANCEL_FULL_REFUND_DAYS,
   OFF_SEASON_MESSAGE,
 } from "../shared/bookingTerms";
@@ -562,7 +565,11 @@ function pricedResponse(booking: StoredQuoteBooking) {
       planInitialFeeCents,
     })),
     expiresAt: booking.expiresAt,
-    terms: { version: BOOKING_TERMS_VERSION, text: BOOKING_TERMS_TEXT },
+    terms: bookingTermsPayload({
+      offSeason: stored.offSeason === true,
+      planOnly: stored.planOnly === true,
+      invoiceEligible: invoiceEligibleFor(booking.propertyKind),
+    }),
     // GL-05: the same customer token quoteStatus uses — the funnel carries it
     // to /booking-status so the post-payment outcome is server-confirmed and
     // durable across reloads/redirects.
@@ -2075,7 +2082,11 @@ async function quote(
     })),
     expiresAt,
     // R17: the checkout must render exactly what /book will hold them to.
-    terms: { version: BOOKING_TERMS_VERSION, text: BOOKING_TERMS_TEXT },
+    terms: bookingTermsPayload({
+      offSeason,
+      planOnly,
+      invoiceEligible: invoiceEligibleFor(propertyKind),
+    }),
   };
 }
 
@@ -2313,6 +2324,8 @@ async function offSeasonEnrollmentAttempt(opts: {
   };
   req: { sourceIp?: string; userAgent?: string };
   tcVersion: string;
+  /** The exact terms text accepted for this enrollment (built for the offer). */
+  tcText: string;
   client: { models: Record<string, unknown> };
   /** The exact attempt-lease value book() acquired — the persistence fence. */
   holderUntil: string;
@@ -2321,7 +2334,7 @@ async function offSeasonEnrollmentAttempt(opts: {
   /** The applied-code snapshot to persist on the BookingRequest. */
   promoSets: { promoCode: string | null; promoDiscountCents: number | null };
 }) {
-  const { booking, stored, req, tcVersion, client, holderUntil, amountCents, promoSets } =
+  const { booking, stored, req, tcVersion, tcText, client, holderUntil, amountCents, promoSets } =
     opts;
   const s = await stripeClient();
   const summary = `${stored.serviceLabel ?? "Seasonal plan"} — billing starts today; first treatment scheduled for April (we'll confirm the exact day).`;
@@ -2352,6 +2365,7 @@ async function offSeasonEnrollmentAttempt(opts: {
           paymentFailedReason: null,
           paymentFailedNoticeSentAt: null,
           tcVersion,
+          tcText,
           tcAcceptedAt: new Date().toISOString(),
           tcIp: req.sourceIp || null,
           tcUserAgent: req.userAgent?.slice(0, 512) || null,
@@ -2542,15 +2556,9 @@ async function book(
     });
   }
   // R17: an acceptance is only worth recording if it names the terms it
-  // accepted. Missing or stale version → the UI re-renders the fresh terms
-  // and re-asks; no money moves against an unseen policy.
+  // accepted. The version is checked below, once the offer being booked is
+  // known, because the terms are built for that offer.
   const tcVersion = typeof body.tcVersion === "string" ? body.tcVersion : "";
-  if (tcVersion !== BOOKING_TERMS_VERSION) {
-    throw new HttpError(409, {
-      error: "The booking terms were updated — please review them again.",
-      terms: { version: BOOKING_TERMS_VERSION, text: BOOKING_TERMS_TEXT },
-    });
-  }
   const client = await dataClient();
   const { data: booking } = await client.models.BookingRequest.get({
     id: bookingId,
@@ -2625,6 +2633,28 @@ async function book(
   // visit day — no date, no capacity claim; the first treatment is scheduled
   // by the office next April (finalize owns that action).
   const offSeason = stored.offSeason === true;
+  // R17: the terms depend on the offer (one-time, recurring, off-season
+  // enrollment). A missing or stale version → the UI re-renders the fresh
+  // terms for this quote and re-asks; no money moves against an unseen
+  // policy. The exact text accepted is stored on the booking with the version.
+  // The text is rebuilt here from the booking's own facts and the payment
+  // method actually submitted (invoiceMode was validated for eligibility
+  // above); a client can never supply the text it "accepted".
+  if (tcVersion !== BOOKING_TERMS_VERSION) {
+    throw new HttpError(409, {
+      error: "The booking terms were updated. Please review them again.",
+      terms: bookingTermsPayload({
+        offSeason,
+        planOnly: stored.planOnly === true,
+        invoiceEligible: invoiceEligibleFor(booking.propertyKind),
+      }),
+    });
+  }
+  const tcText = bookingTermsFor({
+    recurring,
+    offSeason,
+    paymentMethod: invoiceMode ? "INVOICE" : "CARD",
+  });
   const day = offSeason ? null : stored.days?.find((d) => d.date === date);
   if (!offSeason && !day) {
     throw new HttpError(409, {
@@ -2777,6 +2807,7 @@ async function book(
         },
         req,
         tcVersion,
+        tcText,
         client,
         holderUntil,
         amountCents: offSeasonAmountCents,
@@ -2806,7 +2837,7 @@ async function book(
     // drives AR aging / dunning exactly like any other net-terms bill.
     const due = new Date();
     due.setUTCDate(due.getUTCDate() + 30);
-    const invoiceTerms = { terms: "NET_30", dueDate: due.toISOString().slice(0, 10) };
+    const invoiceTerms = { terms: INVOICE_NET_TERMS, dueDate: due.toISOString().slice(0, 10) };
 
     // A dated invoice booking claims its slot against the LIVE schedule (R29
     // / GL-04), exactly like a card checkout; a date-less off-season
@@ -2877,6 +2908,7 @@ async function book(
         paymentFailedReason: null,
         paymentFailedNoticeSentAt: null,
         tcVersion,
+        tcText,
         tcAcceptedAt: new Date().toISOString(),
         tcIp: req.sourceIp || null,
         tcUserAgent: req.userAgent?.slice(0, 512) || null,
@@ -3058,6 +3090,7 @@ async function book(
           paymentFailedReason: null,
           paymentFailedNoticeSentAt: null,
           tcVersion,
+          tcText,
           tcAcceptedAt: new Date().toISOString(),
           tcIp: req.sourceIp || null,
           tcUserAgent: req.userAgent?.slice(0, 512) || null,
@@ -3221,6 +3254,7 @@ async function book(
         paymentFailedReason: null,
         paymentFailedNoticeSentAt: null,
         tcVersion,
+        tcText,
         tcAcceptedAt: new Date().toISOString(),
         tcIp: req.sourceIp || null,
         tcUserAgent: req.userAgent?.slice(0, 512) || null,
@@ -3329,6 +3363,7 @@ async function book(
       // R17: the acceptance record. tcAcceptedAt is server time — a client
       // clock (or a client lie) never decides when the terms were accepted.
       tcVersion,
+      tcText,
       tcAcceptedAt: new Date().toISOString(),
       tcIp: req.sourceIp || null,
       tcUserAgent: req.userAgent?.slice(0, 512) || null,
@@ -3384,7 +3419,7 @@ function summaryFor(
 
 // CANCEL_FULL_REFUND_DAYS lives in ../shared/bookingTerms — the single
 // source shared with the checkout terms and the finalize email (R17).
-const SUPPORT_PHONE = "(508) 258-9294";
+const SUPPORT_PHONE = COMPANY.phone.pretty;
 
 async function cancel(body: Record<string, unknown>) {
   const token = String(body.token ?? "");

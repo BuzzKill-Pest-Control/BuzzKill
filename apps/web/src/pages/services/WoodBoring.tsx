@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -66,8 +66,8 @@ const PROTECT_STEPS = [
 ];
 
 const BOOK_STEPS = [
-  { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No phone tag required." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -117,7 +117,7 @@ const FAQS = [
   },
   {
     q: "Can I request an inspection online?",
-    a: "Yes. Use the Instant Quote tool to schedule your visit.",
+    a: "Yes. Start with the Instant Quote tool and describe what you're seeing, and we'll match it to the right service before your visit.",
   },
 ];
 
@@ -147,22 +147,6 @@ export default function WoodBoring() {
 
   return (
     <>
-      <SEO
-        title="Wood-Boring Insect Control — MA & RI"
-        description="Professional wood-boring insect control for Massachusetts and Rhode Island homes. Not every wood-destroying insect is a termite. We identify the pest and recommend the right treatment. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Wood-Boring Insect Control",
-            "Professional wood-boring insect control for Massachusetts and Rhode Island homes, identifying carpenter ants, powderpost beetles, and other wood-destroying insects and recommending the right treatment.",
-            "/services/termite/wood-boring",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Termite", url: "/services/termite" },
-            { name: "Wood-Boring Insects", url: "/services/termite/wood-boring" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

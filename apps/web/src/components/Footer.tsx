@@ -1,5 +1,13 @@
 import { Link } from "react-router-dom";
 import { portalUrl } from "../lib/portal";
+import { COMPANY, serviceAreaSentence } from "../../amplify/functions/shared/company";
+import {
+  OFFICE_ADDRESS_LINES,
+  OFFICE_EMAIL,
+  OFFICE_MAILTO,
+  OFFICE_PHONE,
+  OFFICE_TEL,
+} from "../lib/contactInfo";
 
 const Instagram = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -32,14 +40,14 @@ export default function Footer() {
           <div className="bk-footer-col">
             <div className="bk-eyebrow bk-on-dark-soft">Get in Touch</div>
             <p className="bk-p bk-on-dark">
-              420 Lakeside Ave, Suite 104
+              {OFFICE_ADDRESS_LINES[0]}
               <br />
-              Marlborough, MA 01752
+              {OFFICE_ADDRESS_LINES[1]}
             </p>
             <p className="bk-p bk-on-dark">
               <strong>Phone:</strong>{" "}
-              <a className="bk-footer-link" style={{ display: "inline" }} href="tel:508-258-9294" data-track-id="footer_phone">
-                508-258-9294
+              <a className="bk-footer-link" style={{ display: "inline" }} href={OFFICE_TEL} data-track-id="footer_phone">
+                {OFFICE_PHONE}
               </a>
             </p>
             <p className="bk-p bk-on-dark">
@@ -47,14 +55,15 @@ export default function Footer() {
               <a
                 className="bk-footer-link"
                 style={{ display: "inline" }}
-                href="mailto:info@pestbuzzkill.com"
+                href={OFFICE_MAILTO}
               >
-                info@pestbuzzkill.com
+                {OFFICE_EMAIL}
               </a>
             </p>
+            <p className="bk-p bk-on-dark">Serving {serviceAreaSentence()}</p>
             <div className="bk-footer-social">
               <a
-                href="https://www.instagram.com/buzzkill_pestcontrol/"
+                href={COMPANY.socialProfiles[0]}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Instagram"
@@ -62,7 +71,7 @@ export default function Footer() {
                 <Instagram />
               </a>
               <a
-                href="https://www.facebook.com/people/BuzzKill-Pest-Control/61584954290487/"
+                href={COMPANY.socialProfiles[1]}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Facebook"
@@ -70,7 +79,7 @@ export default function Footer() {
                 <Facebook />
               </a>
               <a
-                href="https://www.linkedin.com/company/buzzkill-pest-control/"
+                href={COMPANY.socialProfiles[2]}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="LinkedIn"
@@ -82,6 +91,9 @@ export default function Footer() {
 
           <div className="bk-footer-col">
             <div className="bk-eyebrow bk-on-dark-soft">Services</div>
+            <Link className="bk-footer-link" to="/residential">
+              Residential Pest Control
+            </Link>
             <Link className="bk-footer-link" to="/condo-services">
               HOA Common-Area Pest Control
             </Link>
@@ -94,7 +106,13 @@ export default function Footer() {
             <Link className="bk-footer-link" to="/licensed-insured">
               Licensed &amp; Insured
             </Link>
-            <Link className="bk-footer-link" to="/#form" data-track-id="footer_start_service">
+            <Link className="bk-footer-link" to="/service-areas">
+              Service Areas
+            </Link>
+            <Link className="bk-footer-link" to="/contact">
+              Contact
+            </Link>
+            <Link className="bk-footer-link" to="/quote" data-track-id="footer_start_service">
               Start Service
             </Link>
           </div>
@@ -120,7 +138,7 @@ export default function Footer() {
       </div>
 
       <div className="bk-container bk-footer-legal">
-        <span>© {year} BuzzKill Pest Control. All rights reserved.</span>
+        <span>© {year} {COMPANY.legalName}. All rights reserved.</span>
         <div className="bk-footer-legal-links">
           <Link to="/privacy-policy">Privacy</Link>
           <Link to="/terms-of-service">Terms</Link>

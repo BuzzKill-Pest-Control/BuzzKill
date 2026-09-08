@@ -6,6 +6,7 @@ import {
   listWorkEvents,
   listWorkItems,
   opResult,
+  opResultUnlessRefused,
   updateOwnedWork,
   type BookingRequest,
   type WorkEvent,
@@ -120,7 +121,10 @@ export default function WorkQueue() {
   const claim = useCallback(
     async (item: WorkItem) => {
       await runOn(item, "Could not claim work", async () => {
-        const result = opResult<{ workItemId: string }>(
+        // "Already claimed by X", "someone else got it just now", "this case is
+        // already resolved" — a queue two people are working from. Read the
+        // refusal or the row silently reloads as though it were now theirs.
+        const result = opResultUnlessRefused<{ workItemId: string }>(
           await updateOwnedWork({ workItemId: item.id, action: "CLAIM" })
         );
         if (!result) throw new Error("The work update did not complete");
@@ -135,7 +139,7 @@ export default function WorkQueue() {
   const release = useCallback(
     async (item: WorkItem) => {
       await runOn(item, "Could not release work", async () => {
-        const result = opResult<{ workItemId: string }>(
+        const result = opResultUnlessRefused<{ workItemId: string }>(
           await updateOwnedWork({ workItemId: item.id, action: "RELEASE" })
         );
         if (!result) throw new Error("The work update did not complete");
@@ -150,7 +154,10 @@ export default function WorkQueue() {
   // presses used to mean the customer got the notice twice.
   const resendExact = async (item: WorkItem) => {
     await runOn(item, "Could not resend", async () => {
-      const result = opResult(
+      // The named refusals (unknown outcome, attachments) must reach the office
+      // verbatim: without this they collapse into the generic sentence below,
+      // which says nothing about WHY and nothing about what to do instead.
+      const result = opResultUnlessRefused(
         await api().mutations.resendEmailLog({ emailLogId: item.relatedId! })
       ) as { resent?: boolean } | null;
       if (!result?.resent) {
@@ -183,7 +190,9 @@ export default function WorkQueue() {
       );
       if (!evidence) return;
       await runOn(item, "Could not lift the suppression", async () => {
-        const result = opResult<{ lifted: boolean; message: string }>(
+        // A refusal carries no `message`, so the alert below would have said
+        // "undefined" — and the suppression would still be in force.
+        const result = opResultUnlessRefused<{ lifted: boolean; message: string }>(
           await liftEmailSuppression({ email, reasonCode: reason, evidence })
         );
         if (!result) throw new Error("The suppression lift did not complete");
@@ -346,7 +355,11 @@ export default function WorkQueue() {
         return;
       }
       await runOn(item, "Could not resume the visit change", async () => {
-        const res = opResult<{ outcome?: string }>(
+        // A stored reschedule whose visit has since gone terminal can never be
+        // applied; the server says so in words rather than throwing. Surface
+        // them — a refusal has no `outcome`, so it would otherwise pass the
+        // check below and the case would silently look resumed.
+        const res = opResultUnlessRefused<{ outcome?: string }>(
           await api().mutations.resumeVisitChange({ jobId: item.relatedId })
         );
         if (!res) throw new Error("The resume did not run");

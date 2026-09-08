@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -55,7 +55,7 @@ const PROTECT_STEPS = [
     method: "SOLVE",
     num: "02",
     title: "Targeted treatment where it matters.",
-    body: "We treat where ants and spiders live, travel, and nest using targeted pest control methods designed for long-lasting results.",
+    body: "We treat active nests and the sheltered spots wasps and hornets return to, using targeted methods designed for lasting results.",
   },
   {
     method: "PROTECT",
@@ -67,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -91,7 +91,7 @@ const RELATED_SERVICES = [
   { label: "Rodent Control", to: "/services/rodent-control", desc: "They don't wait. Neither should you." },
   { label: "Cockroach Control", to: "/services/cockroach", desc: "If you see one, there's usually more nearby." },
   { label: "Mosquito & Tick Control", to: "/services/mosquito-tick", desc: "Take your yard back this season." },
-  { label: "Wasp & Hornet Control", to: "/services/wasp-hornet-bee", desc: "Enjoy your backyard, not their nest." },
+  { label: "Ant & Spider Control", to: "/services/general-pest", desc: "The ants you see are only the beginning." },
 ];
 
 const FAQS = [
@@ -105,7 +105,7 @@ const FAQS = [
   },
   {
     q: "Are bee services available?",
-    a: "Yes. Our technician will determine the safest solution based on the insect involved.",
+    a: "Yes. Tell us what you're seeing and your technician will identify the insect involved and recommend the right approach.",
   },
   {
     q: "Can wasps return after treatment?",
@@ -113,7 +113,7 @@ const FAQS = [
   },
   {
     q: "Is treatment safe around my family?",
-    a: "Yes. We apply treatments carefully while providing instructions for your safety.",
+    a: "Treatments are applied by a licensed applicator according to the product label and state regulations. We'll tell you how long to keep family and pets away from the nest area and what to expect afterward.",
   },
   {
     q: "How do I schedule service?",
@@ -147,22 +147,6 @@ export default function WaspHornetBee() {
 
   return (
     <>
-      <SEO
-        title="Wasp, Hornet & Bee Removal Services — MA & RI"
-        description="Professional wasp, hornet, and bee nest removal for Massachusetts and Rhode Island homes. Safe removal by licensed technicians so you can enjoy your yard again. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Wasp, Hornet & Bee Removal Services",
-            "Professional wasp, hornet, and bee nest removal for Massachusetts and Rhode Island homes by licensed technicians.",
-            "/services/wasp-hornet-bee",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/wasp-hornet-bee" },
-            { name: "Wasp & Hornet Removal", url: "/services/wasp-hornet-bee" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -180,7 +164,7 @@ export default function WaspHornetBee() {
         image="/images/wasp-hornet-hero.png"
         eyebrow="Wasp &bull; Hornet &bull; Bee Removal Services"
         headline="Wasps or Hornets Taking Over Your Yard?"
-        sub="BuzzKill safely removes active nests and helps reduce future activity so you can enjoy your outdoor spaces again. Professional stinging insect removal across Massachusetts &amp; Rhode Island."
+        sub="BuzzKill removes active nests and helps reduce future activity so you can enjoy your outdoor spaces again. Professional stinging insect removal across Massachusetts &amp; Rhode Island."
         primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
         secondaryCta={{ label: "Talk to a Local Expert", onClick: openTalkToExpert }}
         className="bk-hero--community"

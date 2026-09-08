@@ -156,7 +156,17 @@ export async function claimGroupChange(input: {
       refuseStages: { field: "stage", values: SETTLED },
     });
     if (!takeover.ok) {
-      return { claimed: false, state: "IN_FLIGHT", command: existing };
+      // LOST is a real racer seizing the stale lease first — that racer is now
+      // running the change, which is a fact the office can be told and can act
+      // on by waiting. UNSUPPORTED is the CAS layer having no working
+      // conditional-write path at all: nothing is known about what is running,
+      // so it takes the UNVERIFIED road, which refuses AND alarms. The
+      // distinction matters now that IN_FLIGHT is answered in words — reported
+      // as a colleague, a broken CAS layer would tell the office to keep
+      // refreshing while the outage ran unseen.
+      return takeover.reason === "UNSUPPORTED"
+        ? { claimed: false, state: "UNVERIFIED", command: existing }
+        : { claimed: false, state: "IN_FLIGHT", command: existing };
     }
     return {
       claimed: true,

@@ -106,6 +106,73 @@ describe("owned-work: claim", () => {
   });
 });
 
+describe("owned-work: a queue two people share refuses in words", () => {
+  /**
+   * The Work screen is a snapshot of a shared queue, so every one of these is
+   * a colleague getting there first, or a case somebody else already closed.
+   * A thrown refusal here IS the crm-docs error alarm — an owner paged because
+   * two people clicked the same row.
+   */
+
+  it("refuses a claim on a case someone else already owns", async () => {
+    item.ownerSub = "sub-other";
+    item.ownerEmail = "raj@example.com";
+
+    const res = (await updateOwnedWork({
+      workItemId: "work-1",
+      action: "CLAIM",
+      actorSub: "sub-1",
+      actorEmail: "olga@example.com",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/already claimed by raj@example.com/i);
+    expect(item.ownerSub).toBe("sub-other");
+  });
+
+  it("refuses a claim on a case that is already resolved", async () => {
+    item.status = "RESOLVED";
+
+    const res = (await updateOwnedWork({
+      workItemId: "work-1",
+      action: "CLAIM",
+      actorSub: "sub-1",
+      actorEmail: "olga@example.com",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/resolved work cannot be claimed/i);
+  });
+
+  it("refuses a release of someone else's case, and names who to ask", async () => {
+    item.ownerSub = "sub-other";
+    item.ownerEmail = "raj@example.com";
+
+    const res = (await updateOwnedWork({
+      workItemId: "work-1",
+      action: "RELEASE",
+      actorSub: "sub-1",
+      actorEmail: "olga@example.com",
+      actorIsOwner: false,
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/only raj@example.com \(or an owner\)/i);
+    expect(item.ownerSub).toBe("sub-other");
+  });
+
+  it("refuses a release of a resolved case", async () => {
+    item.status = "RESOLVED";
+    item.ownerSub = "sub-1";
+
+    const res = (await updateOwnedWork({
+      workItemId: "work-1",
+      action: "RELEASE",
+      actorSub: "sub-1",
+      actorEmail: "olga@example.com",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/resolved work cannot be released/i);
+  });
+});
+
 describe("owned-work: manual override is owner-only (GL-18)", () => {
   it("refuses a free-text close by a routine (non-owner) user", async () => {
     await expect(
@@ -199,6 +266,12 @@ describe("owned-work: verified close (GL-18)", () => {
   });
 
   it("refuses a verified close when the real-world outcome is not yet true", async () => {
+    // Deliberately still an ERROR while the claim/release refusals beside it
+    // became words. runWorkVerifier fails CLOSED with a business-shaped
+    // message — its reads use pageErrors "ignore" and catch-to-null — so
+    // "this isn't done yet" is also exactly what a FAILED READ produces. Said
+    // out loud it would be a confident sentence about nothing, closing over an
+    // outage with no alarm behind it.
     item.kind = "MISSING_CONTACT";
     customer = { id: "rel-1", email: null };
     await expect(

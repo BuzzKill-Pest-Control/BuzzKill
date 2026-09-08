@@ -4,6 +4,7 @@ import {
   clientActionId,
   listLeadActivity,
   opResult,
+  opResultUnlessRefused,
   setLeadDisposition,
   LEAD_LOST_REASONS,
   type Customer,
@@ -100,7 +101,10 @@ export default function LeadPanel({
     const quoteTab = window.open("about:blank", "buzzkill-lead-quote");
     if (quoteTab) quoteTab.opener = null;
     const ok = await act("quote", async () => {
-      const prepared = opResult<{ url: string }>(
+      // A refusal names the missing field (or the out-of-area address) the
+      // office has to fix. Without this it collapses into "the link was not
+      // returned", which tells them nothing and sends them nowhere.
+      const prepared = opResultUnlessRefused<{ url: string }>(
         await api().mutations.prepareLeadQuote({ customerId: customer.id })
       );
       if (!prepared?.url) throw new Error("The quote form link was not returned.");

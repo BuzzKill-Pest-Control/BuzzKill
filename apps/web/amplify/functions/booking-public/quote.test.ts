@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "../shared/atomicLock";
 import { capacityFixtureModels } from "../shared/capacityTestFixture";
 import {
-  BOOKING_TERMS_TEXT,
   BOOKING_TERMS_VERSION,
+  bookingTermsFor,
 } from "../shared/bookingTerms";
 
 /**
@@ -1592,10 +1592,16 @@ describe("PRICED quotes carry the checkout terms (R17)", () => {
     const res = await postQuote(rodentInput);
 
     expect(res.body.decision).toBe("PRICED");
+    // A one-time quote that also offers a plan carries both variants, each
+    // built for the offer it governs.
     expect(res.body.terms).toEqual({
       version: BOOKING_TERMS_VERSION,
-      text: BOOKING_TERMS_TEXT,
+      text: bookingTermsFor({ recurring: false, offSeason: false, paymentMethod: "CARD" }),
+      recurringText: bookingTermsFor({ recurring: true, offSeason: false, paymentMethod: "CARD" }),
     });
+    expect(res.body.terms.text).toContain("BuzzKill Pest Control LLC");
+    expect(res.body.terms.recurringText).toContain("after your first completed visit");
+    expect(res.body.terms.recurringText).toContain("cancel the plan at any time");
   });
 
   it("sends no terms on the CONTACT path — there is nothing to accept yet", async () => {

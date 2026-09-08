@@ -19,6 +19,7 @@ import {
   mergeCustomers,
   previewLifecycleTransition,
   opResult,
+  opResultUnlessRefused,
   REACTIVATION_REASONS,
   recordOfflinePayment,
   rescheduleVisit,
@@ -1094,8 +1095,10 @@ export default function CustomerDetail() {
                     onClick={() =>
                       void run(
                         "invite",
-                        async () =>
-                          unwrap(
+                        async () => {
+                          // A refusal envelope must never read as a sent
+                          // invite — surface the server's words instead.
+                          const res = opResult<{ refused?: string }>(
                             await api().mutations.adminCreateUser({
                               email: customer.email!,
                               name: customer.contactName ?? customer.displayName,
@@ -1103,7 +1106,9 @@ export default function CustomerDetail() {
                               customerId: customer.id,
                               resend: Boolean(customer.portalUserSub),
                             })
-                          ),
+                          );
+                          if (res?.refused) throw new Error(res.refused);
+                        },
                         `Portal invite sent to ${customer.email}`
                       )
                     }
@@ -1211,8 +1216,12 @@ export default function CustomerDetail() {
                             }
                             void run(
                               `start-${p.id}`,
+                              // A refusal (no card on file, plan not active)
+                              // arrives as a successful response, so it has to
+                              // be read here or the success line below would
+                              // announce monthly billing that never started.
                               async () =>
-                                unwrap(
+                                opResultUnlessRefused(
                                   await api().mutations.startSubscription({
                                     servicePlanId: p.id,
                                   })
@@ -1231,7 +1240,7 @@ export default function CustomerDetail() {
                         onClick={() => {
                           if (!window.confirm("Deactivate this plan? Billing pauses and no new visits are scheduled.")) return;
                           void run(`pause-${p.id}`, async () =>
-                            unwrap(
+                            opResultUnlessRefused(
                               await api().mutations.pausePlan({
                                 servicePlanId: p.id,
                               })
@@ -1250,7 +1259,7 @@ export default function CustomerDetail() {
                       loading={perform.busyKey === `resume-${p.id}`}
                       onClick={() =>
                         void run(`resume-${p.id}`, async () =>
-                          unwrap(
+                          opResultUnlessRefused(
                             await api().mutations.resumePlan({
                               servicePlanId: p.id,
                             })
@@ -1437,7 +1446,12 @@ export default function CustomerDetail() {
                               // real status. A bank (ACH) debit comes back
                               // "processing": the money is NOT collected yet, so
                               // don't claim it was charged.
-                              const res = opResult<{ status?: string }>(
+                              // The refusal check comes FIRST: a refused
+                              // charge has no status, and the line below reads
+                              // a missing status as "bank payment processing"
+                              // — telling the office money is on its way when
+                              // no charge was attempted at all.
+                              const res = opResultUnlessRefused<{ status?: string }>(
                                 await api().mutations.chargeOneTimeJob({ jobId: j.id })
                               );
                               const collected =
@@ -1822,7 +1836,7 @@ export default function CustomerDetail() {
                             void run(
                               `settle-${inv.id}`,
                               async () => {
-                                const res = opResult<{
+                                const res = opResultUnlessRefused<{
                                   status?: string;
                                   failureReason?: string;
                                 }>(
@@ -1891,8 +1905,11 @@ export default function CustomerDetail() {
                             if (!reason?.trim()) return;
                             void run(
                               `void-${inv.id}`,
+                              // The invoice list is a snapshot; by the time
+                              // Void is pressed the money may have landed. That
+                              // refusal must not read as "Voided".
                               async () =>
-                                unwrap(
+                                opResultUnlessRefused(
                                   await api().mutations.voidInvoice({
                                     invoiceId: inv.id,
                                     reason: reason.trim(),
@@ -2228,7 +2245,10 @@ export default function CustomerDetail() {
             // Safe contact/address/note edit only (GL-09) — raw Customer.update
             // is closed to the browser, so protected lifecycle fields (status,
             // Stripe ids, access groups, paid state) can't be changed from here.
-            unwrap(
+            // A refusal (a mistyped address, a record a merge has since moved
+            // on) comes back as a successful response. Read it, or the sheet
+            // closes and reloads as though the edit had saved.
+            opResultUnlessRefused(
               await api().mutations.updateCustomerContact({
                 customerId: customer.id,
                 displayName: v.displayName.trim(),
@@ -2320,7 +2340,10 @@ export default function CustomerDetail() {
         <JobForm
           plans={plans}
           onSubmit={async (v) => {
-            const result = opResult<{
+            // A refused seasonal month has neither catalogDecisionOpened nor a
+            // job behind it, so it would fall through both branches below and
+            // the sheet would close on a visit that was never created.
+            const result = opResultUnlessRefused<{
               catalogDecisionOpened?: boolean;
               message?: string;
             }>(
@@ -2359,7 +2382,9 @@ export default function CustomerDetail() {
           groups={groups}
           currentGroupId={customer.groupId}
           onPick={async (groupId, reason) => {
-            unwrap(
+            // Another group change mid-flight refuses in words — surface them
+            // rather than closing the sheet on a move that did not happen.
+            opResultUnlessRefused(
               await api().mutations.setCustomerGroup({
                 reason,
                 customerId: customer.id,
@@ -2944,7 +2969,10 @@ function SettleInvoiceSheet({
     const note = [`Received by ${method.toLowerCase()}`, reference.trim()]
       .filter(Boolean)
       .join(" — ");
-    unwrap(
+    // A refusal here means the invoice moved under this sheet (settled, or
+    // voided, or a debit already in flight). Raising it stops the "marked
+    // paid" confirmation below from claiming a settlement that did not happen.
+    opResultUnlessRefused(
       await settleInvoice({
         invoiceId: invoice.id,
         method: "OFFLINE",
@@ -3766,7 +3794,10 @@ function RescheduleForm({
   const dateChanged = date !== (job.scheduledDate ?? "");
 
   const save = useAction(async () => {
-    const data = opResult<VisitRescheduleOutcome>(
+    // Read the refusal before the PARTIAL branch below: a refusal has no
+    // `outcome` at all, so it would fall straight through to onDone() and the
+    // form would close as though the visit had moved.
+    const data = opResultUnlessRefused<VisitRescheduleOutcome>(
       await rescheduleVisit({
         jobId: job.id,
         scheduledDate: date || undefined,
@@ -4230,7 +4261,9 @@ function JobPacketForm({
   const started = Boolean(job.startedAt);
 
   const save = useAction(async () => {
-    opResult(
+    // A packet edit refused because the visit closed under this sheet must not
+    // read as a saved packet.
+    opResultUnlessRefused(
       await api().mutations.updateJobPacket({
         jobId: job.id,
         accessInstructions: packet.accessInstructions.trim() || undefined,

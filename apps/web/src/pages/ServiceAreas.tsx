@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Hero from "../components/Hero";
-import SEO, { buildBreadcrumbSchema } from "../components/SEO";
 import { CITIES } from "../data/cities";
 
 const STATE_ANCHORS: Record<string, string> = {
@@ -50,20 +49,12 @@ export default function ServiceAreas() {
 
   return (
     <>
-      <SEO
-        title="Service Areas | Pest Control Across Massachusetts & Rhode Island"
-        description="BuzzKill Pest Control proudly serves homes, HOAs, and businesses across Massachusetts and Rhode Island. Find your town and get an instant quote."
-        jsonLd={buildBreadcrumbSchema([
-          { name: "Home", url: "/" },
-          { name: "Service Areas", url: "/service-areas" },
-        ])}
-      />
 
       <Hero
         image="/images/service-areas-hero.png"
         eyebrow="Where We Protect"
         headline={<>Proudly Serving Massachusetts &amp; Rhode Island</>}
-        subtitle={<>From Marlborough to the coast, BuzzKill brings safe, thoughtful pest control to homes, HOAs, and businesses across both states.</>}
+        subtitle={<>From Marlborough to the coast, BuzzKill brings careful, thoughtful pest control to homes, HOAs, and businesses across both states.</>}
         primaryCta={{ label: "Get an Instant Quote", href: "/quote" }}
         secondaryCta={{ label: "Find Your Town", href: "#directory" }}
       />
@@ -113,7 +104,7 @@ export default function ServiceAreas() {
 
           {query.trim() !== "" && directoryCities.length === 0 && (
             <p className="bk-areas-empty">
-              We couldn't find a match for "{query}" — but we may still service your area.{" "}
+              We couldn't find a match for "{query}", but we may still service your area.{" "}
               <Link to="/quote">Request a quote</Link> and we'll confirm.
             </p>
           )}
@@ -125,7 +116,7 @@ export default function ServiceAreas() {
           {directoryCities.length > 0 && (
             <div className="bk-areas-city-grid">
               {directoryCities.map((c) => (
-                <Link key={c.slug} to="/quote" className="bk-areas-city">
+                <Link key={c.slug} to={`/pest-control/${c.slug}`} className="bk-areas-city">
                   {c.city}
                   {c.hq && <span className="bk-areas-hq-badge">HQ</span>}
                 </Link>
@@ -149,7 +140,7 @@ export default function ServiceAreas() {
           <div className="bk-locations-grid">
 
             {/* Massachusetts */}
-            <div id={STATE_ANCHORS.Massachusetts} className="bk-location-card">
+            <Link id={STATE_ANCHORS.Massachusetts} to="/locations/massachusetts" className="bk-location-card">
               <div className="bk-location-shape-wrap">
                 <svg viewBox="0 0 540 280" className="bk-state-svg" aria-label="Massachusetts" role="img">
                   <defs>
@@ -189,10 +180,10 @@ export default function ServiceAreas() {
                 <span className="bk-location-name">Massachusetts</span>
                 <span className="bk-location-cta">{stateCounts.Massachusetts ?? 0} Towns</span>
               </div>
-            </div>
+            </Link>
 
             {/* Rhode Island */}
-            <div id={STATE_ANCHORS["Rhode Island"]} className="bk-location-card">
+            <Link id={STATE_ANCHORS["Rhode Island"]} to="/locations/rhode-island" className="bk-location-card">
               <div className="bk-location-shape-wrap">
                 <svg viewBox="0 0 135 175" className="bk-state-svg" aria-label="Rhode Island" role="img">
                   <defs>
@@ -231,7 +222,7 @@ export default function ServiceAreas() {
                 <span className="bk-location-name">Rhode Island</span>
                 <span className="bk-location-cta">{stateCounts["Rhode Island"] ?? 0} Towns</span>
               </div>
-            </div>
+            </Link>
 
           </div>
         </div>
@@ -250,7 +241,7 @@ export default function ServiceAreas() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Don't See Your Town?</p>
               <h2 className="bk-schedule-title">We're Probably Already Nearby</h2>
-              <p className="bk-schedule-sub">We're always expanding across Massachusetts &amp; Rhode Island. Reach out and we'll confirm coverage for your property.</p>
+              <p className="bk-schedule-sub">Our coverage across Massachusetts and Rhode Island goes beyond the towns listed above. Reach out and we'll confirm coverage for your property.</p>
               <Link to="/quote" className="bk-btn bk-schedule-cta">
                 Get an Instant Quote
               </Link>

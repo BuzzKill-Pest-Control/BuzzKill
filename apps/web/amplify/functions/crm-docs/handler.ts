@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { SITE_ORIGIN } from "../shared/company";
 import type { AppSyncIdentity, AppSyncResolverEvent } from "aws-lambda";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -67,6 +68,7 @@ import {
   resumePlanCancellation,
 } from "../shared/planCancellation";
 import { resumeVisitChange, STOPS_PER_TECH } from "../shared/visitChange";
+import { refusal, type Refusal } from "../shared/refusal";
 import {
   dayEligibility,
   liveClaimsOn,
@@ -92,7 +94,7 @@ import {
   renderQuotePdfForBooking,
   type QuotableBooking,
 } from "../shared/quoteDoc";
-import { OFF_SEASON_MESSAGE } from "../shared/bookingTerms";
+import { CANCEL_FULL_REFUND_DAYS, OFF_SEASON_MESSAGE } from "../shared/bookingTerms";
 import { routingAddress } from "../shared/serviceAddress";
 import { queuePresenceReview } from "../shared/recovery";
 import {
@@ -154,7 +156,7 @@ const CRM_URL = () =>
   process.env.CRM_APP_URL ?? "https://app.pestbuzzkill.com";
 /** The public booking funnel — the only path a lead converts down. */
 const FUNNEL_URL = () =>
-  `${process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com"}/quote`;
+  `${process.env.MARKETING_URL ?? SITE_ORIGIN}/quote`;
 
 /** productsUsed is an AWSJSON field — may arrive as a JSON string. */
 function parseProducts(raw: unknown): ReportProduct[] {
@@ -767,13 +769,17 @@ async function resendEmailLogExact(emailLogId: string) {
   if (!models.EmailLog) throw new Error("The email log is unavailable");
   const { data: row } = await models.EmailLog.get({ id: emailLogId });
   if (!row) throw new Error("That email record was not found");
+  // Both are the office pressing Resend on a row the queue offers, and being
+  // told why this particular message cannot go again. The row itself was read
+  // successfully (the `!row` throw above owns that case), so both sentences are
+  // facts about the message rather than guesses.
   if (row.deliveryStatus === "SENDING") {
-    throw new Error(
+    return refusal(
       "This email's outcome is UNKNOWN (its provider call never settled) — verify with the provider or the customer before resending, or it may arrive twice."
     );
   }
   if (row.hasAttachments || !row.bodyHtml) {
-    throw new Error(
+    return refusal(
       "This message carried attachments (or its body was too large to store), so it can't be resent verbatim — re-generate it from its source screen."
     );
   }
@@ -794,7 +800,7 @@ async function submitPortalRequest(opts: {
   jobId?: string | null;
   preferredDate?: string | null;
   message?: string | null;
-}): Promise<{ reference: string }> {
+}): Promise<{ reference: string } | Refusal> {
   if (!PORTAL_REQUEST_KINDS.has(opts.kind)) {
     throw new Error("Pick a request type");
   }
@@ -813,7 +819,11 @@ async function submitPortalRequest(opts: {
       throw new Error("That visit doesn't belong to this account");
     }
     if (job.status !== "SCHEDULED" && job.status !== "UNSCHEDULED") {
-      throw new Error("That visit can't be rescheduled — call the office and we'll help");
+      // A customer on a portal page rendered before the visit was completed or
+      // canceled. The sentence is already written for them — it should not
+      // also page the owner. (The ownership check above stays a throw: it is
+      // the boundary that stops one account probing another's visit ids.)
+      return refusal("That visit can't be rescheduled — call the office and we'll help");
     }
   } else if (!opts.message?.trim()) {
     throw new Error("Tell us what you need help with");
@@ -1479,7 +1489,9 @@ export async function updateOwnedWork(args: {
   const now = new Date().toISOString();
 
   if (args.action === "CLAIM") {
-    if (item.status !== "OPEN") throw new Error("Resolved work cannot be claimed");
+    // The queue is a snapshot; somebody closed this case while it was on
+    // screen. Every refusal in this action is that same stale list.
+    if (item.status !== "OPEN") return refusal("Resolved work cannot be claimed");
     if (item.ownerSub && item.ownerSub === args.actorSub) {
       // Idempotent: already the claimer.
       return { workItemId: item.id, status: "OPEN", ownerEmail: actorEmail };
@@ -1497,8 +1509,11 @@ export async function updateOwnedWork(args: {
         { kind: "fieldMissingOrNull", field: "ownerSub" },
       ]
     );
+    // LOST is a real racer winning the guarded write — a colleague, not an
+    // outage. (UNSUPPORTED falls through to the branch below, which decides
+    // from the row it actually read.)
     if (!guarded.ok && guarded.reason === "LOST") {
-      throw new Error(
+      return refusal(
         item.ownerSub
           ? `This case is already claimed by ${item.ownerEmail}. Ask them to release it, or an owner to reassign it.`
           : "Someone else claimed this case just now — refresh the queue."
@@ -1508,7 +1523,7 @@ export async function updateOwnedWork(args: {
       // UNSUPPORTED (no CAS wiring): the pre-checked plain write, with the
       // steal refusal enforced from the read above.
       if (item.ownerSub) {
-        throw new Error(
+        return refusal(
           `This case is already claimed by ${item.ownerEmail}. Ask them to release it, or an owner to reassign it.`
         );
       }
@@ -1560,12 +1575,14 @@ export async function updateOwnedWork(args: {
     // GL-18 R9: a routine employee can hand a claimed case back to the shared
     // queue (or an owner can release anyone's) — completing ordinary work
     // never depends on the original claimer or an OWNER close.
-    if (item.status !== "OPEN") throw new Error("Resolved work cannot be released");
+    if (item.status !== "OPEN") return refusal("Resolved work cannot be released");
     if (!item.ownerSub) {
       return { workItemId: item.id, status: "OPEN", ownerEmail: item.ownerEmail };
     }
     if (item.ownerSub !== args.actorSub && !args.actorIsOwner) {
-      throw new Error(
+      // Not a boundary being defended — the message names the colleague to ask,
+      // which is what you write for someone who arrived here reasonably.
+      return refusal(
         `Only ${item.ownerEmail} (or an owner) can release this case.`
       );
     }
@@ -1842,8 +1859,11 @@ async function prepareLeadQuote(customerId: string) {
   if (errors?.length || !lead || lead.status !== "LEAD") {
     throw new Error("Open lead not found.");
   }
+  // The lead row itself was read successfully — the `errors?.length` check
+  // above owns the failed-read case — so each of these is a fact about the
+  // lead that the office can go and fix, one screen away.
   if (lead.doNotContact || lead.lostReason) {
-    throw new Error("Reopen this lead before starting a quote.");
+    return refusal("Reopen this lead before starting a quote.");
   }
   const missing = [
     ["email", lead.email],
@@ -1856,13 +1876,13 @@ async function prepareLeadQuote(customerId: string) {
     .filter(([, value]) => !String(value ?? "").trim())
     .map(([label]) => label);
   if (missing.length) {
-    throw new Error(
+    return refusal(
       `Add the lead's ${missing.join(", ")} before building the quote.`
     );
   }
   const state = String(lead.serviceState).trim().toUpperCase();
   if (!new Set(["MA", "RI"]).has(state)) {
-    throw new Error("Online quoting is available only for MA and RI addresses.");
+    return refusal("Online quoting is available only for MA and RI addresses.");
   }
   const token = await ensureBookingLinkToken(client, {
     id: lead.id,
@@ -1914,7 +1934,7 @@ async function sendCustomerEmail(
       <p>Before your first BuzzKill service visit, please add a payment method (card or bank account) to your account.</p>
       ${noteHtml}
       <p style="margin:20px 0;"><a href="${CRM_URL()}/portal/billing" style="background:#176b2c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Add payment method</a></p>
-      <p style="color:#666;font-size:13px;">Sign in with your BuzzKill account. Payment details are stored securely with Stripe — we never see your card or account number.</p>`;
+      <p style="color:#666;font-size:13px;">Sign in with your BuzzKill account. Payment details are stored securely with Stripe. We never see your card or account number.</p>`;
   } else if (kind === "portal-reminder") {
     subject = "Your BuzzKill customer portal";
     heading = "Your customer portal";
@@ -1940,7 +1960,7 @@ async function sendCustomerEmail(
     subject = "Get your exact price and book your BuzzKill visit online";
     heading = "Your price and your day, in about a minute";
     body = `${hi}
-      <p>You can see your exact price in seconds, pick the day that works for you, and pay online to lock in your visit — no paperwork, no back-and-forth.</p>
+      <p>You can see your exact price online, pick the day that works for you, and pay online to lock in your visit, with no paperwork and no back-and-forth.</p>
       ${noteHtml}
       <p style="margin:20px 0;"><a href="${funnelUrl}" style="background:#176b2c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Get my price &amp; book my visit</a></p>
       <p>If a fresh market rate is needed, the page will keep working on it and email you a secure link as soon as the price is ready.</p>
@@ -2268,7 +2288,9 @@ async function createOfficeJob(args: Args) {
     if (plan.seasonal && args.scheduledDate) {
       const monthKey = args.scheduledDate.slice(0, 7);
       if (!isServiceMonth(plan, monthKey)) {
-        throw new Error(
+        // The office picked a date; the plan says that month has no routine
+        // treatment. Both parties are working correctly.
+        return refusal(
           "This plan's treatments run April–October. Pick an in-season month — November–March has no routine treatment (the plan still bills monthly year-round)."
         );
       }
@@ -2285,12 +2307,19 @@ async function createOfficeJob(args: Args) {
         customerId,
       });
       if (!monthClaim.ok) {
-        throw new Error(
-          monthClaim.unavailable
-            ? "The seasonal-month ledger can't be verified right now — nothing was changed. Try again in a moment."
-            : monthClaim.status === "SATISFIED"
-              ? `This plan's ${monthKey} treatment already happened — a seasonal plan gets exactly one treatment per month. Pick the next month instead.`
-              : `This plan already has its ${monthKey} visit scheduled — a seasonal plan gets exactly one treatment per month. Pick a different month, or reschedule the existing visit.`
+        // The ledger being unverifiable is NOT one of the two business
+        // answers — nothing is known about the month, so it keeps throwing.
+        // The claim already draws this line; it just used to arrive at the
+        // same destination as the other two.
+        if (monthClaim.unavailable) {
+          throw new Error(
+            "The seasonal-month ledger can't be verified right now — nothing was changed. Try again in a moment."
+          );
+        }
+        return refusal(
+          monthClaim.status === "SATISFIED"
+            ? `This plan's ${monthKey} treatment already happened — a seasonal plan gets exactly one treatment per month. Pick the next month instead.`
+            : `This plan already has its ${monthKey} visit scheduled — a seasonal plan gets exactly one treatment per month. Pick a different month, or reschedule the existing visit.`
         );
       }
     }
@@ -2349,12 +2378,21 @@ async function createOfficeJob(args: Args) {
   return { jobId: created.id };
 }
 
-function assertJobCanBeScheduled(job: { status?: string | null }) {
+/**
+ * Why a visit cannot be moved, or null when it can.
+ *
+ * Returns rather than throws: every one of these is the office finding out
+ * that the day moved on — the technician finished the stop, or started it, or
+ * a no-access record already exists — from a board that was rendered before it
+ * happened. The Schedule screen even pre-checks the same statuses, so reaching
+ * here is precisely the stale-board case. None of it is crm-docs failing.
+ */
+function jobNotSchedulable(job: { status?: string | null }): Refusal | null {
   if (job.status === "COMPLETED") {
-    throw new Error("A completed job stays on the record and cannot be rescheduled");
+    return refusal("A completed job stays on the record and cannot be rescheduled");
   }
   if (job.status === "IN_PROGRESS") {
-    throw new Error("This job is in progress — call the technician instead of changing its route");
+    return refusal("This job is in progress — call the technician instead of changing its route");
   }
   // A no-access or canceled visit is a terminal record: its reason, time,
   // note, and door photo are evidence that the attempt happened. Reusing the
@@ -2366,10 +2404,11 @@ function assertJobCanBeScheduled(job: { status?: string | null }) {
     job.status === "PREP_MISSING" ||
     job.status === "CANCELED"
   ) {
-    throw new Error(
+    return refusal(
       "This visit reached a terminal outcome and cannot be reused — rebook it to create a new linked visit"
     );
   }
+  return null;
 }
 
 /**
@@ -2554,7 +2593,8 @@ async function updateJobSchedule(
   };
 
   if (operation === "ASSIGN") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     if (!args.technicianId || !args.routeId || !args.scheduledDate) {
       throw new Error("Assignment requires a technician, route, and service date");
     }
@@ -2577,7 +2617,9 @@ async function updateJobSchedule(
     });
     if (!technician) throw new Error(`Technician ${args.technicianId} not found`);
     if (!technician.active) {
-      throw new Error(
+      // A roster the board rendered before someone was deactivated. The office
+      // picks a different technician; nothing failed.
+      return refusal(
         `${technician.name ?? "This technician"} is inactive and cannot be assigned regulated work`
       );
     }
@@ -2594,13 +2636,27 @@ async function updateJobSchedule(
           );
         }
         if (facts.source === "LEGACY") {
-          // No records yet — the legacy check names the exact missing fact.
-          assertTechnicianCompliance(technician, {
-            requireActive: true,
-            workDate: args.scheduledDate,
-          });
+          // No records yet — the legacy check names the exact missing fact,
+          // and it is the SAME conversation as the refusal below (one office
+          // click, one technician, one lapsed or missing licence), so it gets
+          // the same answer. Safe to convert a throw wholesale here because
+          // shared/compliance.ts is a pure leaf: it does no I/O, so everything
+          // it raises is a named licence fact, never an infrastructure failure
+          // wearing a business message.
+          try {
+            assertTechnicianCompliance(technician, {
+              requireActive: true,
+              workDate: args.scheduledDate,
+            });
+          } catch (err) {
+            return refusal(err instanceof Error ? err.message : String(err));
+          }
         }
-        throw new Error(
+        // Safe as words because the branch above already split off
+        // source === "ERROR": GL-17 fails CLOSED, so a licence-records read
+        // that fell over is indistinguishable from a lapse at `current` alone,
+        // and reaching here means the records were actually read.
+        return refusal(
           `${technician.name ?? "This technician"} has no current applicator licence on record for ${args.scheduledDate} — record a current licence (or pick another technician) before assigning regulated work`
         );
       }
@@ -2610,10 +2666,24 @@ async function updateJobSchedule(
     // gets driven — never a fixed HQ constant. An unavailable base (PTO,
     // closure, weekend, or unverifiable availability facts) fails the
     // assignment closed.
-    const assignBase = await techBaseFor(technician.id, args.scheduledDate);
+    // Read through dayEligibility rather than techBaseFor, which collapses to
+    // `string | null` and so cannot say WHY the base is missing. It matters
+    // here for the first time: every read behind this fails CLOSED, so an
+    // unreadable closure calendar produces exactly the same null as a real day
+    // off, and "isn't available on that date" is a confident sentence about
+    // nothing during an outage — with no alarm, because a refusal returns
+    // cleanly. PTO/closure/weekend refuse; unverifiable throws.
+    const assignDay = await dayEligibility(args.scheduledDate);
+    const assignBase =
+      assignDay.techs.find((t) => t.id === technician.id)?.baseAddress ?? null;
     if (!assignBase) {
-      throw new Error(
-        `${technician.name ?? "This technician"} isn't available on ${args.scheduledDate} (PTO, closure, weekend, or unverifiable availability facts) — pick another technician or day.`
+      if (assignDay.unverifiable) {
+        throw new Error(
+          `${args.scheduledDate}'s availability facts could not be read, so ${technician.name ?? "this technician"}'s availability is unknown and nothing was assigned — try again in a moment. (${assignDay.reasons.join(" ")})`
+        );
+      }
+      return refusal(
+        `${technician.name ?? "This technician"} isn't available on ${args.scheduledDate} (PTO, closure, or weekend) — pick another technician or day.`
       );
     }
     const routeProof = await proveRoutable(
@@ -2850,7 +2920,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "UNASSIGN") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     // GL-04: unassigning ENDS the technician-day hold ASSIGN reserved.
     // The write clears the assignment and restamps pending-assignment pool
     // facts in the SAME update; the old hold is released from the pre-update
@@ -2902,7 +2973,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "REORDER") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     if (args.routeOrder == null || !args.otherJobId || args.otherRouteOrder == null) {
       throw new Error("Reordering requires both stops and their positions");
     }
@@ -2910,7 +2982,8 @@ async function updateJobSchedule(
     if (!other || !job.routeId || other.routeId !== job.routeId) {
       throw new Error("Stops can only be reordered on the same route");
     }
-    assertJobCanBeScheduled(other);
+    const otherNotSchedulable = jobNotSchedulable(other);
+    if (otherNotSchedulable) return otherNotSchedulable;
     const [first, second] = await Promise.all([
       client.models.Job.update({ id: job.id, routeOrder: args.routeOrder }),
       client.models.Job.update({ id: other.id, routeOrder: args.otherRouteOrder }),
@@ -2928,7 +3001,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "CANCEL") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     // The cancel WRITE comes first and clears the capacity stamps in the same
     // update; the releases below read the pre-update row. A retried cancel
     // re-reads a job with no stamps and releases nothing — exactly once. The
@@ -2979,7 +3053,8 @@ async function updateJobSchedule(
   }
 
   if (operation === "RESCHEDULE") {
-    assertJobCanBeScheduled(job);
+    const notSchedulable = jobNotSchedulable(job);
+    if (notSchedulable) return notSchedulable;
     const date = args.scheduledDate || null;
     const dateChanged = date !== (job.scheduledDate ?? null);
 
@@ -3160,7 +3235,9 @@ async function updateJobPacket(
     job.status === "PREP_MISSING" ||
     job.status === "CANCELED"
   ) {
-    throw new Error(
+    // The office had the packet open when the technician closed the visit.
+    // A stale sheet, not a fault.
+    return refusal(
       "This visit is closed — its packet is part of the record and cannot be edited"
     );
   }
@@ -3299,7 +3376,14 @@ async function acknowledgePacket(
   if (!job) throw new Error(`Job ${jobId} not found`);
   const tech = await technicianForCaller(identity);
   if (!tech || job.technicianId !== tech.id) {
-    throw new Error(
+    // Ownership, so worth stating the judgment: this is not the opaque
+    // authorization boundary assertCanActOnJob defends (which stays a throw,
+    // and whose message deliberately says nothing). It is the friendly
+    // explanation written for the person who reaches it by accident — the
+    // office reassigned the stop while the packet was open on a phone. The
+    // roster read behind `tech` pages with pageErrors: "throw", so a failed
+    // read cannot arrive here as "you are not the assignee".
+    return refusal(
       "Only the assigned technician can acknowledge their packet — the point is that THEY read it."
     );
   }
@@ -3464,7 +3548,7 @@ const GEO_REVIEW_DISTANCE_M = 1609;
  * technician in a basement or a dead-zone cannot GPS their way out of it, so
  * those are handled by flagLocationForReview as owned work, never a block.
  */
-function assertLocationIsPresence(
+function locationNotPresence(
   report: {
     geoLat?: number | null;
     geoLng?: number | null;
@@ -3472,9 +3556,9 @@ function assertLocationIsPresence(
     geoCapturedAt?: string | null;
   },
   job: { startedAt?: string | null; applicationEndAt?: string | null }
-) {
+): Refusal | null {
   if (report.geoLat == null || report.geoLng == null) {
-    throw new Error("Capture the location on site before sending the report");
+    return refusal("Capture the location on site before sending the report");
   }
   if (
     !Number.isFinite(report.geoLat) ||
@@ -3483,23 +3567,23 @@ function assertLocationIsPresence(
     Math.abs(report.geoLng) > 180 ||
     (report.geoLat === 0 && report.geoLng === 0)
   ) {
-    throw new Error(
+    return refusal(
       "The captured location isn't a real point on the map — capture it again on site"
     );
   }
   if (report.geoCapturedAt == null || report.geoAccuracyM == null) {
-    throw new Error(
+    return refusal(
       "Re-capture the location on site — this reading is missing its time or its accuracy, so it can't stand as proof you were there"
     );
   }
   if (!Number.isFinite(report.geoAccuracyM) || report.geoAccuracyM <= 0) {
-    throw new Error(
+    return refusal(
       "The location reading has no real accuracy — capture it again on site"
     );
   }
   const capturedMs = Date.parse(report.geoCapturedAt);
   if (Number.isNaN(capturedMs)) {
-    throw new Error(
+    return refusal(
       "The location reading's timestamp is unreadable — capture it again on site"
     );
   }
@@ -3511,10 +3595,11 @@ function assertLocationIsPresence(
     (capturedMs < startMs - GEO_CAPTURE_GRACE_MS ||
       capturedMs > endMs + GEO_CAPTURE_GRACE_MS)
   ) {
-    throw new Error(
+    return refusal(
       "The location was captured outside the time you were on site — re-capture it during the visit so the record proves you were there"
     );
   }
+  return null;
 }
 
 /**
@@ -3630,7 +3715,20 @@ async function flagLocationForReview(input: {
   }
 }
 
-function assertReportIsARecord(
+/**
+ * Why this report is not yet a record, or null when it is.
+ *
+ * Every sentence here is written to a technician standing on a driveway with a
+ * phone: add the products, set the re-entry interval, press Start job first.
+ * That is a form being checked, and a form being checked is not a Lambda
+ * failure — thrown, each of these was the crm-docs error alarm going off
+ * because somebody left a field blank.
+ *
+ * Everything it reads is already in hand (the report row and the job row the
+ * caller fetched), so no failed read can reach these branches and masquerade
+ * as a missing field.
+ */
+function reportNotARecord(
   report: {
     inspectionOnly?: boolean | null;
     productsUsed?: unknown;
@@ -3646,14 +3744,14 @@ function assertReportIsARecord(
     startedAt?: string | null;
     applicationEndAt?: string | null;
   }
-) {
+): Refusal | null {
   if (job.status === "CANCELED") {
-    throw new Error(
+    return refusal(
       "This job was canceled — finalizing a report against it would resurrect it as completed"
     );
   }
   if (job.status === "NO_ACCESS") {
-    throw new Error(
+    return refusal(
       "This job is marked as no access — a report would be a record of an application that did not happen"
     );
   }
@@ -3662,62 +3760,64 @@ function assertReportIsARecord(
   // the server invented is not a record of when the application happened; it is
   // a record of when someone pressed send. Refuse rather than substitute.
   if (!job.startedAt) {
-    throw new Error(
+    return refusal(
       "This job was never started — press Start job first, so the record carries the application's real start time, then complete the report"
     );
   }
   if (!job.applicationEndAt) {
-    throw new Error(
+    return refusal(
       "The application was never ended — the record needs the real time you finished on site, not the moment this report was sent"
     );
   }
   if (!report.servicesPerformed?.trim()) {
-    throw new Error("Say what was done before sending the report");
+    return refusal("Say what was done before sending the report");
   }
-  assertLocationIsPresence(report, job);
+  const badLocation = locationNotPresence(report, job);
+  if (badLocation) return badLocation;
 
   const products = parseProducts(report.productsUsed);
 
   if (report.inspectionOnly) {
     if (products.length) {
-      throw new Error(
+      return refusal(
         "This is marked inspection-only but lists products applied — untick one or the other"
       );
     }
-    return;
+    return null;
   }
 
   // Zero products used to finalize and email happily. A pesticide record with
   // no pesticide on it is either a false record or an inspection, and the
   // system should know which.
   if (!products.length) {
-    throw new Error(
+    return refusal(
       "Add the products you applied, or tick “inspection only — no product applied”"
     );
   }
   for (const p of products) {
     const name = p.name?.trim();
-    if (!name) throw new Error("A product row is missing its name");
+    if (!name) return refusal("A product row is missing its name");
     if (!p.epaNumber?.trim()) {
-      throw new Error(`${name} needs its EPA registration number`);
+      return refusal(`${name} needs its EPA registration number`);
     }
     if (!EPA_REGISTRATION_RE.test(p.epaNumber.trim())) {
-      throw new Error(
+      return refusal(
         `“${p.epaNumber}” isn't a valid EPA registration number for ${name} — it looks like 432-1234`
       );
     }
     if (!p.quantity?.trim()) {
-      throw new Error(`How much ${name} was applied?`);
+      return refusal(`How much ${name} was applied?`);
     }
     if (!p.rate?.trim()) {
-      throw new Error(`Record the label application rate or dilution for ${name}`);
+      return refusal(`Record the label application rate or dilution for ${name}`);
     }
   }
   if (report.reEntryIntervalHours == null) {
-    throw new Error(
+    return refusal(
       "Set the re-entry interval — the occupant has to be told when it is safe to go back in"
     );
   }
+  return null;
 }
 
 type CatalogProduct = {
@@ -3749,10 +3849,10 @@ type CatalogProduct = {
  * that was added but never label-approved is refused here — not silently
  * finalized onto the document a customer keeps and an inspector may read.
  */
-function assertProductsAreApproved(
+function productsNotApproved(
   products: { name?: string | null; epaNumber?: string | null }[],
   catalog: CatalogProduct[]
-): void {
+): Refusal | null {
   const approved = catalog.filter((c) => c.active && c.labelApproved);
   for (const p of products) {
     const name = p.name?.trim() ?? "";
@@ -3763,11 +3863,17 @@ function assertProductsAreApproved(
         (c.name?.trim().toLowerCase() ?? "") === name.toLowerCase()
     );
     if (!match) {
-      throw new Error(
+      // Words, and safe to say them, but ONLY because the caller now pages the
+      // catalog with pageErrors: "throw". Read with a dropped page, this
+      // sentence would tell a technician that a product the office approved
+      // months ago is not in the catalog, and send them to ask for something
+      // that is already there.
+      return refusal(
         `“${name}” (EPA ${epa || "—"}) isn't an approved product in the catalog. A product has to be reviewed and added to the product log by the office before it can go on a service report — free-text details can't authorize a pesticide record. Ask the office to add it, then pick it here.`
       );
     }
   }
+  return null;
 }
 
 /**
@@ -3780,7 +3886,7 @@ function assertProductsAreApproved(
  * reEntryHours); the validation logic is shared/compliance's
  * assertApplicationWithinLabel, pure and unit-tested.
  */
-function assertProductsWithinLabelRules(
+function productsOutsideLabel(
   products: {
     name?: string | null;
     epaNumber?: string | null;
@@ -3790,7 +3896,7 @@ function assertProductsWithinLabelRules(
   catalog: CatalogProduct[],
   report: { reEntryIntervalHours?: number | null; targetPests?: string | null },
   job: { serviceType?: string | null }
-): void {
+): Refusal | null {
   const approved = catalog.filter((c) => c.active && c.labelApproved);
   for (const p of products) {
     const name = p.name?.trim() ?? "";
@@ -3800,20 +3906,28 @@ function assertProductsWithinLabelRules(
         (c.epaNumber?.trim() ?? "") === epa &&
         (c.name?.trim().toLowerCase() ?? "") === name.toLowerCase()
     );
-    // Unmatched rows are already refused by assertProductsAreApproved.
+    // Unmatched rows are already refused by productsNotApproved.
     if (!match) continue;
-    assertApplicationWithinLabel({
-      productName: name,
-      recordedQuantity: p.quantity,
-      recordedRate: p.rate,
-      reportReEntryHours: report.reEntryIntervalHours,
-      reportPests: report.targetPests,
-      jobServiceType: job.serviceType,
-      catalogDefaultRate: match.defaultRate,
-      catalogReEntryHours: match.reEntryHours,
-      rules: parseLabelRules(match.labelRulesJson),
-    });
+    // shared/compliance's assertApplicationWithinLabel is a pure leaf — no
+    // I/O — so everything it raises is a named label fact for the technician
+    // to fix, never an infrastructure failure wearing a business message.
+    try {
+      assertApplicationWithinLabel({
+        productName: name,
+        recordedQuantity: p.quantity,
+        recordedRate: p.rate,
+        reportReEntryHours: report.reEntryIntervalHours,
+        reportPests: report.targetPests,
+        jobServiceType: job.serviceType,
+        catalogDefaultRate: match.defaultRate,
+        catalogReEntryHours: match.reEntryHours,
+        rules: parseLabelRules(match.labelRulesJson),
+      });
+    } catch (err) {
+      return refusal(err instanceof Error ? err.message : String(err));
+    }
   }
+  return null;
 }
 
 /** Re-fetch a finalized report's stored PDF for a resumed delivery. A missing
@@ -4039,7 +4153,7 @@ async function deliverServiceReport(
          <p>${technicianName} completed your <strong>${job.serviceType}</strong> service. Your full service report is attached${customer.portalUserSub ? ", and it's always available in your BuzzKill portal" : ""}.</p>
          ${
            nextIso
-             ? `<p><strong>Your next visit is planned for around ${prettyDate(nextIso)}</strong> — we'll confirm the exact time and send reminders as it gets closer.</p>`
+             ? `<p><strong>Your next visit is planned for around ${prettyDate(nextIso)}.</strong> We'll confirm the exact day and send reminders as it gets closer.</p>`
              : ""
          }
          ${
@@ -4313,7 +4427,8 @@ async function finalizeServiceReport(reportId: string) {
     // The gate was in React only. finalizeServiceReport checked nothing — not
     // products, not an EPA number, not a quantity, not the job's state — so any
     // caller could finalize an empty report on any job and email it.
-    assertReportIsARecord(report, job);
+    const notARecord = reportNotARecord(report, job);
+    if (notARecord) return notARecord;
 
     // Every product must be an office-approved catalog product AND carry the
     // approved label rate — not a free-text row (or strength) a technician typed
@@ -4322,10 +4437,18 @@ async function finalizeServiceReport(reportId: string) {
     if (productsUsed.length) {
       const approved = await listAll(
         (nextToken) => client.models.Product.list({ limit: 1000, nextToken }),
-        { pageErrors: "ignore" }
+        // Was "ignore". A dropped page here USED to mean an approved product
+        // was reported missing and the finalize threw, which at least alarmed.
+        // Now that the same condition answers in words, an incomplete catalog
+        // would quietly tell a technician to go and ask the office for a
+        // product the office already added. The refusal below is only honest
+        // if the catalog behind it is whole, so a failed page is an error.
+        { pageErrors: "throw" }
       );
-      assertProductsAreApproved(productsUsed, approved);
-      assertProductsWithinLabelRules(productsUsed, approved, report, job);
+      const notApproved = productsNotApproved(productsUsed, approved);
+      if (notApproved) return notApproved;
+      const offLabel = productsOutsideLabel(productsUsed, approved, report, job);
+      if (offLabel) return offLabel;
     }
 
     // assertReportIsARecord has already refused any report whose job is missing
@@ -5014,7 +5137,9 @@ async function startJob(jobId: string) {
   // GL-12: a packet change since assignment must reach the technician BEFORE
   // work starts — the app shows the change; acknowledging it unblocks Start.
   if ((job.packetVersion ?? 1) > 1 && (job.packetAckVersion ?? 0) < (job.packetVersion ?? 1)) {
-    throw new Error(
+    // GL-12 working: the office changed the packet and the technician has not
+    // read it yet. The app's next screen IS the fix.
+    return refusal(
       "The job packet changed since it was assigned — review the change in the packet and tap Acknowledge before starting."
     );
   }
@@ -5048,7 +5173,7 @@ async function startJob(jobId: string) {
 
 /** The public site origin the customer's tracking link lives on. */
 const TRACK_SITE_URL = () =>
-  process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com";
+  process.env.MARKETING_URL ?? SITE_ORIGIN;
 /** How long an On-My-Way session may broadcast before it auto-expires. */
 const TRACK_TTL_MS = 3 * 60 * 60 * 1000;
 
@@ -5114,8 +5239,8 @@ async function startOnMyWay(
       html: emailShell(
         `${techFirstSafe} is on the way`,
         `<p>Your BuzzKill technician is heading to your service address now.</p>
-         <p><a href="${trackUrl}">Track their arrival on a live map</a> — it updates as they drive and shows an estimated arrival time.</p>
-         <p class="muted">The link stops working once your technician arrives.</p>`
+         <p><a href="${trackUrl}">Track their arrival on a live map</a>. It updates as they drive and shows an estimated arrival time.</p>
+         <p style="color:#666;font-size:13px;">The link stops working once the visit starts, or after three hours.</p>`
       ),
     });
   }
@@ -5401,12 +5526,14 @@ async function reportNoAccess(args: {
     return { jobId: args.jobId, status: "NO_ACCESS", alreadyReported: true };
   }
   if (job.status === "COMPLETED") {
-    throw new Error(
+    // Two taps, or a visit the office closed from its end while the phone was
+    // on the honest-exit screen. The record stands; the technician is told so.
+    return refusal(
       "This job is already completed — if that was a mistake, tell the office rather than overwriting it"
     );
   }
   if (job.status === "CANCELED") {
-    throw new Error("This job was canceled — nothing to report against it");
+    return refusal("This job was canceled — nothing to report against it");
   }
 
   const nowIso = new Date().toISOString();
@@ -5469,8 +5596,8 @@ async function reportNoAccess(args: {
         "We couldn't complete today's visit",
         `<p>Hi ${customer.displayName ?? "there"},</p>
          <p>Our technician arrived for your ${job.serviceType}${job.scheduledDate ? ` on ${job.scheduledDate}` : ""} but couldn't get access (${label.toLowerCase()}).</p>
-         <p>Under the cancellation policy, a visit we can't access counts as a same-day cancellation and <strong>isn't refundable</strong>${job.paidAt ? " — but your payment stays with your visit: we'll rebook it with you at no additional charge" : ""}.</p>
-         <p>Our office will reach out within one business day to set the new time — or just reply to this email with a day that works.</p>`
+         <p>Because the visit couldn't go ahead on the day, it falls under our cancellation policy (cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the visit are <strong>not refundable</strong>).${job.paidAt ? " Your payment stays with your visit, and we'll rebook it with you at no additional charge." : " We'll rebook it with you."}</p>
+         <p>Our office will reach out within one business day to set the new day, or just reply to this email with a day that works.</p>`
       ),
     }).catch(() => undefined);
   }
@@ -5540,12 +5667,14 @@ async function reportVisitNotPerformed(
     return { jobId: args.jobId, status: kind, alreadyReported: true };
   }
   if (job.status === "COMPLETED") {
-    throw new Error(
+    // Two taps, or a visit the office closed from its end while the phone was
+    // on the honest-exit screen. The record stands; the technician is told so.
+    return refusal(
       "This job is already completed — if that was a mistake, tell the office rather than overwriting it"
     );
   }
   if (job.status === "CANCELED") {
-    throw new Error("This job was canceled — nothing to report against it");
+    return refusal("This job was canceled — nothing to report against it");
   }
 
   const nowIso = new Date().toISOString();
@@ -5605,8 +5734,8 @@ async function reportVisitNotPerformed(
     await sendEmail({
       to: customer.email,
       subject: isScope
-        ? "About today's visit — we need to adjust your service"
-        : "About today's visit — we couldn't treat yet",
+        ? "About today's visit: we need to adjust your service"
+        : "About today's visit: we couldn't treat yet",
       template: isScope ? "scope-mismatch-next-step" : "prep-missing-next-step",
       customerId: customer.id,
       relatedId: job.id,
@@ -5679,7 +5808,11 @@ async function getReportPhotoUploadUrl(reportId: string, contentType: string) {
   });
   if (!report) throw new Error(`Report ${reportId} not found`);
   if (report.status === "FINALIZED") {
-    throw new Error("Report is finalized — photos can no longer be added");
+    // The same refusal saveServiceReportDraft and setReportPhotos already
+    // make (394e7e3) — this upload-url path was the one left throwing, so a
+    // technician tapping "add photo" on a report that finalized a moment ago
+    // still paged the owner.
+    return refusal("Report is finalized — photos can no longer be added");
   }
   const key = `reports/${report.customerId}/photos/${reportId}/${Date.now()}-${randomBytes(4).toString("hex")}.${ext}`;
   const uploadUrl = await getSignedUrl(

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 function GoogleLogo() {
   return (
@@ -35,6 +36,14 @@ function CtaButton({
   const className = `bk-btn bk-btn-${variant}`;
   const trackId = variant === "primary" ? "hero_primary" : "hero_secondary";
   if (cta.href) {
+    const isInternalRoute = cta.href.startsWith("/") && !cta.href.includes("#");
+    if (isInternalRoute) {
+      return (
+        <Link className={className} to={cta.href} onClick={cta.onClick} data-track-id={trackId}>
+          {cta.label}
+        </Link>
+      );
+    }
     return (
       <a className={className} href={cta.href} onClick={cta.onClick} data-track-id={trackId}>
         {cta.label}
@@ -75,8 +84,6 @@ export default function Hero({
               </span>
               <span className="bk-announce-sep" aria-hidden="true">|</span>
               <span>Licensed &amp; Insured</span>
-              <span className="bk-announce-sep" aria-hidden="true">|</span>
-              <span>Family Owned &amp; Operated</span>
               <span className="bk-announce-sep" aria-hidden="true">|</span>
               <span>Serving MA &amp; RI</span>
             </div>

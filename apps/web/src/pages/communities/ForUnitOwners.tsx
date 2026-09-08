@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
+import { OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
   { emoji: "🐜", text: "I keep seeing the same pests no matter what I try." },
@@ -43,7 +43,7 @@ const METHOD_STEPS = [
     method: "SOLVE",
     num: "02",
     title: "Treat The Problem. Not Just The Pest.",
-    body: "We target the source so you're not dealing with the same issue again next month.",
+    body: "We target the source to help keep the same issue from coming back next month.",
   },
   {
     method: "PROTECT",
@@ -93,7 +93,7 @@ const FAQS = [
   },
   {
     q: "Are treatments safe for children and pets?",
-    a: "Absolutely. Safe for Families. Tough on Pests. Every treatment is applied with your home and family in mind.",
+    a: "Safe for Families. Tough on Pests. That is how we approach every visit. We apply every product according to its label directions and Massachusetts and Rhode Island regulations, choose methods suited to occupied homes, and give you clear guidance on any preparation or re-entry time for your specific service.",
   },
   {
     q: "My neighbor has pests too. Should I be concerned?",
@@ -123,22 +123,6 @@ export default function ForUnitOwners() {
 
   return (
     <>
-      <SEO
-        title="Pest Control For Unit Owners — MA & RI Condos & HOAs"
-        description="Professional pest control for unit owners across Massachusetts and Rhode Island. Know the price. Book in minutes. Safe for families. Tough on pests."
-        jsonLd={[
-          buildServiceSchema(
-            "Pest Control for Unit Owners",
-            "Professional pest control for individual unit owners in condominiums and HOA communities across Massachusetts and Rhode Island.",
-            "/communities/for-owners",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home",            url: "/" },
-            { name: "Communities",     url: "/communities" },
-            { name: "For Unit Owners", url: "/communities/for-owners" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -158,7 +142,7 @@ export default function ForUnitOwners() {
         headline="Pest Problems In Your Home? Let's Get It BuzzKilled."
         sub="Whether it's ants in the kitchen, mice in the attic, or wasps on the patio, you shouldn't have to guess what to do next. BuzzKill helps homeowners across Massachusetts and Rhode Island understand the problem, solve it at the source, and protect what matters most. Safe for Families. Tough on Pests."
         primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
-        secondaryCta={{ label: "Talk To A Local Expert", href: "tel:+15082589294" }}
+        secondaryCta={{ label: "Talk To A Local Expert", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
 
@@ -363,7 +347,7 @@ export default function ForUnitOwners() {
                 <Link to="/quote" className="bk-btn bk-schedule-cta">
                   Get Instant Quote
                 </Link>
-                <a href="tel:+15082589294" className="bk-btn bk-btn-outline-light bk-com-talk-btn">
+                <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light bk-com-talk-btn">
                   Talk To A Local Expert
                 </a>
               </div>

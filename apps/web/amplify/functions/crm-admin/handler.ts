@@ -50,6 +50,7 @@ import {
 } from "../shared/ownedWork";
 import { disposeStaleDrafts } from "../shared/jobAssignment";
 import { forEachPage, listAll } from "../shared/pagination";
+import { Refused, refusal, refusalFrom, type Refusal } from "../shared/refusal";
 import { todayEastern } from "../shared/dates";
 import { callerEmail, callerIsOwner, callerSub } from "../shared/authz";
 import {
@@ -1081,11 +1082,27 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     }
     // Active + present, current licence (GL-17: from the licence records, with
     // the legacy fields honored only until records exist).
+    //
+    // These are refusals a well-meaning office screen can reach — a licence
+    // lapses on its own, a roster list goes stale — so they come back as
+    // {refused} for the screen to show, not as a thrown (alarmed) error. Only
+    // a licence check that could not be COMPLETED still throws.
     if (!tech.active) {
-      throw new Error(`${tech.name} is inactive and cannot hold a technician login`);
+      return refusal(`${tech.name} is inactive and cannot hold a technician login`);
     }
-    if (!(await licenseFactsFor(tech)).current) {
-      throw new Error(
+    const licenceFacts = await licenseFactsFor(tech);
+    if (!licenceFacts.current) {
+      // GL-17 fails CLOSED, so a licence-records READ FAILURE is indistinguish-
+      // able from a lapse at `current` alone. It must not become a refusal: a
+      // refusal returns cleanly, and the office would chase paperwork for a
+      // licensed technician while the outage ran unseen. Throw — the alarm is
+      // for exactly this.
+      if (licenceFacts.source === "ERROR") {
+        throw new Error(
+          `${tech.name}'s licence records could not be read just now — try again in a moment. The login can't be created until the licence check succeeds.`
+        );
+      }
+      return refusal(
         `${tech.name} has no current applicator licence on record — record one before inviting their login.`
       );
     }
@@ -1093,7 +1110,7 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     // different person's login, linking it here would make two logins one
     // identity — the shared-identity case GL-14 forbids.
     if (tech.userSub && tech.email && tech.email.toLowerCase() !== email) {
-      throw new Error(
+      return refusal(
         `${tech.name} is already linked to the login ${tech.email}. Offboard that login first, or pick a technician that isn't linked yet — one technician record, one login.`
       );
     }
@@ -1119,11 +1136,16 @@ async function adminCreateUser(args: AdminCreateUserArgs) {
     // login on UsernameExistsException, which for a group would graft the whole
     // portfolio onto whoever already signs in with that email. Refuse until the
     // office explicitly confirms the reuse, and name who the email is today.
+    // The refusal is an envelope, not a throw: this is a working office flow
+    // (the screen offers "reuse" / "different email"), not a Lambda failure.
     if (!args.confirmReuse) {
       const existing = await describeExistingLoginForEmail(email);
       if (existing)
-        throw new Error(
-          `${email} already signs in as ${existing}. Giving this group that login would also let it see this group's whole portfolio. Reuse that login for the group, or use a different email.`
+        return refusal(
+          `${email} already signs in as ${existing}. Giving this group that login would also let it see this group's whole portfolio. Reuse that login for the group, or use a different email.`,
+          // Tells the screen this refusal is resolvable by re-sending with
+          // confirmReuse, unlike a plain refusal.
+          { offerReuse: true }
         );
     }
   }
@@ -1338,16 +1360,22 @@ async function setCustomerGroup(
     actor,
   });
   if (!claim.claimed) {
+    // "Someone else got here first" and "your own click is still running" are
+    // the single-winner command doing exactly its job, and both resolve by
+    // waiting. They come back as words.
     if (claim.state === "CONFLICT") {
-      throw new Error(
+      return refusal(
         `Another group change (${claim.command?.fromGroupId ?? "none"} → ${claim.command?.toGroupId ?? "none"}) is mid-flight for this customer — let it finish (the daily run resumes stuck ones) before starting a different one.`
       );
     }
     if (claim.state === "IN_FLIGHT") {
-      throw new Error(
+      return refusal(
         "This group change is already running — give it a moment and refresh the customer."
       );
     }
+    // The third case is NOT a refusal and must keep throwing: the command
+    // store itself could not be reached, so nothing is known about what is or
+    // is not running. That is the outage the alarm exists for.
     throw new Error(
       "Group membership can't be changed right now: the change command store is unavailable, and an untracked change is not allowed."
     );
@@ -1817,7 +1845,12 @@ async function updateCustomerContact(args: UpdateCustomerContactArgs) {
   if (!displayName) throw new Error("A customer name is required");
   const email = args.email?.trim().toLowerCase() || null;
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    throw new Error("Enter a valid email address, or leave it blank");
+    // Reachable by typing: this pattern is STRICTER than the Edit sheet's own
+    // check (which allows an @ inside either half), so a real address typed
+    // slightly wrong clears the browser and lands here. The blank-name guard
+    // above stays a throw — the sheet enforces exactly the same rule, so an
+    // empty name arriving here is a client that has stopped working.
+    return refusal("Enter a valid email address, or leave it blank");
   }
   const trim = (v?: string | null) => (v?.trim() ? v.trim() : null);
 
@@ -1828,13 +1861,18 @@ async function updateCustomerContact(args: UpdateCustomerContactArgs) {
   if (!customer) throw new Error(`Customer ${args.customerId} not found`);
   // The merge command owns both of its rows until it settles; a contact edit
   // must not race it, and a tombstone must never be edited.
+  // Both are ordinary consequences of an open tab: a customer list rendered
+  // before a merge ran still offers Edit on a row that has since become a
+  // tombstone, or that a merge is currently rewriting. Words, not a page — and
+  // a read failure cannot fake either, because both need a row that says so
+  // (the `!customer` throw above is where an unreadable customer lands).
   if (customer.status === "MERGED") {
-    throw new Error(
+    return refusal(
       `This record was merged into ${customer.mergedIntoId ?? "another record"}; act on that record instead.`
     );
   }
   if (isMidMerge(customer)) {
-    throw new Error(
+    return refusal(
       "This record is mid-merge — finish or resume the merge first."
     );
   }
@@ -2540,10 +2578,21 @@ async function changeStaffRoles(
       // last-owner check and the change makes the check authoritative — two
       // concurrent demotions can no longer both pass a point-in-time count and
       // then depend on a fallible rollback to keep one owner alive.
-      ownerSerialHeld = await acquireOwnerSerial(serialHolder);
-      if (!ownerSerialHeld) {
+      const serial = await acquireOwnerSerial(serialHolder);
+      ownerSerialHeld = serial.ok;
+      if (!serial.ok) {
+        // A colleague mid-change is a fact the office can act on (wait, then
+        // retry) and comes back as words through the catch below. A mutex that
+        // could not be READ is not that fact — reported as one, it would tell
+        // the office to keep retrying while the outage ran unseen, so it keeps
+        // throwing and keeps the alarm.
+        if (serial.reason === "HELD") {
+          throw new Refused(
+            "Another owner change is being applied right now. Wait a moment, then retry."
+          );
+        }
         throw new Error(
-          "Another owner change is being applied right now. Wait a moment, then retry."
+          `The owner-change lock could not be read, so this change was not attempted: ${serial.detail}`
         );
       }
     }
@@ -2558,21 +2607,46 @@ async function changeStaffRoles(
     if (want.includes("TECH") && !have.includes("TECH")) {
       const client = await dataClient();
       // Point read: userSub maps to at most one technician — one page cannot truncate.
-      const { data: techs } =
+      const { data: techs, errors: techErrors } =
         await client.models.Technician.listTechnicianByUserSub({
           userSub: target.sub,
         });
+      // A failed read also arrives as an empty result, and "no rows" is about
+      // to be reported as "this login isn't linked to a technician record" —
+      // a sentence about the data that would be false. Fail loudly instead.
+      if (techErrors?.length) {
+        throw new Error(
+          `Could not read the technician linked to ${target.email}: ${techErrors
+            .map((e) => e.message)
+            .join("; ")}`
+        );
+      }
+      // The same three refusals adminCreateUser makes on the invite path, and
+      // the same reasoning: an owner picking "Technician" for a login that was
+      // never linked, or whose licence lapsed, is being told "no" by a working
+      // guard. Refused (not Error) so the catch below returns it as words for
+      // the Staff screen — the ledger still records REFUSED either way.
       const tech = techs?.[0];
       if (!tech) {
-        throw new Error(
+        throw new Refused(
           `Can't grant the technician role to ${target.email}: this login isn't linked to a technician record. Link it first with an invite (which binds a login to a licensed technician atomically).`
         );
       }
       if (!tech.active) {
-        throw new Error(`${tech.name} is inactive and cannot hold the technician role`);
+        throw new Refused(`${tech.name} is inactive and cannot hold the technician role`);
       }
-      if (!(await licenseFactsFor(tech)).current) {
-        throw new Error(
+      const licenceFacts = await licenseFactsFor(tech);
+      if (!licenceFacts.current) {
+        // GL-17 fails CLOSED: a records READ FAILURE looks exactly like a lapse
+        // at `current`. A plain Error (not Refused) so it escapes the catch
+        // below and still alarms — otherwise an outage would be filed as a
+        // licence problem in the staff-access ledger and page nobody.
+        if (licenceFacts.source === "ERROR") {
+          throw new Error(
+            `${tech.name}'s licence records could not be read just now — try again in a moment. The technician role can't be granted until the licence check succeeds.`
+          );
+        }
+        throw new Refused(
           `${tech.name} has no current applicator licence on record — record one before granting the technician role.`
         );
       }
@@ -2793,6 +2867,12 @@ async function changeStaffRoles(
         },
         fence
       );
+      // A guard saying "no" to an authorized owner is the product working:
+      // hand the words back for the screen to show. Anything else that threw
+      // before the first write is a real failure and still escapes to the
+      // alarm, which is what keeps the alarm worth reading.
+      const refused = refusalFrom(err);
+      if (refused) return { email, outcome: "REFUSED", ...refused };
       throw err;
     }
     // Failed after mutation began (e.g. the Cognito read-back itself threw).
@@ -2916,6 +2996,15 @@ async function offboardStaff(
         },
         fence
       );
+      // The last-active-owner guard raises a Refused, and it raises it before a
+      // single Cognito call — the command row above already records the refusal
+      // and its reason, which is the durable account of "someone tried to
+      // offboard the last owner" that a CloudWatch page was standing in for.
+      // Hand the words back instead. Anything else that threw is a real failure
+      // and still escapes to the alarm, as does this same guard's cousin when
+      // the owner-serial mutex could not be taken.
+      const refused = refusalFrom(err);
+      if (refused) return { email, outcome: "REFUSED", ...refused };
       throw err;
     }
     // Stopped after access changes began. killLogin already opened (and
@@ -2979,10 +3068,18 @@ async function offboardStaff(
     // GL-14: owner-set changes are serialized — the mutex is held across the
     // last-owner check AND the removal, so the check is authoritative and no
     // fallible rollback is needed to preserve an owner.
-    ownerSerialHeld = await acquireOwnerSerial(serialHolder);
-    if (!ownerSerialHeld) {
+    const serial = await acquireOwnerSerial(serialHolder);
+    ownerSerialHeld = serial.ok;
+    if (!serial.ok) {
+      // Same split as changeStaffRoles: a live lease someone else holds is a
+      // refusal; a lock we could not read is an outage and still throws.
+      if (serial.reason === "HELD") {
+        throw new Refused(
+          "Another owner change is being applied right now. Wait a moment, then retry."
+        );
+      }
       throw new Error(
-        "Another owner change is being applied right now. Wait a moment, then retry."
+        `The owner-change lock could not be read, so nothing was offboarded: ${serial.detail}`
       );
     }
     assertOwnerRemains({
@@ -3437,10 +3534,14 @@ async function staffRoster() {
 async function liftEmailSuppression(
   args: { email: string; reasonCode: string; evidence: string },
   actor: { sub: string | null; email: string | null }
-): Promise<{ lifted: boolean; message: string }> {
+): Promise<{ lifted: boolean; message: string } | Refusal> {
   const email = args.email.trim().toLowerCase();
   if (!email || !email.includes("@")) {
-    throw new Error("Enter the suppressed email address to lift.");
+    // The address is free text the office pastes out of a bounce; a mistyped
+    // one is a person mistyping. The two guards below it are not: the reason
+    // code comes from a fixed list and the evidence field is required by the
+    // screen, so either arriving wrong is a broken client.
+    return refusal("Enter the suppressed email address to lift.");
   }
   if (!(SUPPRESSION_RELEASE_REASONS as readonly string[]).includes(args.reasonCode)) {
     throw new Error("Choose the controlled suppression-release reason.");

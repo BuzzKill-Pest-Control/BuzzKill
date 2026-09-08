@@ -116,7 +116,7 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
             {status === "success" ? (
               <div className="bk-modal-success">
                 <h2 id="talk-to-expert-title" className="bk-modal-title">We've got it!</h2>
-                <p>A local pest control expert will reach out to you shortly.</p>
+                <p>A local BuzzKill expert will follow up with you by phone or email.</p>
                 <FormContactFooter lead="Need help right now?" />
                 <button type="button" className="bk-btn bk-btn-primary" onClick={close}>
                   Close
@@ -149,7 +149,7 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     autoComplete="tel"
-                    placeholder="(508) 258-9294"
+                    placeholder="Your phone number"
                   />
                 </div>
 

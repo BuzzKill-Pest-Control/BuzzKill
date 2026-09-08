@@ -43,6 +43,7 @@ import {
 } from "../shared/visitChangeReasons";
 import { customerAccessGroups } from "../shared/dynamicGroups";
 import { listAll } from "../shared/pagination";
+import { refusal } from "../shared/refusal";
 
 type Args = {
   customerId?: string;
@@ -453,7 +454,26 @@ async function getPaymentMethodSummary(customerId: string) {
  */
 async function startSubscription(servicePlanId: string) {
   const outcome = await startPlanBilling(stripeClient(), servicePlanId);
-  if (!outcome.started) throw new Error(outcome.message);
+  if (!outcome.started) {
+    // Two of the four reasons are this guard doing its job, and the office can
+    // act on both: a plan that is canceled or paused does not bill, and a
+    // customer with no card on file cannot be billed. Those come back as words.
+    //
+    // The other two must not. STRIPE_ERROR is the catch-all wrapped around the
+    // whole Stripe conversation — a throttle, a dropped connection, a rotated
+    // key all arrive as STRIPE_ERROR — and PLAN_NOT_FOUND is also what a FAILED
+    // READ looks like, because ServicePlan.get returns data: null whether the
+    // row is absent or Dynamo would not answer. Reported as a refusal, either
+    // would be an outage described to the office as a business fact. They keep
+    // throwing, which is what keeps the alarm worth reading.
+    if (
+      outcome.reason === "PLAN_NOT_ACTIVE" ||
+      outcome.reason === "NO_PAYMENT_METHOD"
+    ) {
+      return refusal(outcome.message);
+    }
+    throw new Error(outcome.message);
+  }
   return {
     stripeSubscriptionId: outcome.stripeSubscriptionId,
     existing: outcome.alreadyRunning,
@@ -504,7 +524,10 @@ async function setPlanPaused(servicePlanId: string, paused: boolean) {
   });
   if (!sub) throw new Error(`Service plan ${servicePlanId} not found`);
   if (sub.status === "CANCELED") {
-    throw new Error("Plan is canceled — create a new plan instead");
+    // Reachable from any screen rendered before the cancel landed: the plan
+    // list is a snapshot, and Deactivate is still on it. Nothing broke, and
+    // nothing was changed — say so.
+    return refusal("Plan is canceled — create a new plan instead");
   }
   if (sub.stripeSubscriptionId) {
     const stripe = stripeClient();
@@ -596,7 +619,14 @@ async function chargeOneTimeJob(actor: Actor, jobId: string) {
   );
   const pm = await getDefaultPaymentMethod(stripeCustomerId);
   if (!pm) {
-    throw new Error(
+    // The one refusal the Charge button can actually reach: the CRM hides it
+    // unless the job is completed, priced, unpaid and uncovered, so everything
+    // above this is a backstop against a request the office cannot make, while
+    // "no card on file" is an ordinary Tuesday. Safe to return as data because
+    // getDefaultPaymentMethod THROWS when Stripe cannot be reached — a null
+    // here means Stripe answered and there is no default method, not that the
+    // question went unanswered.
+    return refusal(
       "Customer has no saved payment method — collect payment info first"
     );
   }
@@ -783,7 +813,10 @@ async function voidInvoice(
     return { invoiceId, status: "VOID", alreadyVoid: true };
   }
   if (invoice.status === "PAID" || invoice.status === "REFUNDED") {
-    throw new Error(
+    // The CRM only offers Void on an OPEN or FAILED invoice, but the list it
+    // offers it from is a snapshot: a bank debit settling to PAID through the
+    // webhook, or another tab, gets here with an ordinary click behind it.
+    return refusal(
       "This invoice has been paid — refund it instead. Voiding it would drop money that actually moved out of the books."
     );
   }
@@ -796,13 +829,17 @@ async function voidInvoice(
     const intent = await stripeClient().paymentIntents.retrieve(
       invoice.stripePaymentIntentId
     );
+    // Both of these are the same sentence as the PAID check above, told a
+    // few seconds earlier — the invoice row has not caught up with the money
+    // yet. paymentIntents.retrieve throws if Stripe cannot be reached, so
+    // reaching either branch means Stripe answered.
     if (intent.status === "succeeded") {
-      throw new Error(
+      return refusal(
         "This invoice's payment already went through — it will settle to PAID shortly. Refund it instead of voiding."
       );
     }
     if (intent.status === "processing") {
-      throw new Error(
+      return refusal(
         "This invoice's bank debit is still processing — the money may still arrive. Wait for it to settle or fail, then void or refund."
       );
     }
@@ -936,7 +973,9 @@ async function settleInvoice(
     return { invoiceId, status: String(invoice.status), alreadyPaid: true };
   }
   if (invoice.status !== "OPEN" && invoice.status !== "FAILED") {
-    throw new Error(
+    // A voided invoice reached from a stale list. Bookkeeping refused, not
+    // bookkeeping broken.
+    return refusal(
       `This invoice is ${String(invoice.status).toLowerCase()} — only an open or failed invoice can be settled`
     );
   }
@@ -949,7 +988,9 @@ async function settleInvoice(
       invoice.stripePaymentIntentId
     );
     if (intent.status === "processing" || intent.status === "succeeded") {
-      throw new Error(
+      // "Come back in a few days" is advice, not a failure. (Retrieve throws
+      // on a Stripe outage, so this branch means Stripe answered.)
+      return refusal(
         "A card or bank payment is already in flight on this invoice — wait for it to settle or fail before recording an offline payment, or you will collect twice."
       );
     }

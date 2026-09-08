@@ -1,31 +1,29 @@
-import SEO from "../components/SEO";
+import { COMPANY, SITE_HOSTNAME } from "../../amplify/functions/shared/company";
+import { OFFICE_ADDRESS, OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE, OFFICE_TEL } from "../lib/contactInfo";
 
 export default function PrivacyPolicy() {
   return (
     <>
-    <SEO
-      title="Privacy Policy"
-      description="BuzzKill Pest Control privacy policy. Learn how we collect, use, and protect your information when you use our services or visit our website."
-      noindex
-    />
     <section className="bk-legal">
       <div className="bk-container bk-narrow">
         <h1>Privacy Policy</h1>
         <p className="bk-legal-meta">
-          <strong>Effective Date:</strong> January 1, 2026 &nbsp;|&nbsp;{" "}
-          <strong>Last Updated:</strong> July 16, 2026
+          <strong>Effective Date:</strong> January 16, 2026 &nbsp;|&nbsp;{" "}
+          <strong>Last Updated:</strong> September 7, 2026
         </p>
 
         <p>
-          This Privacy Policy explains how BuzzKill Pest Control ("BuzzKill,"
-          "we," "us," or "our") collects, uses, discloses, and protects
-          information when you visit www.pestbuzzkill.com, contact us, request a
-          quote, schedule service, or otherwise interact with us.
+          This Privacy Policy explains how {COMPANY.legalName}, which operates
+          the {COMPANY.brandName} brand and provides the services described as{" "}
+          {COMPANY.serviceDisplayName} ("BuzzKill," "we," "us," or "our"),
+          collects, uses, discloses, and protects information when you visit{" "}
+          {SITE_HOSTNAME}, contact us, request a quote, schedule service, or
+          otherwise interact with us.
         </p>
         <p>
           Questions? Contact us at{" "}
-          <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a> or{" "}
-          <a href="tel:508-258-9294">508-258-9294</a>.
+          <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a> or{" "}
+          <a href={OFFICE_TEL}>{OFFICE_PHONE}</a>.
         </p>
 
         <h2>1. Information We Collect</h2>
@@ -51,8 +49,11 @@ export default function PrivacyPolicy() {
         <ul>
           <li>
             Device and usage data: IP address, browser type, operating system,
-            pages requested, and referring URLs, collected through standard web
-            server logs
+            pages requested, and referring URLs, collected through web server
+            logs and through third-party analytics, advertising, and
+            session-replay tools (Google Analytics, Google Ads conversion
+            tracking, and Microsoft Clarity), which set their own cookies and
+            identifiers
           </li>
           <li>
             How you reached us: if you arrive from an ad or link, we note the
@@ -132,8 +133,8 @@ export default function PrivacyPolicy() {
         <p>
           You can opt out of marketing communications at any time by contacting
           us at{" "}
-          <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a> or{" "}
-          <a href="tel:508-258-9294">508-258-9294</a>. Non-marketing messages
+          <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a> or{" "}
+          <a href={OFFICE_TEL}>{OFFICE_PHONE}</a>. Non-marketing messages
           like appointment confirmations and invoices continue regardless.
         </p>
 
@@ -168,7 +169,7 @@ export default function PrivacyPolicy() {
         </ul>
         <p>
           Email{" "}
-          <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a> with
+          <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a> with
           "Privacy Request" in the subject line. Identity verification may be
           required.
         </p>
@@ -187,11 +188,13 @@ export default function PrivacyPolicy() {
 
         <h2>Contact</h2>
         <p>
-          420 Lakeside Ave, Suite 104, Marlborough, MA 01752
+          {COMPANY.legalName}
           <br />
-          <a href="tel:508-258-9294">508-258-9294</a>
+          {OFFICE_ADDRESS}
           <br />
-          <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a>
+          <a href={OFFICE_TEL}>{OFFICE_PHONE}</a>
+          <br />
+          <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a>
         </p>
       </div>
     </section>

@@ -13,9 +13,7 @@ import {
   money,
 } from "../../lib/bookingFunnel";
 import { trackFormSubmit } from "../../lib/analytics";
-
-/** The number customers should call when self-service can't help. */
-const SUPPORT_PHONE = "(508) 258-9294";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
 type Phase =
   | { kind: "no-token" }
@@ -109,10 +107,12 @@ export default function CancelPage() {
               <h1 className="bk-h2">We need your cancellation link.</h1>
               <p className="bk-body-lead">
                 This page only works from the link in your booking confirmation
-                email — it carries a code that identifies your appointment.
+                email, which carries a code that identifies your appointment.
                 Can&rsquo;t find the email? Call us at{" "}
-                <strong>{SUPPORT_PHONE}</strong> and we&rsquo;ll cancel it for
-                you.
+                <a href={OFFICE_TEL}>
+                  <strong>{OFFICE_PHONE_PRETTY}</strong>
+                </a>{" "}
+                and we&rsquo;ll cancel it for you.
               </p>
             </>
           )}
@@ -129,7 +129,10 @@ export default function CancelPage() {
               </div>
               <p className="bk-p">
                 If you think this is wrong, call us at{" "}
-                <strong>{SUPPORT_PHONE}</strong>.
+                <a href={OFFICE_TEL}>
+                  <strong>{OFFICE_PHONE_PRETTY}</strong>
+                </a>
+                .
               </p>
             </>
           )}
@@ -141,17 +144,21 @@ export default function CancelPage() {
                 {phase.message}
               </div>
               <p className="bk-p">
-                You can also cancel by phone: <strong>{SUPPORT_PHONE}</strong>.
+                You can also cancel by phone:{" "}
+                <a href={OFFICE_TEL}>
+                  <strong>{OFFICE_PHONE_PRETTY}</strong>
+                </a>
+                .
               </p>
             </>
           )}
 
           {phase.kind === "recorded-failure" && (
             <>
-              <h1 className="bk-h2">That didn&rsquo;t go through — but you&rsquo;re covered.</h1>
+              <h1 className="bk-h2">That didn&rsquo;t go through, but you&rsquo;re covered.</h1>
               <div className="bk-form-error" role="alert">
                 {phase.body.error ??
-                  `We couldn't cancel your appointment just now — please call us at ${SUPPORT_PHONE}.`}
+                  `We couldn't cancel your appointment just now. Please call us at ${OFFICE_PHONE_PRETTY}.`}
               </div>
               {phase.body.reassurance && (
                 <div className="bk-notice">
@@ -176,7 +183,7 @@ export default function CancelPage() {
               <h1 className="bk-h2">Your appointment is canceled.</h1>
               <p className="bk-body-lead">
                 {phase.refunded
-                  ? "A full refund is on its way to your original payment method (3–5 business days). A confirmation email is on its way too."
+                  ? "A full refund is on its way to your original payment method. Cards usually see it within 3 to 5 business days, and bank payments can take a little longer. A confirmation email is on its way too."
                   : "Per the cancellation policy, this booking wasn't refundable. A confirmation email is on its way."}
               </p>
             </div>

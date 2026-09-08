@@ -208,7 +208,7 @@ describe("sendCustomerEmail kind booking-link", () => {
     await send("booking-link");
 
     const [email] = sentEmails;
-    expect(email.html).toMatch(/exact price in seconds/i);
+    expect(email.html).toMatch(/exact price online/i);
     expect(email.html).toMatch(/pick the day/i);
     expect(email.html).toMatch(/pay online/i);
     expect(email.html).toMatch(/keep working on it/i);
@@ -284,24 +284,35 @@ describe("prepareLeadQuote", () => {
     expect(customerUpdates).toHaveLength(1);
   });
 
-  it("fails closed when required staff-assist facts are missing", async () => {
+  it("names the missing staff-assist facts, and mints nothing", async () => {
+    // The office is one screen away from fixing these, so they come back as
+    // words rather than as an invocation error on the crm-docs alarm. The
+    // lead row itself was read successfully — prepareLeadQuote checks the
+    // read's `errors` before any of this — so each sentence is a fact.
     customer!.phone = null;
     customer!.serviceZip = null;
 
-    await expect(prepare()).rejects.toThrow(/phone, ZIP code/i);
+    const res = (await prepare()) as { refused?: string };
+
+    expect(res.refused).toMatch(/phone, ZIP code/i);
     expect(customerUpdates).toHaveLength(0);
   });
 
-  it("refuses suppressed and out-of-footprint leads", async () => {
+  it("refuses suppressed and out-of-footprint leads, in words", async () => {
     customer!.doNotContact = true;
-    await expect(prepare()).rejects.toThrow(/reopen/i);
+    const reopen = (await prepare()) as { refused?: string };
+    expect(reopen.refused).toMatch(/reopen/i);
 
     customer!.doNotContact = false;
     customer!.serviceState = "CT";
-    await expect(prepare()).rejects.toThrow(/only for MA and RI/i);
+    const outside = (await prepare()) as { refused?: string };
+    expect(outside.refused).toMatch(/only for MA and RI/i);
   });
 
   it("never falls back to an identity-less link when token persistence fails", async () => {
+    // Still an ERROR, and deliberately so: the link could not be MINTED. That
+    // is the write failing, not the office being told no, and it is the one
+    // failure in this function the alarm needs to see.
     customerUpdateFails = true;
     await expect(prepare()).rejects.toThrow(/could not be created/i);
   });

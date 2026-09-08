@@ -214,6 +214,9 @@ const workItems = new Map<string, Record<string, unknown>>();
 const staffCommands = new Map<string, Record<string, unknown>>();
 /** The owner-change mutex row(s) (OwnerChangeSerial). */
 const ownerSerial = new Map<string, Record<string, unknown>>();
+/** Force the owner-change mutex to be UNREADABLE, so a test can prove an
+ *  outage there is never reported as "another owner change is running". */
+let ownerSerialReadFails = false;
 const leadLifecycleClaims = new Map<string, Record<string, unknown>>();
 /** Immutable lead activity rows written by the offboarding lead hand-over. */
 const leadActivities: Record<string, unknown>[] = [];
@@ -233,6 +236,14 @@ let jobGetOverride: ((id: string) => Job | null) | null = null;
 /** Force the audit-ledger write to fail, so a test can drive the durable-ledger
  *  "security case + PARTIAL" path. */
 let staffEventCreateThrows = false;
+/** Force the licence-records read to fail. GL-17 fails CLOSED, so an outage and
+ *  a genuine lapse look identical at `current` — a test needs this to prove the
+ *  outage still THROWS (and alarms) instead of being filed as a refusal that
+ *  tells the office a licensed technician is unlicensed. */
+let technicianLicenseListThrows = false;
+/** Make the technician-by-userSub read return GraphQL errors, so a test can
+ *  prove a failed read is not reported as "no technician is linked". */
+let technicianListErrors = false;
 
 const fakeDataClient = {
   models: {
@@ -297,9 +308,20 @@ const fakeDataClient = {
         technicians.set(patch.id, { ...technicians.get(patch.id)!, ...patch });
         return { data: technicians.get(patch.id) };
       },
-      listTechnicianByUserSub: async ({ userSub }: { userSub: string }) => ({
-        data: [...technicians.values()].filter((t) => t.userSub === userSub),
-      }),
+      listTechnicianByUserSub: async ({ userSub }: { userSub: string }) =>
+        technicianListErrors
+          ? { data: null, errors: [{ message: "ThrottlingException (injected)" }] }
+          : { data: [...technicians.values()].filter((t) => t.userSub === userSub) },
+    },
+    // Present but empty by default, which is the same LEGACY fallback the
+    // absent-model shortcut produced — only the injected throw changes anything.
+    TechnicianLicense: {
+      listTechnicianLicenseByTechnicianId: async () => {
+        if (technicianLicenseListThrows) {
+          throw new Error("TechnicianLicense read failed (injected)");
+        }
+        return { data: [], nextToken: null };
+      },
     },
     Job: {
       get: async ({ id }: { id: string }) => ({
@@ -369,13 +391,15 @@ const fakeDataClient = {
     },
     OwnerChangeSerial: {
       create: async (row: Record<string, unknown> & { id: string }) => {
+        if (ownerSerialReadFails) return { data: null, errors: [{ message: "store down" }] };
         if (ownerSerial.has(row.id)) return { data: null };
         ownerSerial.set(row.id, { ...row });
         return { data: ownerSerial.get(row.id) };
       },
-      get: async ({ id }: { id: string }) => ({
-        data: ownerSerial.get(id) ?? null,
-      }),
+      get: async ({ id }: { id: string }) =>
+        ownerSerialReadFails
+          ? { data: null, errors: [{ message: "store down" }] }
+          : { data: ownerSerial.get(id) ?? null },
       delete: async ({ id }: { id: string }) => {
         const existed = ownerSerial.get(id) ?? null;
         ownerSerial.delete(id);
@@ -509,12 +533,15 @@ beforeEach(() => {
   workItems.clear();
   staffCommands.clear();
   ownerSerial.clear();
+  ownerSerialReadFails = false;
   leadLifecycleClaims.clear();
   leadActivities.length = 0;
   technicianUpdateThrows = false;
   staffEventCreateThrows = false;
   jobUpdateThrows = false;
   workEventCreateThrows = false;
+  technicianLicenseListThrows = false;
+  technicianListErrors = false;
   jobGetOverride = null;
   notifyOffice.mockClear();
   sendEmail.mockClear();
@@ -533,6 +560,10 @@ describe("adminCreateUser — atomic technician linking (GL-14)", () => {
     expect(sentTypes()).not.toContain("CreateUser");
   });
 
+  // These three are refusals the office can reach by working the screen — a
+  // licence lapsed, a roster row went stale. They come back as {refused} the
+  // screen shows, NOT as a thrown error: a thrown one pages the owner as a
+  // background system failure (it did, on the group collision guard).
   it("refuses linking a technician whose licence is missing/expired", async () => {
     technicians.set("t-nolic", {
       id: "t-nolic",
@@ -541,14 +572,65 @@ describe("adminCreateUser — atomic technician linking (GL-14)", () => {
       licenseNumber: null,
       licenseExpiresOn: null,
     });
+    const res = (await call("adminCreateUser", {
+      email: "unlic@buzzkill.com",
+      name: "Unlicensed",
+      roles: ["TECH"],
+      technicianId: "t-nolic",
+    })) as { refused?: string };
+    expect(res.refused).toMatch(/licen[sc]e/i);
+    expect(sentTypes()).not.toContain("CreateUser");
+  });
+
+  it("refuses linking an inactive technician", async () => {
+    technicians.set("t-gone", {
+      id: "t-gone",
+      name: "Retired Rick",
+      active: false,
+      licenseNumber: "APP-9",
+      licenseExpiresOn: FUTURE_LICENSE,
+    });
+    const res = (await call("adminCreateUser", {
+      email: "rick@buzzkill.com",
+      name: "Retired Rick",
+      roles: ["TECH"],
+      technicianId: "t-gone",
+    })) as { refused?: string };
+    expect(res.refused).toMatch(/inactive/i);
+    expect(sentTypes()).not.toContain("CreateUser");
+  });
+
+  // The other half of the envelope bargain: a refusal stops paging the owner
+  // ONLY because a real failure still does. GL-17 fails CLOSED, so a licence
+  // read that fell over is indistinguishable from a lapse at `current` — if
+  // that returned quietly, an outage would tell the office a licensed
+  // technician is unlicensed, forever, with nothing to alarm on.
+  it("throws (does not refuse) when the licence records can't be READ", async () => {
+    technicians.set("t-lic", {
+      id: "t-lic",
+      name: "Marcus",
+      active: true,
+      licenseNumber: "APP-1",
+      licenseExpiresOn: FUTURE_LICENSE,
+    });
+    technicianLicenseListThrows = true;
     await expect(
       call("adminCreateUser", {
-        email: "unlic@buzzkill.com",
-        name: "Unlicensed",
+        email: "marcus@buzzkill.com",
+        name: "Marcus",
         roles: ["TECH"],
-        technicianId: "t-nolic",
+        technicianId: "t-lic",
       })
-    ).rejects.toThrow(/licen[sc]e/i);
+    ).rejects.toThrow(/could not be read just now/i);
+    // And it must not masquerade as the lapse refusal.
+    await expect(
+      call("adminCreateUser", {
+        email: "marcus@buzzkill.com",
+        name: "Marcus",
+        roles: ["TECH"],
+        technicianId: "t-lic",
+      })
+    ).rejects.not.toThrow(/no current applicator licence on record/i);
     expect(sentTypes()).not.toContain("CreateUser");
   });
 
@@ -562,14 +644,13 @@ describe("adminCreateUser — atomic technician linking (GL-14)", () => {
       userSub: "sub-someone-else",
       email: "marcus@buzzkill.com",
     });
-    await expect(
-      call("adminCreateUser", {
-        email: "different@buzzkill.com",
-        name: "Impostor",
-        roles: ["TECH"],
-        technicianId: "t-linked",
-      })
-    ).rejects.toThrow(/already linked/i);
+    const res = (await call("adminCreateUser", {
+      email: "different@buzzkill.com",
+      name: "Impostor",
+      roles: ["TECH"],
+      technicianId: "t-linked",
+    })) as { refused?: string };
+    expect(res.refused).toMatch(/already linked/i);
     expect(sentTypes()).not.toContain("CreateUser");
   });
 
@@ -692,14 +773,17 @@ describe("adminCreateUser — management-company group login", () => {
     });
 
     // Without confirmation: refused, names who the email is, provisions nothing.
-    await expect(
-      call("adminCreateUser", {
-        email: "shared@x.com",
-        name: "Maple HOA",
-        roles: ["CUSTOMER"],
-        groupId: "g1",
-      })
-    ).rejects.toThrow(/already signs in as customer "Unit 4B"/i);
+    // The refusal is an envelope the screen shows — an office choosing between
+    // two logins is not a Lambda failure, and throwing here paged the owner.
+    const warned = (await call("adminCreateUser", {
+      email: "shared@x.com",
+      name: "Maple HOA",
+      roles: ["CUSTOMER"],
+      groupId: "g1",
+    })) as { refused?: string; offerReuse?: boolean };
+    expect(warned.refused).toMatch(/already signs in as customer "Unit 4B"/i);
+    // offerReuse marks the refusal the screen can resolve by re-sending.
+    expect(warned.offerReuse).toBe(true);
     expect(sentTypes()).not.toContain("CreateUser");
 
     // With confirmReuse: the existing login is reused and gains grp-g1.
@@ -739,6 +823,10 @@ describe("changeStaffRoles (GL-14)", () => {
     expect(added).toContain("OWNER");
   });
 
+  // The role editor offers "Technician" for every roster row, including office
+  // logins that were never linked — so this refusal is one ordinary click away.
+  // It comes back as {refused} the screen shows, not a thrown error that pages
+  // the owner, and it is REFUSED (nothing changed), never a resumable PARTIAL.
   it("refuses granting TECH to a login with no linked technician", async () => {
     pool.set("dana@x.com", {
       username: "dana@x.com",
@@ -746,9 +834,103 @@ describe("changeStaffRoles (GL-14)", () => {
       email: "dana@x.com",
       groups: ["OWNER"],
     });
+    const res = (await call("changeStaffRoles", {
+      email: "dana@x.com",
+      roles: ["OWNER", "TECH"],
+    })) as { refused?: string; outcome?: string };
+    expect(res.refused).toMatch(/isn't linked to a technician record/i);
+    expect(res.outcome).toBe("REFUSED");
+    // Nothing was granted — a refusal leaves the role set exactly as it was.
+    expect(sentTypes()).not.toContain("AddToGroup");
+    expect(pool.get("dana@x.com")?.groups).toEqual(["OWNER"]);
+  });
+
+  it("refuses granting TECH when the linked technician is inactive or lapsed", async () => {
+    pool.set("rick@x.com", {
+      username: "rick@x.com",
+      sub: "sub-rick",
+      email: "rick@x.com",
+      groups: ["OWNER"],
+    });
+    technicians.set("t-rick", {
+      id: "t-rick",
+      name: "Retired Rick",
+      active: false,
+      licenseNumber: "APP-9",
+      licenseExpiresOn: FUTURE_LICENSE,
+      userSub: "sub-rick",
+      email: "rick@x.com",
+    });
+    const inactive = (await call("changeStaffRoles", {
+      email: "rick@x.com",
+      roles: ["OWNER", "TECH"],
+    })) as { refused?: string; outcome?: string };
+    expect(inactive.refused).toMatch(/inactive/i);
+    expect(inactive.outcome).toBe("REFUSED");
+
+    // Active again but the licence has lapsed — still refused, still in words.
+    technicians.set("t-rick", {
+      id: "t-rick",
+      name: "Retired Rick",
+      active: true,
+      licenseNumber: null,
+      licenseExpiresOn: null,
+      userSub: "sub-rick",
+      email: "rick@x.com",
+    });
+    const lapsed = (await call("changeStaffRoles", {
+      email: "rick@x.com",
+      roles: ["OWNER", "TECH"],
+    })) as { refused?: string; outcome?: string };
+    // Match the licence guard's own words. A loose /licen[sc]e/ would also match
+    // the no-linked-technician refusal ("...binds a login to a licensed
+    // technician..."), so a lookup that stopped resolving would read as green.
+    expect(lapsed.refused).toMatch(/no current applicator licence/i);
+    expect(lapsed.refused).toContain("Retired Rick");
+    expect(lapsed.outcome).toBe("REFUSED");
+    expect(sentTypes()).not.toContain("AddToGroup");
+  });
+
+  // A refusal returns cleanly and pages nobody, so anything that ISN'T a
+  // refusal has to keep throwing — otherwise this change trades a false page
+  // for a silent outage, which is the worse of the two.
+  it("throws (does not refuse) when the licence records can't be READ", async () => {
+    pool.set("marcus@x.com", {
+      username: "marcus@x.com",
+      sub: "sub-marcus",
+      email: "marcus@x.com",
+      groups: ["OWNER"],
+    });
+    technicians.set("t-marcus", {
+      id: "t-marcus",
+      name: "Marcus",
+      active: true,
+      licenseNumber: "APP-1",
+      licenseExpiresOn: FUTURE_LICENSE,
+      userSub: "sub-marcus",
+      email: "marcus@x.com",
+    });
+    technicianLicenseListThrows = true;
+    await expect(
+      call("changeStaffRoles", { email: "marcus@x.com", roles: ["OWNER", "TECH"] })
+    ).rejects.toThrow(/could not be read just now/i);
+    expect(sentTypes()).not.toContain("AddToGroup");
+  });
+
+  it("throws (does not refuse 'no technician linked') when the technician read fails", async () => {
+    pool.set("dana@x.com", {
+      username: "dana@x.com",
+      sub: "sub-dana",
+      email: "dana@x.com",
+      groups: ["OWNER"],
+    });
+    technicianListErrors = true;
+    // An empty result and a failed read look the same. Saying "this login isn't
+    // linked to a technician record" would be a false statement about the data.
     await expect(
       call("changeStaffRoles", { email: "dana@x.com", roles: ["OWNER", "TECH"] })
-    ).rejects.toThrow(/isn't linked to a technician record/i);
+    ).rejects.toThrow(/could not read the technician/i);
+    expect(sentTypes()).not.toContain("AddToGroup");
   });
 
   it("refuses an empty role set (offboard instead)", async () => {
@@ -770,9 +952,25 @@ describe("changeStaffRoles (GL-14)", () => {
       email: "solo@x.com",
       groups: ["OWNER"],
     });
-    await expect(
-      call("changeStaffRoles", { email: "solo@x.com", roles: ["TECH"] })
-    ).rejects.toThrow(/last active owner/i);
+    // As words, with a REFUSED row in the command ledger behind them. The
+    // instinct was to keep this one loud, but the only loudness on offer is
+    // the crm-admin error alarm, which means "this function is broken" — and
+    // nothing here is broken or touched. The ledger row is the durable record.
+    const res = (await call("changeStaffRoles", {
+      email: "solo@x.com",
+      roles: ["TECH"],
+    })) as { refused?: string; outcome?: string };
+
+    expect(res.refused).toMatch(/last active owner/i);
+    expect(res.outcome).toBe("REFUSED");
+    expect(
+      [...staffCommands.values()].some(
+        (row) =>
+          row.outcome === "REFUSED" && /last active owner/i.test(String(row.lastError))
+      )
+    ).toBe(true);
+    // Still an owner, still in the group.
+    expect(pool.get("solo@x.com")!.groups).toContain("OWNER");
   });
 
   it("allows demoting an owner when a second owner exists", async () => {
@@ -903,11 +1101,21 @@ describe("offboardStaff (GL-14)", () => {
       email: "solo@x.com",
       groups: ["OWNER"],
     });
-    await expect(
-      call("offboardStaff", { email: "solo@x.com" })
-    ).rejects.toThrow(/last active owner/i);
+    const res = (await call("offboardStaff", { email: "solo@x.com" })) as {
+      refused?: string;
+      outcome?: string;
+    };
+
+    expect(res.refused).toMatch(/last active owner/i);
+    expect(res.outcome).toBe("REFUSED");
     // The refusal did not disable anyone.
     expect(sentTypes()).not.toContain("Disable");
+    expect(
+      [...staffCommands.values()].some(
+        (row) =>
+          row.outcome === "REFUSED" && /last active owner/i.test(String(row.lastError))
+      )
+    ).toBe(true);
   });
 
   it("offboards an owner when another owner remains", async () => {
@@ -1756,17 +1964,43 @@ describe("GL-14 — the durable access-change command", () => {
       holder: "someone-else",
       leaseUntil: new Date(Date.now() + 60_000).toISOString(),
     });
-    await expect(
-      call("offboardStaff", {
-        email: "owner2@x.com",
-        idempotencyKey: "owner-race-key",
-      })
-    ).rejects.toThrow(/another owner change/i);
+    const res = (await call("offboardStaff", {
+      email: "owner2@x.com",
+      idempotencyKey: "owner-race-key",
+    })) as { refused?: string; outcome?: string };
+
+    // A colleague mid-change is a fact, so it arrives as words — the mutex was
+    // READ and its lease is live. Contrast the store-unreadable case below.
+    expect(res.refused).toMatch(/another owner change/i);
+    expect(res.outcome).toBe("REFUSED");
     // Nothing moved: no disable, no group removal.
     expect(sentTypes()).not.toContain("Disable");
     expect(sentTypes()).not.toContain("RemoveFromGroup");
     // The command records the refusal terminally.
     expect(staffCommands.get("owner-race-key")!.stage).toBe("FAILED");
+  });
+
+  it("but a mutex it cannot READ still THROWS — an outage must not pose as a colleague", async () => {
+    // The trap this whole workstream is about. acquireOwnerSerial used to
+    // answer a plain false for both "someone holds it" and "the store would
+    // not answer"; as a refusal, an outage would have told the office to wait
+    // and retry, indefinitely, with nothing to alarm on.
+    finLogin();
+    pool.set("owner2@x.com", {
+      username: "owner2@x.com",
+      sub: "owner-2",
+      email: "owner2@x.com",
+      groups: ["OWNER"],
+    });
+    ownerSerialReadFails = true;
+
+    await expect(
+      call("offboardStaff", {
+        email: "owner2@x.com",
+        idempotencyKey: "owner-outage-key",
+      })
+    ).rejects.toThrow(/could not be read/i);
+    expect(sentTypes()).not.toContain("Disable");
   });
 
   it("counts a failed future-job unassign and keeps the offboard PARTIAL with an owned case", async () => {

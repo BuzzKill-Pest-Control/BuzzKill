@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
+import { OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
   { img: "/images/01-pests-near-dumpster.jpg",    text: "We keep getting complaints about pests near the mailboxes and dumpster area." },
@@ -87,7 +88,7 @@ const PREVENTION_TIPS = [
   { title: "Manage Waste Areas Properly",    body: "Ensure dumpster enclosures are sealed, lids close fully, and the surrounding area is kept clean to reduce the food access that attracts pests." },
   { title: "Reduce Moisture Near Buildings", body: "Maintain proper drainage away from foundations, check irrigation systems for leaks, and address any pooling or moisture accumulation near common areas." },
   { title: "Maintain Landscaping Buffers",   body: "Keep mulch beds, shrubs, and dense plantings a safe distance from building exteriors to reduce nesting and harborage zones for pests." },
-  { title: "Schedule Preventative Service",  body: "Reactive treatment addresses problems after they appear. Ongoing preventative service keeps pest pressure consistently low across the entire community." },
+  { title: "Schedule Preventative Service",  body: "Reactive treatment addresses problems after they appear. Ongoing preventative service helps keep pest pressure low across the entire community." },
 ];
 
 const COMMUNITY_SERVICES = [
@@ -100,7 +101,7 @@ const COMMUNITY_SERVICES = [
 const FAQS = [
   {
     q: "Are pest treatments in common areas safe for residents and pets?",
-    a: "Yes. Every treatment is applied with residents, children, and pets in mind. Our technicians will communicate clearly with property management about any preparation needed before or after each visit.",
+    a: "Every treatment is applied according to the product label directions and Massachusetts and Rhode Island regulations, with residents, children, and pets in mind. Our technicians communicate clearly with property management about any preparation or re-entry guidance needed before and after each visit.",
   },
   {
     q: "How often should community common areas be treated?",
@@ -116,11 +117,11 @@ const FAQS = [
   },
   {
     q: "What happens if residents report pest activity between scheduled visits?",
-    a: "If covered pests return during your service period, we return at no additional cost. Your community should never feel like it is on its own between visits.",
+    a: `${CALLBACK_POLICY_TEXT} Your community should never feel like it is on its own between visits.`,
   },
   {
     q: "Do you offer service contracts or annual programs for communities?",
-    a: "Yes. We offer ongoing service programs designed for community properties. Annual programs provide consistent protection, simplified billing, and priority scheduling throughout the year.",
+    a: "Yes. We offer ongoing recurring service programs designed for community properties, with a consistent visit schedule and predictable monthly billing throughout the year.",
   },
 ];
 
@@ -141,22 +142,6 @@ export default function CommonAreaProtection() {
 
   return (
     <>
-      <SEO
-        title="Common Area Pest Protection — MA & RI Communities"
-        description="Professional pest control for community common areas across Massachusetts and Rhode Island. HOA boards, property managers, and condo associations trust BuzzKill."
-        jsonLd={[
-          buildServiceSchema(
-            "Common Area Pest Protection",
-            "Pest control services for community common areas, HOA properties, and shared spaces across Massachusetts and Rhode Island.",
-            "/communities/common-areas",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home",        url: "/" },
-            { name: "Communities", url: "/communities" },
-            { name: "Common Area Protection", url: "/communities/common-areas" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -176,7 +161,7 @@ export default function CommonAreaProtection() {
         headline="Protect the Spaces That Shape Every Resident's Experience"
         sub="Safe for Families. Tough on Pests."
         primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
-        secondaryCta={{ label: "Talk to Our Team", href: "tel:+15082589294" }}
+        secondaryCta={{ label: "Talk to Our Team", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
 
@@ -185,7 +170,7 @@ export default function CommonAreaProtection() {
         <div className="bk-container">
           <p className="bk-eyebrow bk-center">Sound Familiar?</p>
           <h2 className="bk-h2 bk-center">Does This Sound Familiar?</h2>
-          <p className="bk-body-lead bk-center">These are the most common things property managers and board members tell us before they call.</p>
+          <p className="bk-body-lead bk-center">These are the concerns we hear most often from property managers and board members.</p>
 
           <div className="bk-com-who-carousel">
             <button className="bk-com-who-arrow" onClick={prevFamiliar} aria-label="Previous">
@@ -377,7 +362,7 @@ export default function CommonAreaProtection() {
         <div className="bk-container bk-narrow">
           <p className="bk-eyebrow">Prevention</p>
           <h2 className="bk-h2">Keep Pests From Coming Back</h2>
-          <p className="bk-body-lead">Professional treatment protects your community between visits. These habits help reduce pest activity and keep shared spaces cleaner year-round.</p>
+          <p className="bk-body-lead">Professional treatment helps protect your community between visits. These habits help reduce pest activity and keep shared spaces cleaner year-round.</p>
           <div className="bk-tips-list">
             {PREVENTION_TIPS.map((tip, i) => (
               <div key={i} className="bk-tip-item">
@@ -439,12 +424,12 @@ export default function CommonAreaProtection() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Ready to Protect Your Community?</p>
               <h2 className="bk-schedule-title">Help Protect the Spaces Everyone Shares</h2>
-              <p className="bk-schedule-sub">Safe for residents. Tough on pests. Let BuzzKill build a protection plan your entire community can count on.</p>
+              <p className="bk-schedule-sub">Mindful of residents. Tough on pests. Let BuzzKill build a protection plan your entire community can count on.</p>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
                 <Link to="/quote" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
-                <a href="tel:+15082589294" className="bk-btn bk-schedule-cta bk-schedule-cta--outline">
+                <a href={OFFICE_TEL} className="bk-btn bk-schedule-cta bk-schedule-cta--outline">
                   Talk to Our Team
                 </a>
               </div>

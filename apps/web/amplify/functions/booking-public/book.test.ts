@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "../shared/atomicLock";
 import { capacityFixtureModels } from "../shared/capacityTestFixture";
 import {
-  BOOKING_TERMS_TEXT,
   BOOKING_TERMS_VERSION,
+  bookingTermsFor,
 } from "../shared/bookingTerms";
 
 /**
@@ -526,9 +526,12 @@ describe("plan-only quotes always book the plan", () => {
 });
 
 describe("terms acceptance is versioned and recorded (R17)", () => {
+  // The fixture is a residential one-time quote that also offers a plan, so
+  // the fresh terms carry both variants.
   const freshTerms = {
     version: BOOKING_TERMS_VERSION,
-    text: BOOKING_TERMS_TEXT,
+    text: bookingTermsFor({ recurring: false, offSeason: false, paymentMethod: "CARD" }),
+    recurringText: bookingTermsFor({ recurring: true, offSeason: false, paymentMethod: "CARD" }),
   };
 
   it("refuses a /book with no tcVersion — 409 carrying the fresh terms, no charge", async () => {
@@ -558,6 +561,9 @@ describe("terms acceptance is versioned and recorded (R17)", () => {
     expect(res.status).toBe(200);
     expect(booking).toMatchObject({
       tcVersion: BOOKING_TERMS_VERSION,
+      // The exact text accepted is stored with the version (a one-time
+      // booking on a quote that is not invoice-eligible).
+      tcText: bookingTermsFor({ recurring: false, offSeason: false, paymentMethod: "CARD" }),
       tcAcceptedAt: new Date().toISOString(), // frozen 2026-07-16T16:00:00.000Z
       tcIp: "1.2.3.4",
       tcUserAgent: "vitest-agent/1.0",
@@ -1404,5 +1410,163 @@ describe("/promo previews against the SAME base /book will charge", () => {
 
     expect(booked.status).toBe(200);
     expect(booked.body.amountCents).toBe(preview.body.amountCents);
+  });
+});
+
+describe("off-season enrollment terms and payment paths (card versus invoice)", () => {
+  const offSeasonQuoteFor = (propertyKind?: "COMMUNITY" | "COMMERCIAL") => {
+    freezeEastern("2026-12-09");
+    booking.service = "MOSQUITO";
+    booking.expiresAt = "2026-12-10T12:00:00Z";
+    if (propertyKind) booking.propertyKind = propertyKind;
+    booking.quoteJson = JSON.stringify({
+      days: [],
+      baseCents: 11900,
+      serviceLabel: "Mosquito plan — up to ½ acre",
+      recurringOffer: { frequency: "MONTHLY", monthlyCents: 11900, initialFeeCents: 11900 },
+      planOnly: true,
+      offSeason: true,
+    });
+  };
+  const enroll = (extra: Record<string, unknown> = {}) =>
+    postBook({ bookingId: "b1", recurring: true, tcAccepted: true, tcVersion: BOOKING_TERMS_VERSION, ...extra });
+
+  const cardTerms = bookingTermsFor({ recurring: true, offSeason: true, paymentMethod: "CARD" });
+  const invoiceTerms = bookingTermsFor({ recurring: true, offSeason: true, paymentMethod: "INVOICE" });
+
+  it("residential card enrollment: charged today, no invoice sentence, no date or capacity", async () => {
+    offSeasonQuoteFor(undefined);
+    const res = await enroll();
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBe("cs_new");
+    expect(intentCreate).toHaveBeenCalledTimes(1);
+    expect(booking.tcText).toBe(cardTerms);
+    expect(String(booking.tcText)).toContain("charges your card your first monthly payment today, at enrollment");
+    expect(String(booking.tcText)).not.toMatch(/invoiced/);
+    expect(booking.selectedDate ?? null).toBeNull();
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
+  });
+
+  it("community card enrollment: charged today, card terms only, no mention of invoicing", async () => {
+    offSeasonQuoteFor("COMMUNITY");
+    const res = await enroll();
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBe("cs_new");
+    expect(intentCreate).toHaveBeenCalledTimes(1);
+    expect(booking.tcText).toBe(cardTerms);
+    expect(String(booking.tcText)).not.toMatch(/invoice/i);
+    expect(booking.selectedDate ?? null).toBeNull();
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
+  });
+
+  it("community invoice enrollment: no PaymentIntent, finalized card-less on net terms, terms stored verbatim", async () => {
+    offSeasonQuoteFor("COMMUNITY");
+    const res = await enroll({ invoice: true });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBeUndefined();
+    expect(intentCreate).not.toHaveBeenCalled();
+    expect(finalizeBookingMock).toHaveBeenCalledTimes(1);
+    expect(finalizeBookingMock.mock.calls[0][0]).toMatchObject({ bookingRequestId: "b1", invoice: { terms: "NET_30" } });
+    expect(booking.tcText).toBe(invoiceTerms);
+    expect(String(booking.tcText)).not.toMatch(/card/i);
+    expect(booking.tcVersion).toBe(BOOKING_TERMS_VERSION);
+    expect(booking.stripePaymentIntentId ?? null).toBeNull();
+    expect(booking.selectedDate ?? null).toBeNull();
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
+  });
+
+  it("commercial invoice enrollment: the same card-less path, and nothing claims a card was charged", async () => {
+    offSeasonQuoteFor("COMMERCIAL");
+    const res = await enroll({ invoice: true });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBeUndefined();
+    expect(intentCreate).not.toHaveBeenCalled();
+    expect(finalizeBookingMock).toHaveBeenCalledTimes(1);
+    expect(booking.tcText).toBe(invoiceTerms);
+    // Invoice terms only: nothing says a card was charged.
+    expect(String(booking.tcText)).toContain("payable on Net 30 terms");
+    expect(String(booking.tcText)).not.toMatch(/charges your card|card/i);
+    expect(booking.stripePaymentIntentId ?? null).toBeNull();
+    expect(booking.selectedDate ?? null).toBeNull();
+    expect(String(res.body.summary ?? "")).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("rejects the previous terms version now that the off-season wording changed", async () => {
+    offSeasonQuoteFor("COMMUNITY");
+    const res = await enroll({ tcVersion: "2026-09-08" });
+    expect(res.status).toBe(409);
+    expect(res.body.terms.version).toBe(BOOKING_TERMS_VERSION);
+    expect(res.body.terms.text).toBe(cardTerms);
+    expect(res.body.terms.invoiceText).toBe(invoiceTerms);
+    expect(intentCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("payment method decides the accepted terms (dated bookings)", () => {
+  const oneTimeCard = bookingTermsFor({ recurring: false, offSeason: false, paymentMethod: "CARD" });
+  const oneTimeInvoice = bookingTermsFor({ recurring: false, offSeason: false, paymentMethod: "INVOICE" });
+  const planCard = bookingTermsFor({ recurring: true, offSeason: false, paymentMethod: "CARD" });
+  const planInvoice = bookingTermsFor({ recurring: true, offSeason: false, paymentMethod: "INVOICE" });
+
+  it("a residential one-time card booking stores card terms with no invoice language", async () => {
+    const res = await bookIt();
+    expect(res.status).toBe(200);
+    expect(booking.tcText).toBe(oneTimeCard);
+    expect(String(booking.tcText)).not.toMatch(/invoice/i);
+  });
+
+  it("a commercial one-time invoice booking stores invoice terms with no card-charge language and no PaymentIntent", async () => {
+    booking.propertyKind = "COMMERCIAL";
+    const res = await bookIt({ invoice: true });
+    expect(res.status).toBe(200);
+    expect(intentCreate).not.toHaveBeenCalled();
+    expect(booking.tcText).toBe(oneTimeInvoice);
+    expect(String(booking.tcText)).toMatch(/payable on Net 30 terms/);
+    expect(String(booking.tcText)).not.toMatch(/charges your card|card/i);
+    expect(booking.stripePaymentIntentId ?? null).toBeNull();
+  });
+
+  it("a community recurring card booking stores the card plan terms", async () => {
+    booking.propertyKind = "COMMUNITY";
+    booking.quoteJson = JSON.stringify({
+      days: [QUOTED_DAY],
+      baseCents: 31300,
+      serviceLabel: "General pest control — up to 2,000 sqft",
+      recurringOffer: { frequency: "QUARTERLY", monthlyCents: 4900, initialFeeCents: 28800 },
+    });
+    const res = await bookIt({ recurring: true });
+    expect(res.status).toBe(200);
+    expect(booking.tcText).toBe(planCard);
+    expect(String(booking.tcText)).toContain("after your first completed visit");
+    expect(String(booking.tcText)).not.toMatch(/invoice/i);
+  });
+
+  it("a community recurring invoice booking stores the invoice plan terms and creates no PaymentIntent", async () => {
+    booking.propertyKind = "COMMUNITY";
+    booking.quoteJson = JSON.stringify({
+      days: [QUOTED_DAY],
+      baseCents: 31300,
+      serviceLabel: "General pest control — up to 2,000 sqft",
+      recurringOffer: { frequency: "QUARTERLY", monthlyCents: 4900, initialFeeCents: 28800 },
+    });
+    const res = await bookIt({ recurring: true, invoice: true });
+    expect(res.status).toBe(200);
+    expect(intentCreate).not.toHaveBeenCalled();
+    expect(finalizeBookingMock).toHaveBeenCalledTimes(1);
+    expect(booking.tcText).toBe(planInvoice);
+    expect(String(booking.tcText)).toContain("after your first completed visit");
+    expect(String(booking.tcText)).not.toMatch(/charges your card|card/i);
+  });
+
+  it("a stale terms version is refused before any money, invoice, or capacity change", async () => {
+    booking.propertyKind = "COMMERCIAL";
+    const res = await bookIt({ invoice: true, tcVersion: "2026-09-08" });
+    expect(res.status).toBe(409);
+    expect(res.body.terms.version).toBe(BOOKING_TERMS_VERSION);
+    expect(res.body.terms.invoiceText).toBe(oneTimeInvoice);
+    expect(intentCreate).not.toHaveBeenCalled();
+    expect(finalizeBookingMock).not.toHaveBeenCalled();
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
   });
 });

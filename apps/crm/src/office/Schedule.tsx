@@ -4,6 +4,7 @@ import {
   api,
   listAll,
   opResult,
+  opResultUnlessRefused,
   unwrap,
   type Customer,
   type Job,
@@ -182,7 +183,11 @@ export default function Schedule() {
           .filter((j) => j.routeId === route.id)
           .map((j) => j.routeOrder ?? 0)
       ) + 1;
-    opResult(
+    // The board's own pre-check (assignBlockedNote) reads the status it last
+    // rendered, so the server's refusals are precisely the ones it cannot see:
+    // the stop finished, or started, while this board sat open. Discarded, a
+    // refusal would look exactly like a successful assignment.
+    opResultUnlessRefused(
       await api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "ASSIGN",
@@ -244,7 +249,7 @@ export default function Schedule() {
   };
 
   const unassignAct = useAction(async (job: Job) => {
-    opResult(
+    opResultUnlessRefused(
       await api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "UNASSIGN",
@@ -276,7 +281,7 @@ export default function Schedule() {
   // A reorder swaps two stops' positions; firing the second swap off the same
   // pre-swap ordering wrote a sequence neither click asked for.
   const bumpAct = useAction(async (job: Job, swap: Job) => {
-    opResult(
+    opResultUnlessRefused(
       await api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "REORDER",

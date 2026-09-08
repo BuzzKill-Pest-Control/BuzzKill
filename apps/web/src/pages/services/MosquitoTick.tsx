@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -67,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -90,7 +90,7 @@ const TIPS = [
 const RELATED_SERVICES = [
   { label: "Rodent Control", to: "/services/rodent-control", desc: "They don't wait. Neither should you." },
   { label: "Cockroach Control", to: "/services/cockroach", desc: "If you see one, there's usually more nearby." },
-  { label: "Mosquito & Tick Control", to: "/services/mosquito-tick", desc: "Take your yard back this season." },
+  { label: "Termite Inspection", to: "/services/termite", desc: "Catch termite problems early, before costly repairs begin." },
   { label: "Wasp & Hornet Control", to: "/services/wasp-hornet-bee", desc: "Enjoy your backyard, not their nest." },
 ];
 
@@ -109,7 +109,7 @@ const FAQS = [
   },
   {
     q: "Is treatment safe for pets?",
-    a: "Yes. Your technician will explain any precautions before treatment.",
+    a: "Treatments are applied according to the product label, and your technician will explain any precautions for pets, including how long to keep them off treated areas, before treatment begins.",
   },
   {
     q: "Will treatment eliminate every mosquito?",
@@ -147,22 +147,6 @@ export default function MosquitoTick() {
 
   return (
     <>
-      <SEO
-        title="Mosquito & Tick Control Services — MA & RI"
-        description="Professional mosquito and tick control for Massachusetts and Rhode Island yards. Our seasonal program reduces activity so you can enjoy your outdoor spaces. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Mosquito & Tick Control Services",
-            "Professional seasonal mosquito and tick control for Massachusetts and Rhode Island properties, reducing activity to protect families, pets, and outdoor spaces.",
-            "/services/mosquito-tick",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/mosquito-tick" },
-            { name: "Mosquito & Tick Control", url: "/services/mosquito-tick" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

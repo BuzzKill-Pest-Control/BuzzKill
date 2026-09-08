@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -67,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -89,7 +89,7 @@ const TIPS = [
 
 const RELATED_SERVICES = [
   { label: "Rodent Control", to: "/services/rodent-control", desc: "They don't wait. Neither should you." },
-  { label: "Cockroach Control", to: "/services/cockroach", desc: "If you see one, there's usually more nearby." },
+  { label: "Ant & Spider Control", to: "/services/general-pest", desc: "The ants you see are only the beginning." },
   { label: "Mosquito & Tick Control", to: "/services/mosquito-tick", desc: "Take your yard back this season." },
   { label: "Wasp & Hornet Control", to: "/services/wasp-hornet-bee", desc: "Enjoy your backyard, not their nest." },
 ];
@@ -105,15 +105,15 @@ const FAQS = [
   },
   {
     q: "Is cockroach treatment safe around my family?",
-    a: "Yes. We use treatments designed with your family and pets in mind when applied as directed.",
+    a: "Treatments are applied by a licensed applicator according to the product label and state regulations. Your technician will explain any preparation steps and how long to keep family and pets out of treated areas.",
   },
   {
     q: "How long does cockroach treatment take?",
-    a: "Most services take about an hour depending on the size of your property.",
+    a: "Visit length depends on the size of your property and the extent of the activity. Your technician will give you a clear estimate when they arrive.",
   },
   {
     q: "Will I need more than one treatment?",
-    a: "Some infestations require follow up visits to fully eliminate the population.",
+    a: "Some infestations require follow-up visits to bring the population under control.",
   },
   {
     q: "Can I book online?",
@@ -147,22 +147,6 @@ export default function Cockroach() {
 
   return (
     <>
-      <SEO
-        title="Cockroach Control Services — MA & RI"
-        description="Professional cockroach control for Massachusetts and Rhode Island homes. We eliminate infestations at the source and help keep them from coming back. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Cockroach Control Services",
-            "Professional cockroach control for Massachusetts and Rhode Island homes, eliminating infestations at the source with licensed technicians.",
-            "/services/cockroach",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/cockroach" },
-            { name: "Cockroach Control", url: "/services/cockroach" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -180,7 +164,7 @@ export default function Cockroach() {
         image="/images/cockroach-hero.png"
         eyebrow="Cockroach Control Services"
         headline="Found a Cockroach? There Are Usually More Nearby."
-        sub="BuzzKill helps homeowners across Massachusetts &amp; Rhode Island eliminate cockroaches at the source, not just the ones you see. We Understand. Solve. Protect. so your home stays protected long after treatment."
+        sub="BuzzKill helps homeowners across Massachusetts &amp; Rhode Island treat cockroaches at the source, not just the ones you see. We Understand. Solve. Protect. to help keep your home protected long after treatment."
         primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
         secondaryCta={{ label: "Talk to a Local Expert", onClick: openTalkToExpert }}
         className="bk-hero--community"

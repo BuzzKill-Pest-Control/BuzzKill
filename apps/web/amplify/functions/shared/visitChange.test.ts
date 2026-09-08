@@ -180,10 +180,31 @@ const fakeStripe = {
 
 const {
   buildVisitChangePreview,
-  cancelVisit,
-  rescheduleVisit,
-  resumeVisitChange,
+  cancelVisit: cancelVisitRaw,
+  rescheduleVisit: rescheduleVisitRaw,
+  resumeVisitChange: resumeVisitChangeRaw,
 } = await import("./visitChange");
+
+/**
+ * Both entry points can now answer with a refusal envelope instead of an
+ * outcome, so every test below that reads an outcome narrows through here — an
+ * unexpected refusal fails loudly and by name, rather than surfacing as a
+ * missing property three assertions later. The refusal tests call the raw
+ * functions directly.
+ */
+function noRefusal<T extends object>(res: T): Exclude<T, { refused: string }> {
+  if ("refused" in res) {
+    throw new Error(`unexpected refusal: ${String(res.refused)}`);
+  }
+  return res as Exclude<T, { refused: string }>;
+}
+const cancelVisit = async (...args: Parameters<typeof cancelVisitRaw>) =>
+  noRefusal(await cancelVisitRaw(...args));
+const rescheduleVisit = async (...args: Parameters<typeof rescheduleVisitRaw>) =>
+  noRefusal(await rescheduleVisitRaw(...args));
+const resumeVisitChange = async (
+  ...args: Parameters<typeof resumeVisitChangeRaw>
+) => noRefusal(await resumeVisitChangeRaw(...args));
 
 // A licence date comfortably in the future so an active tech is compliant.
 const FUTURE_LICENSE = "2099-12-31";
@@ -403,6 +424,66 @@ describe("cancelVisit — money", () => {
     expect(res.invoiceVoided).toBe(true);
     expect(invoices.get("inv-open")!.status).toBe("VOID");
     expect(jobs.get("j1")!.status).toBe("CANCELED");
+  });
+});
+
+describe("a visit that finished first is refused, not an alarm", () => {
+  /**
+   * The cancel sheet and the reschedule form both gate on the preview's
+   * `changeable`, so reaching these guards means the visit went terminal
+   * between the preview and the confirm — the technician completed it while
+   * the office had the sheet open. That is news, not a fault, and a thrown
+   * error out of these paths IS the calling function's error alarm.
+   */
+
+  it("refuses to cancel a completed visit, in words, touching nothing", async () => {
+    seedPaidVisit({ status: "COMPLETED" });
+
+    const res = await cancelVisitRaw(fakeStripe, {
+      jobId: "j1",
+      decision: "CANCEL_REFUND",
+      reason: "customer moving",
+      actor: OFFICE,
+    });
+
+    expect("refused" in res && res.refused).toMatch(/can't be canceled here/i);
+    // No claim taken, no money moved, no status change — the refusal happens
+    // before the durable command is created.
+    expect(visitClaims.size).toBe(0);
+    expect(refundsCreate).not.toHaveBeenCalled();
+    expect(jobs.get("j1")!.status).toBe("COMPLETED");
+  });
+
+  it("refuses to reschedule a completed visit the same way", async () => {
+    seedPaidVisit({ status: "COMPLETED" });
+
+    const res = await rescheduleVisitRaw({
+      jobId: "j1",
+      scheduledDate: daysFromNow(20),
+      reason: "customer asked",
+      actor: OFFICE,
+    });
+
+    expect("refused" in res && res.refused).toMatch(
+      /only a scheduled or unscheduled visit can be rescheduled/i
+    );
+    expect(visitClaims.size).toBe(0);
+    expect(jobs.get("j1")!.scheduledDate).toBe(daysFromNow(10));
+  });
+
+  it("still THROWS for a visit it cannot read — an absent row and a failed read look identical", async () => {
+    // Job.get answers data: null for both, so "not found" is a sentence about
+    // the data that a read failure would make false. It stays an error.
+    jobs.delete("j1");
+
+    await expect(
+      cancelVisitRaw(fakeStripe, {
+        jobId: "j1",
+        decision: "CANCEL_REFUND",
+        reason: "customer moving",
+        actor: OFFICE,
+      })
+    ).rejects.toThrow(/not found/i);
   });
 });
 

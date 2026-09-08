@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -11,7 +11,7 @@ const FAMILIAR_ITEMS = [
   { emoji: "😟", icon: "/images/icon-restore-insulation.png",        text: "I'm worried damaged insulation is affecting my home's efficiency." },
   { emoji: "🤔", icon: "/images/icon-restore-clean-or-restore.png",  text: "I don't know if my attic needs cleaning or a complete restoration." },
   { emoji: "😷", icon: "/images/icon-restore-contamination.png",     text: "I'm concerned about droppings and contamination in the attic." },
-  { emoji: "🔇", icon: "/images/icon-restore-damage-remains.png",    text: "I can hear activity stopped, but the damage is still there." },
+  { emoji: "🔇", icon: "/images/icon-restore-damage-remains.png",    text: "The activity has stopped, but the damage is still there." },
   { emoji: "👍", icon: "/images/icon-restore-right-way.png",         text: "I want my attic restored the right way, not just cleaned up." },
 ];
 
@@ -20,7 +20,7 @@ const HAPPENING_CARDS = [
     tag: "The Damage",
     title: "The Damage Doesn't Leave With The Rodents",
     body: "Even after rodents are removed, damaged insulation, nesting material, and contamination can remain hidden throughout your attic.",
-    cta: "Know the Price. Book in Minutes.",
+    cta: "Request a Quote",
   },
   {
     tag: "The Insulation",
@@ -39,7 +39,7 @@ const HAPPENING_CARDS = [
 const ATTRACT_REASONS = [
   { num: "01", label: "Damaged Insulation",        title: "Rodents Flatten, Tear, And Contaminate Insulation", body: "Compressed or contaminated insulation reduces its effectiveness and affects your home's comfort and energy efficiency." },
   { num: "02", label: "Nesting Materials",         title: "Nests Left Behind Affect Air Quality",              body: "Nesting debris continues to affect cleanliness and indoor air quality long after the animals are removed." },
-  { num: "03", label: "Droppings And Contamination", title: "Rodent Waste Remains After Removal",              body: "Rodent waste can remain throughout attic spaces long after the infestation ends and requires professional removal." },
+  { num: "03", label: "Droppings And Contamination", title: "Rodent Waste Remains After Removal",              body: "Rodent waste can remain throughout attic spaces long after the infestation ends and should be handled with proper protective equipment." },
   { num: "04", label: "Hidden Damage",             title: "Damage Is Often Discovered During Inspection",      body: "Chewed materials and damaged storage areas are often only found during a thorough attic restoration inspection." },
   { num: "05", label: "Poor Ventilation",          title: "Moisture Makes Existing Problems Worse",            body: "Moisture and inadequate airflow can compound existing attic damage and create conditions for future pest activity." },
 ];
@@ -66,8 +66,8 @@ const PROTECT_STEPS = [
 ];
 
 const BOOK_STEPS = [
-  { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "01", title: "Request Your Quote.", body: "Tell us about your attic online in minutes. Restoration is quoted after your inspection." },
+  { num: "02", title: "Pick Your Day.", body: "We'll set up an inspection on a day that works for you." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -109,7 +109,7 @@ const FAQS = [
   },
   {
     q: "How long does attic restoration take?",
-    a: "Most projects are completed within one to two days, depending on the size of the attic and the amount of restoration required.",
+    a: "Timing depends on the size of the attic and the amount of restoration required. Your technician will give you an estimated timeline after the inspection.",
   },
   {
     q: "Will attic restoration improve energy efficiency?",
@@ -117,7 +117,7 @@ const FAQS = [
   },
   {
     q: "Can I get an Instant Quote?",
-    a: "Yes. Start with our Instant Quote tool to schedule your attic inspection. If restoration is needed, your BuzzKill technician will provide a clear recommendation and next steps.",
+    a: "Attic restoration is quoted after an inspection. Use Talk to a Local Expert on this page and we'll reach out to set up your visit. If restoration is needed, your BuzzKill technician will give you a clear recommendation and next steps.",
   },
 ];
 
@@ -147,22 +147,6 @@ export default function AtticRestoration() {
 
   return (
     <>
-      <SEO
-        title="Attic Restoration Services — MA & RI"
-        description="Professional attic restoration for Massachusetts and Rhode Island homes. We remove damaged insulation, nesting material, and contamination left behind by rodents. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Attic Restoration Services",
-            "Professional attic restoration for Massachusetts and Rhode Island homes. Removal of damaged insulation, nesting material, and rodent contamination by licensed technicians.",
-            "/services/rodent-control/attic-restoration",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Rodent Control", url: "/services/rodent-control" },
-            { name: "Attic Restoration", url: "/services/rodent-control/attic-restoration" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button

@@ -313,19 +313,22 @@ describe("updateCustomerContact (GL-09)", () => {
     }
   });
 
-  it("rejects an invalid email instead of saving it", async () => {
-    await expect(
-      call("updateCustomerContact", {
-        customerId: "c1",
-        displayName: "New Name",
-        email: "not-an-email",
-      })
-    ).rejects.toThrow(/valid email/i);
+  it("rejects an invalid email instead of saving it — in words, not an alarm", async () => {
+    // This pattern is stricter than the Edit sheet's own, so a real address
+    // typed slightly wrong clears the browser and lands here. That is a person
+    // mistyping, not crm-admin failing.
+    const res = (await call("updateCustomerContact", {
+      customerId: "c1",
+      displayName: "New Name",
+      email: "not-an-email",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/valid email/i);
     // Nothing was written.
     expect(customers.get("c1")!.displayName).toBe("Old Name");
   });
 
-  it("requires a customer name", async () => {
+  it("still THROWS on a blank name — the sheet enforces the same rule, so this is a broken client", async () => {
     await expect(
       call("updateCustomerContact", { customerId: "c1", displayName: "   " })
     ).rejects.toThrow(/name is required/i);
@@ -337,9 +340,12 @@ describe("updateCustomerContact (GL-09)", () => {
       mergeCounterpartId: "dup#fields-done",
     });
 
-    await expect(
-      call("updateCustomerContact", { customerId: "c1", displayName: "New Name" })
-    ).rejects.toThrow(/mid-merge — finish or resume the merge first/);
+    const res = (await call("updateCustomerContact", {
+      customerId: "c1",
+      displayName: "New Name",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/mid-merge — finish or resume the merge first/);
     // Nothing was written.
     expect(customers.get("c1")!.displayName).toBe("Old Name");
   });
@@ -351,10 +357,24 @@ describe("updateCustomerContact (GL-09)", () => {
       mergedIntoId: "c2",
     });
 
+    const res = (await call("updateCustomerContact", {
+      customerId: "c1",
+      displayName: "New Name",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/merged into c2/);
+    expect(customers.get("c1")!.displayName).toBe("Old Name");
+  });
+
+  it("still THROWS for a customer it cannot read — absent and unreadable look the same", async () => {
+    // Customer.get answers data: null either way, so "not found" is a sentence
+    // a read failure would make false. Unlike the three refusals above, which
+    // all need a row that actually says so.
+    customers.delete("c1");
+
     await expect(
       call("updateCustomerContact", { customerId: "c1", displayName: "New Name" })
-    ).rejects.toThrow(/merged into c2/);
-    expect(customers.get("c1")!.displayName).toBe("Old Name");
+    ).rejects.toThrow(/not found/i);
   });
 });
 
@@ -384,5 +404,31 @@ describe("reportSuspectAddresses", () => {
     expect(res.suspectCount).toBe(1);
     // The tombstone was still scanned — it is skipped, not hidden.
     expect(res.scanned).toBe(2);
+  });
+});
+
+describe("liftEmailSuppression — the address the office types", () => {
+  it("refuses a mistyped address in words, spending nothing", async () => {
+    // The address is free text pasted out of a bounce notice, so a mistyped
+    // one is a person mistyping — not crm-admin failing.
+    const res = (await call("liftEmailSuppression", {
+      email: "dana-at-example.com",
+      reasonCode: "CUSTOMER_RECONSENTED",
+      evidence: "Signed form on file",
+    })) as { refused?: string };
+
+    expect(res.refused).toMatch(/enter the suppressed email address/i);
+  });
+
+  it("still THROWS on a reason code that is not on the list — that is a broken client", async () => {
+    // The screen offers exactly two codes. One arriving off-list means the
+    // caller is not the screen, which is not a conversation to have in words.
+    await expect(
+      call("liftEmailSuppression", {
+        email: "dana@example.com",
+        reasonCode: "FELT_LIKE_IT",
+        evidence: "x",
+      })
+    ).rejects.toThrow(/controlled suppression-release reason/i);
   });
 });

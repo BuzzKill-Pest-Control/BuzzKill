@@ -9,7 +9,6 @@ import {
   ADS_CONVERSIONS,
 } from "../lib/analytics";
 import FormContactFooter from "./FormContactFooter";
-import { OFFICE_PHONE_PRETTY } from "../lib/contactInfo";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
@@ -85,7 +84,7 @@ export default function ContactMeForm({ formId }: { formId: string }) {
         <h2>We&rsquo;ve got it!</h2>
         <p>
           Your request is with our team and a local BuzzKill expert will follow
-          up shortly.
+          up by phone or email.
         </p>
         <FormContactFooter lead="Need help right now?" />
       </div>
@@ -133,7 +132,7 @@ export default function ContactMeForm({ formId }: { formId: string }) {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             autoComplete="tel"
-            placeholder={OFFICE_PHONE_PRETTY}
+            placeholder="Your phone number"
           />
         </div>
       </div>

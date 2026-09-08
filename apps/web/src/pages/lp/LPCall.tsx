@@ -9,7 +9,12 @@
  * - Speed to lead: fastest path from ad click to conversation
  */
 import { Link } from "react-router-dom";
-import SEO from "../../components/SEO";
+import { COMPANY } from "../../../amplify/functions/shared/company";
+import {
+  OFFICE_ADDRESS,
+  OFFICE_PHONE_PRETTY,
+  OFFICE_TEL,
+} from "../../lib/contactInfo";
 
 function PhoneIcon({ size = 24 }: { size?: number }) {
   return (
@@ -50,11 +55,6 @@ function CheckIcon({ size = 14 }: { size?: number }) {
 export default function LPCall() {
   return (
     <div className="bk-lp bk-lp--dark">
-      <SEO
-        title="Talk to a Pest Control Specialist Now"
-        description="Get expert advice on your HOA or condo pest situation. One call, one plan, done."
-        noindex
-      />
 
       <header className="bk-lp-header">
         <img src="/images/logo.png" alt="BuzzKill Pest Control" />
@@ -79,17 +79,17 @@ export default function LPCall() {
           style={{ margin: "0 0 32px", fontSize: 17 }}
         >
           Speak with a specialist who knows condo and HOA pest control.
-          Get a plan for your community in minutes, not days.
+          Get your community&rsquo;s plan started on the first call.
         </p>
 
         {/* Primary CTA: Phone */}
         <a
-          href="tel:508-258-9294"
+          href={OFFICE_TEL}
           className="bk-btn bk-btn-primary bk-lp-cta bk-lp-cta--lg bk-lp-cta-row"
           style={{ marginBottom: 10 }}
         >
           <PhoneIcon size={22} />
-          508-258-9294
+          {OFFICE_PHONE_PRETTY}
         </a>
 
         <p
@@ -99,7 +99,7 @@ export default function LPCall() {
             margin: "0 0 32px",
           }}
         >
-          Mon–Fri 7am–6pm &bull; Free consultation
+          Calling costs nothing, and there&rsquo;s no obligation.
         </p>
 
         {/* OR divider */}
@@ -140,6 +140,26 @@ export default function LPCall() {
           )}
         </div>
       </main>
+
+      <footer
+        style={{
+          marginTop: "auto",
+          padding: "20px 24px 28px",
+          textAlign: "center",
+          fontSize: 12,
+          lineHeight: 1.6,
+          color: "rgba(255,255,255,0.5)",
+        }}
+      >
+        {COMPANY.legalName} &middot; {OFFICE_ADDRESS} &middot;{" "}
+        <Link to="/privacy-policy" style={{ color: "inherit" }}>
+          Privacy Policy
+        </Link>{" "}
+        &middot;{" "}
+        <Link to="/terms-of-service" style={{ color: "inherit" }}>
+          Terms of Service
+        </Link>
+      </footer>
     </div>
   );
 }

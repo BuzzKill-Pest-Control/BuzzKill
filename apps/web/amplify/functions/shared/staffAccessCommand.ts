@@ -302,41 +302,81 @@ const OWNER_SERIAL_ID = "owner-serial";
 const OWNER_SERIAL_LEASE_MS = 2 * 60_000;
 
 /**
+ * Why acquiring the owner mutex is not a boolean.
+ *
+ * "Another owner change is running" is a business fact the office can act on —
+ * wait, then retry — and it belongs on the screen, not in the error alarm. But
+ * every step of taking this mutex can ALSO simply fail to answer: a conditional
+ * create returns nothing whether the row exists or the write never landed, and
+ * a takeover the CAS layer could not perform is not a race that was lost. A
+ * single `false` for both makes an outage indistinguishable from a colleague,
+ * and reported as one it would tell the office to "wait a moment and retry"
+ * indefinitely with nothing to alarm on.
+ *
+ * So HELD (a live lease we actually READ, or a takeover a real racer won) is
+ * separated from UNKNOWN (the store would not answer). Callers refuse on the
+ * first and throw on the second — matching the LOST / UNSUPPORTED split the
+ * atomicLock layer already draws for the same reason.
+ */
+export type OwnerSerialResult =
+  | { ok: true }
+  | { ok: false; reason: "HELD" }
+  | { ok: false; reason: "UNKNOWN"; detail: string };
+
+/**
  * GL-14 — serialize owner-set changes. Any action that grants or removes the
  * OWNER role must hold this across its last-owner check AND the change, so two
  * concurrent owner demotions/offboardings cannot both pass a point-in-time
- * count and then need a fallible rollback. Returns false when another owner
- * change is in flight — the caller refuses safely, having changed nothing.
- * A crashed holder's expired lease is seized with ONE conditional update
- * (never delete-then-create), and release is fenced on the holder value so an
- * expired worker can never delete a newer worker's mutex.
+ * count and then need a fallible rollback. A crashed holder's expired lease is
+ * seized with ONE conditional update (never delete-then-create), and release is
+ * fenced on the holder value so an expired worker can never delete a newer
+ * worker's mutex.
  */
-export async function acquireOwnerSerial(holder: string): Promise<boolean> {
+export async function acquireOwnerSerial(
+  holder: string
+): Promise<OwnerSerialResult> {
   const client = await dataClient();
   const now = Date.now();
-  const { data: created } = await client.models.OwnerChangeSerial.create({
+  const created = await client.models.OwnerChangeSerial.create({
     id: OWNER_SERIAL_ID,
     holder,
     leaseUntil: new Date(now + OWNER_SERIAL_LEASE_MS).toISOString(),
   });
-  if (created) return true;
-  const { data: existing } = await client.models.OwnerChangeSerial.get({
+  if (created.data) return { ok: true };
+  // A conditional create returns no row for two unrelated reasons — the mutex
+  // is taken, or the write did not land — so it is not yet a verdict. Only the
+  // read below can tell them apart.
+  const existing = await client.models.OwnerChangeSerial.get({
     id: OWNER_SERIAL_ID,
   });
-  if (
-    existing?.leaseUntil &&
-    Date.parse(existing.leaseUntil) > now
-  ) {
-    return false;
+  if (existing.errors?.length) {
+    return {
+      ok: false,
+      reason: "UNKNOWN",
+      detail: existing.errors.map((e) => e.message).join("; "),
+    };
   }
-  if (!existing) {
+  if (existing.data?.leaseUntil && Date.parse(existing.data.leaseUntil) > now) {
+    return { ok: false, reason: "HELD" };
+  }
+  if (!existing.data) {
     // Released between our create and get — one more conditional create.
-    const { data: retried } = await client.models.OwnerChangeSerial.create({
+    const retried = await client.models.OwnerChangeSerial.create({
       id: OWNER_SERIAL_ID,
       holder,
       leaseUntil: new Date(now + OWNER_SERIAL_LEASE_MS).toISOString(),
     });
-    return Boolean(retried);
+    if (retried.data) return { ok: true };
+    // Two creates refused with a confirmed-absent row between them. Either the
+    // writes are not landing or the mutex is churning faster than we can read
+    // it; neither is a fact worth telling anyone. Say we do not know.
+    return {
+      ok: false,
+      reason: "UNKNOWN",
+      detail:
+        retried.errors?.map((e) => e.message).join("; ") ??
+        "the owner-change mutex could neither be created nor read",
+    };
   }
   // Stale — seize it atomically. Exactly one concurrent reclaimer wins.
   const takeover = await casTakeover("OwnerChangeSerial", OWNER_SERIAL_ID, {
@@ -345,7 +385,18 @@ export async function acquireOwnerSerial(holder: string): Promise<boolean> {
     leaseField: "leaseUntil",
     leaseMs: OWNER_SERIAL_LEASE_MS,
   });
-  return takeover.ok;
+  if (takeover.ok) return { ok: true };
+  // LOST is a real racer taking the stale lease first — that racer now holds
+  // it. UNSUPPORTED means the CAS layer itself is broken, which the atomicLock
+  // contract is explicit about: refuse and alarm, never conclude someone else
+  // holds the resource.
+  return takeover.reason === "LOST"
+    ? { ok: false, reason: "HELD" }
+    : {
+        ok: false,
+        reason: "UNKNOWN",
+        detail: "the owner-change mutex has no working conditional-write path",
+      };
 }
 
 /** Release the owner-change mutex — fenced on the holder, so a worker whose

@@ -1,4 +1,8 @@
 import { formatMoney as fmtMoney } from "./money";
+import { COMPANY, SITE_HOSTNAME, companyAddressLines } from "./company";
+import { documentLicenseLine } from "./credentials";
+import { quoteCoverageArtFor } from "./coverage";
+import type { CatalogServiceId } from "./serviceCatalog";
 import {
   PDFDocument,
   PDFFont,
@@ -202,25 +206,35 @@ const fmtSignedDate = (iso: string) =>
 
 export type AgreementCompany = {
   name: string;
+  /** Registered name of the contracting entity. Printed in small text under
+   *  the public name on the agreement masthead only. */
+  legalName?: string;
   addressLines?: string[];
   phone?: string;
   email?: string;
   website?: string;
-  /** Applicator/business license number. Printed only when provided. */
+  /** The published state credentials. Printed only when provided. */
   license?: string;
 };
 
 /** The BuzzKill masthead identity, used when a caller supplies no company. It
  *  mirrors AGREEMENT_COMPANY so the report, quote, and agreement print the same
- *  address, contact, and applicator licence. */
-const DEFAULT_COMPANY: AgreementCompany = {
-  name: "BuzzKill Pest Control",
-  addressLines: ["420 Lakeside Ave, Suite 104", "Marlborough, MA 01752"],
-  phone: "(508) 258-9294",
-  email: "info@pestbuzzkill.com",
-  website: "pestbuzzkill.com",
-  license: "CC-0060592",
-};
+ *  address, contact, and published credentials (the MA commercial
+ *  certification and the RI company registration from /licensed-insured). */
+/** The masthead identity for a document about work in `serviceState`: the
+ *  credential line prints the Category 41 certification for Massachusetts
+ *  work and adds the Rhode Island company registration for Rhode Island work. */
+function defaultCompanyFor(serviceState?: string | null): AgreementCompany {
+  return {
+    name: COMPANY.name,
+    legalName: COMPANY.legalName,
+    addressLines: [...companyAddressLines()],
+    phone: COMPANY.phone.pretty,
+    email: COMPANY.email.address,
+    website: SITE_HOSTNAME,
+    license: documentLicenseLine({ state: serviceState }),
+  };
+}
 
 /** One line in a money summary box (label left, amount right). */
 export type AgreementMoneyRow = {
@@ -230,7 +244,7 @@ export type AgreementMoneyRow = {
   negative?: boolean;
   /** Bold, with a rule above — used for the box's total line. */
   total?: boolean;
-  /** Grey, smaller — used for a "Tax (0%)" style line. */
+  /** Grey, smaller: a secondary note row. */
   muted?: boolean;
 };
 
@@ -247,6 +261,9 @@ class AgreementDoc {
   bold!: PDFFont;
   italic!: PDFFont;
   y = 0; // top edge of the next block, measured from the page bottom
+  /** When set, every drawn text line is appended here (tests read the
+   *  rendered words back instead of parsing the PDF). */
+  textLog: string[] | null = null;
 
   static async create(): Promise<AgreementDoc> {
     const d = new AgreementDoc();
@@ -332,6 +349,7 @@ class AgreementDoc {
     let yy = top;
     for (const line of this.lines(text, font, size, maxWidth)) {
       if (line) {
+        this.textLog?.push(line);
         const tw = font.widthOfTextAtSize(line, size);
         let dx = x;
         if (opts.align === "center") dx = x + (maxWidth - tw) / 2;
@@ -419,8 +437,10 @@ export async function renderAgreementPdf(opts: {
   recurring?: { title?: string; rows: AgreementMoneyRow[] };
   /** Payment-authorization terms (the EFT/auto-charge consent). */
   paymentAuthText?: string;
-  /** Initial commitment length in months; printed as a closing line. */
-  initialTermMonths?: number;
+  /** Two-letter state of the service address, for the credential line. */
+  serviceState?: string | null;
+  /** Test hook: every drawn text line is appended here. */
+  textLog?: string[];
   signerName: string;
   signerEmail?: string;
   signatureDataUrl?: string | null;
@@ -431,7 +451,8 @@ export async function renderAgreementPdf(opts: {
   images?: AgreementImage[];
 }): Promise<Uint8Array> {
   const d = await AgreementDoc.create();
-  const co = opts.company ?? DEFAULT_COMPANY;
+  if (opts.textLog) d.textLog = opts.textLog;
+  const co = opts.company ?? defaultCompanyFor(opts.serviceState);
 
   // ---- Masthead: logo (left) · SERVICE AGREEMENT (center) · contact (right)
   const topY = d.y;
@@ -453,17 +474,37 @@ export async function renderAgreementPdf(opts: {
     maxWidth: A_CW,
     align: "center",
   });
+  // The public name, then the contracting entity in small text beneath it:
+  // the LLC is the party to this agreement, the trade name is what customers
+  // know. Quotes and reports print the public name alone.
+  let contactY = d.write(co.name, A_M, topY, {
+    font: d.font,
+    size: 8,
+    color: INK,
+    maxWidth: A_CW,
+    align: "right",
+    lineGap: 1.5,
+  });
+  if (co.legalName && co.legalName !== co.name) {
+    contactY = d.write(co.legalName, A_M, contactY, {
+      font: d.font,
+      size: 7,
+      color: MUTED,
+      maxWidth: A_CW,
+      align: "right",
+      lineGap: 1.5,
+    });
+  }
   const contact = [
-    co.name,
     ...(co.addressLines ?? []),
     co.phone,
     co.email,
     co.website,
-    co.license ? `License #: ${co.license}` : null,
+    co.license ? `Credentials: ${co.license}` : null,
   ]
     .filter(Boolean)
     .join("\n");
-  const contactBottom = d.write(contact, A_M, topY, {
+  const contactBottom = d.write(contact, A_M, contactY, {
     font: d.font,
     size: 8,
     color: INK,
@@ -627,16 +668,28 @@ export async function renderAgreementPdf(opts: {
   d.y -= 8;
   d.flow(opts.bodyText, { size: 8.5, gapAfter: 10 });
 
+  // A funnel agreement carries no signature image: the customer accepted the
+  // booking terms by checkbox at online checkout. Only an agreement that was
+  // actually signed is described as signed.
+  const acceptedOnline = !opts.signatureDataUrl;
+
   // ---- Acceptance line
-  d.need(24);
-  d.write("I have read and understand this entire agreement.", A_M, d.y, {
-    font: d.bold,
-    size: 10,
-    color: BK_GREEN_DK,
-    maxWidth: A_CW,
-    align: "center",
-  });
-  d.y -= 22;
+  d.need(36);
+  d.y =
+    d.write(
+      acceptedOnline
+        ? "Accepted online: at checkout the customer ticked 'I have read and accept the booking & cancellation terms.'"
+        : "I have read and understand this entire agreement.",
+      A_M,
+      d.y,
+      {
+        font: d.bold,
+        size: 10,
+        color: BK_GREEN_DK,
+        maxWidth: A_CW,
+        align: "center",
+      }
+    ) - 9;
 
   // ---- Billing | Payment authorization
   if (opts.billingAddress || opts.paymentAuthText) {
@@ -698,34 +751,33 @@ export async function renderAgreementPdf(opts: {
   }
   d.hline(A_M, A_M + 220, d.y, INK, 0.75);
   d.y -= 12;
-  d.write(`Customer signed on: ${fmtSignedDate(opts.signedAtIso)}`, A_M, d.y, {
-    font: d.bold,
-    size: 9.5,
-  });
+  d.write(
+    acceptedOnline
+      ? `Accepted electronically at online checkout on ${fmtSignedDate(opts.signedAtIso)}`
+      : `Customer signed on: ${fmtSignedDate(opts.signedAtIso)}`,
+    A_M,
+    d.y,
+    { font: d.bold, size: 9.5 }
+  );
   d.y -= 16;
-
-  // ---- Initial-term closing line
-  if (opts.initialTermMonths) {
-    d.need(24);
-    d.write(
-      `This agreement is for an initial period of ${opts.initialTermMonths} month(s).`,
-      A_M,
-      d.y,
-      { font: d.bold, size: 11, maxWidth: A_CW, align: "center" }
-    );
-    d.y -= 20;
-  }
 
   // ---- Electronic-signature audit footer
   d.need(40);
   d.hline(A_M, PAGE.width - A_M, d.y, RULE, 0.5);
   d.y -= 10;
+  const who = acceptedOnline ? "Accepted by" : "Signer";
   const audit = [
-    `Signed electronically. Agreement reference: ${opts.agreementId}.`,
-    opts.signerEmail ? `Signer: ${opts.signerName} (${opts.signerEmail}).` : `Signer: ${opts.signerName}.`,
+    acceptedOnline
+      ? `Accepted electronically. Agreement reference: ${opts.agreementId}.`
+      : `Signed electronically. Agreement reference: ${opts.agreementId}.`,
+    opts.signerEmail
+      ? `${who}: ${opts.signerName} (${opts.signerEmail}).`
+      : `${who}: ${opts.signerName}.`,
     opts.signerIp ? `IP: ${opts.signerIp}.` : null,
     opts.signerUserAgent ? `Device: ${opts.signerUserAgent.slice(0, 80)}.` : null,
-    "By signing, the signer agreed to the terms above and consented to conduct this transaction electronically.",
+    acceptedOnline
+      ? "By accepting the booking terms at online checkout, the customer agreed to the terms above and consented to conduct this transaction electronically."
+      : "By signing, the signer agreed to the terms above and consented to conduct this transaction electronically.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -758,18 +810,6 @@ const fmtQuoteDate = (iso: string) =>
  * general home/community/commercial plan shows the full common-pest lineup.
  * Keys must exist in PEST_ART.
  */
-function pestsForService(label: string): string[] {
-  const l = label.toLowerCase();
-  if (/mosquito/.test(l)) return ["mosquitoes", "ticks", "fleas"];
-  if (/\btick|\bflea/.test(l)) return ["ticks", "fleas", "mosquitoes"];
-  if (/wasp|hornet|\bbee|sting/.test(l)) return ["wasps"];
-  if (/rodent|mice|mouse|\brat/.test(l)) return ["rodents"];
-  if (/roach|cockroach/.test(l)) return ["cockroaches"];
-  if (/spider/.test(l)) return ["spiders"];
-  if (/\bant\b|ants/.test(l)) return ["ants"];
-  // General home / community / commercial / "pest control" plans.
-  return ["ants", "spiders", "cockroaches", "mosquitoes", "ticks", "wasps", "rodents"];
-}
 
 /**
  * Draw a green check mark whose top-left sits near (x, top), about `s` points
@@ -883,7 +923,14 @@ export async function renderQuotePdf(opts: {
   customerEmail?: string | null;
   customerPhone?: string | null;
   serviceAddress?: string | null;
+  /** Two-letter state of the service address, for the credential line. */
+  serviceState?: string | null;
   serviceLabel: string;
+  /** The catalog service id the quote was priced for. Coverage pictures come
+   *  from this id alone (coverage.ts), never from the label. */
+  serviceId: CatalogServiceId | string | null;
+  /** Test hook: every drawn text line is appended here. */
+  textLog?: string[];
   /** The one-time treatment price, in cents. Omit for a plan-only quote. */
   oneTimeCents?: number | null;
   /** The recurring plan offer. Omit for a one-time-only quote. */
@@ -899,7 +946,8 @@ export async function renderQuotePdf(opts: {
   offSeasonMessage?: string | null;
 }): Promise<Uint8Array> {
   const d = await AgreementDoc.create();
-  const co = opts.company ?? DEFAULT_COMPANY;
+  if (opts.textLog) d.textLog = opts.textLog;
+  const co = opts.company ?? defaultCompanyFor(opts.serviceState);
   const rightX = A_M + A_COLW + A_GUTTER;
 
   // ---- Masthead: logo (left) · PRICE QUOTE (center) · contact (right)
@@ -928,7 +976,7 @@ export async function renderQuotePdf(opts: {
     co.phone,
     co.email,
     co.website,
-    co.license ? `License #: ${co.license}` : null,
+    co.license ? `Credentials: ${co.license}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1034,7 +1082,7 @@ export async function renderQuotePdf(opts: {
     rB = moneyBlock(bothBoxes ? rightX : soloX, "Recurring Plan", [
       { label: `Visits: ${cadenceLabel(opts.plan.frequency)}`, amountCents: opts.plan.monthlyCents, muted: true },
       { label: "Billed monthly", amountCents: opts.plan.monthlyCents },
-      { label: "Due at booking", amountCents: opts.plan.initialFeeCents, total: true },
+      { label: "Initial fee", amountCents: opts.plan.initialFeeCents, total: true },
     ]);
   }
   d.y = Math.min(lB, rB) - 16;
@@ -1054,34 +1102,52 @@ export async function renderQuotePdf(opts: {
   // ---- Pests We Protect Against — the coverage strip with real pest photos
   d.band("Pests We Protect Against");
   d.y -= 12;
-  await drawCoverageStrip(d, pestsForService(opts.serviceLabel));
+  await drawCoverageStrip(d, quoteCoverageArtFor(opts.serviceId));
   d.y -= 6;
 
-  // ---- Why Homeowners Choose BuzzKill — green-checked value props, two columns
-  d.band("Why Homeowners Choose BuzzKill");
+  // ---- Why Customers Choose BuzzKill — green-checked value props, two columns
+  d.band("Why Customers Choose BuzzKill");
   d.y -= 10;
   const valueProps = [
     "Licensed, insured local technicians",
-    "Complimentary re-treats between visits",
-    "Safe for families and pets",
-    "Products registered with the EPA",
+    "Covered re-treats between visits on active service plans",
+    "Label-directed applications with clear guidance for your family and pets",
+    "EPA-registered products, applied as their labels direct",
   ];
   const propColW = A_CW / 2;
-  const propRows = Math.ceil(valueProps.length / 2);
-  d.need(propRows * 16 + 4);
+  const propSize = 9.5;
+  const propMaxW = propColW - 20;
+  // Each row is as tall as its longest prop, so a prop that wraps to a second
+  // line never runs into the row beneath it.
+  const propRowH: number[] = [];
+  for (let i = 0; i < valueProps.length; i += 2) {
+    const h = Math.max(
+      ...valueProps
+        .slice(i, i + 2)
+        .map((p) => d.measure(p, d.font, propSize, propMaxW))
+    );
+    propRowH.push(h + 3.5);
+  }
+  const propsH = propRowH.reduce((a, b) => a + b, 0);
+  d.need(propsH + 4);
   const propTop = d.y;
+  let propRowTop = propTop;
   valueProps.forEach((prop, i) => {
+    if (i > 0 && i % 2 === 0) propRowTop -= propRowH[i / 2 - 1];
     const px = A_M + (i % 2) * propColW;
-    const py = propTop - Math.floor(i / 2) * 16;
-    drawCheck(d, px + 2, py, 9);
-    d.write(prop, px + 16, py, { size: 9.5, color: INK, maxWidth: propColW - 20 });
+    drawCheck(d, px + 2, propRowTop, 9);
+    d.write(prop, px + 16, propRowTop, {
+      size: propSize,
+      color: INK,
+      maxWidth: propMaxW,
+    });
   });
-  d.y = propTop - propRows * 16 - 12;
+  d.y = propTop - propsH - 12;
 
   // ---- Booking call-to-action, in a green-tinted callout with an accent bar
   const ctaText = opts.offSeason
-    ? "To reserve this price, open your quote from the email we just sent and enroll — it takes about a minute."
-    : "To lock in this price, open your quote from the email we just sent and pick the day that works — booking online takes about a minute.";
+    ? "To reserve this price, open your quote from the email we just sent and enroll. It takes about a minute."
+    : "To lock in this price, open your quote from the email we just sent and pick the day that works. Booking online takes about a minute.";
   const ctaH = d.measure(ctaText, d.font, 10, A_CW - 44, 0.5) + 20;
   d.need(ctaH + 4);
   const ctaTop = d.y;
@@ -1150,9 +1216,11 @@ export async function renderServiceReportPdf(opts: {
     accuracyM?: number | null;
     capturedAtIso?: string | null;
   } | null;
+  /** Two-letter state of the service address, for the credential line. */
+  serviceState?: string | null;
 }): Promise<Uint8Array> {
   const d = await AgreementDoc.create();
-  const co = opts.company ?? DEFAULT_COMPANY;
+  const co = opts.company ?? defaultCompanyFor(opts.serviceState);
   const rightX = A_M + A_COLW + A_GUTTER;
 
   // ---- Masthead: logo (left) · SERVICE REPORT (center) · contact (right)
@@ -1181,7 +1249,7 @@ export async function renderServiceReportPdf(opts: {
     co.phone,
     co.email,
     co.website,
-    co.license ? `License #: ${co.license}` : null,
+    co.license ? `Credentials: ${co.license}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1332,14 +1400,16 @@ export async function renderServiceReportPdf(opts: {
     });
   }
 
-  // The applicator's duty to warn. An occupant who is not told when it is safe
-  // to go back in has not been told the one thing this document is for.
+  // The applicator's duty to warn. An occupant who is not told the label's
+  // re-entry interval has not been told the one thing this document is for.
+  // The interval is the product label's, stated as such, never as BuzzKill's
+  // own safety judgment.
   if (!opts.inspectionOnly && opts.reEntryIntervalHours != null) {
     section(
-      "When It Is Safe to Re-Enter",
+      "Re-Entry Interval",
       opts.reEntryIntervalHours <= 0
-        ? "Treated areas may be re-entered immediately once any applied product is dry or contained."
-        : `Keep people and pets out of the treated areas for ${opts.reEntryIntervalHours} ${opts.reEntryIntervalHours === 1 ? "hour" : "hours"} from the application time above.`
+        ? "Per the product label, treated areas may be re-entered once any applied product is dry or contained."
+        : `Per the product label, keep people and pets out of the treated areas for ${opts.reEntryIntervalHours} ${opts.reEntryIntervalHours === 1 ? "hour" : "hours"} from the application time above.`
     );
   }
 
@@ -1391,11 +1461,11 @@ export async function renderServiceReportPdf(opts: {
   d.hline(A_M, PAGE.width - A_M, d.y, RULE, 0.5);
   d.y -= 10;
   d.y = d.write(
-    `${co.name} is committed to the safety of our customers and our environment. ` +
-      "All materials used have been registered by the Environmental Protection Agency. " +
-      "Please avoid unnecessary contact with materials and comply with all instructions and " +
-      "recommendations from our technicians. Thank you for your patronage! " +
-      "National Emergency Poison Control: (800) 222-1222",
+    `${co.name} applies every product according to its label directions and the pesticide ` +
+      "regulations of the state where the service was performed. Please avoid unnecessary " +
+      "contact with treated areas and follow all instructions and recommendations from our " +
+      "technicians. Thank you for your patronage! " +
+      "National Poison Control: (800) 222-1222",
     A_M,
     d.y,
     { size: 7.5, color: MUTED, maxWidth: A_CW, align: "center", lineGap: 0.5 }
@@ -1431,9 +1501,11 @@ export async function renderAmendmentPdf(opts: {
   authorName: string;
   authorEmail?: string | null;
   issuedAtIso: string;
+  /** Two-letter state of the service address, for the credential line. */
+  serviceState?: string | null;
 }): Promise<Uint8Array> {
   const d = await AgreementDoc.create();
-  const co = opts.company ?? DEFAULT_COMPANY;
+  const co = opts.company ?? defaultCompanyFor(opts.serviceState);
   const rightX = A_M + A_COLW + A_GUTTER;
 
   // ---- Masthead: logo (left) · SERVICE REPORT AMENDMENT (center) · contact
@@ -1458,7 +1530,7 @@ export async function renderAmendmentPdf(opts: {
     co.phone,
     co.email,
     co.website,
-    co.license ? `License #: ${co.license}` : null,
+    co.license ? `Credentials: ${co.license}` : null,
   ]
     .filter(Boolean)
     .join("\n");

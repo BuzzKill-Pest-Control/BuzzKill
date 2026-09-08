@@ -1,32 +1,30 @@
-import SEO from "../components/SEO";
+import { COMPANY, SITE_HOSTNAME } from "../../amplify/functions/shared/company";
+import { OFFICE_ADDRESS, OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE, OFFICE_TEL } from "../lib/contactInfo";
 
 export default function TermsOfService() {
   return (
     <>
-    <SEO
-      title="Terms of Service"
-      description="BuzzKill Pest Control terms of service. Review the terms governing use of our website and pest control services."
-      noindex
-    />
     <section className="bk-legal">
       <div className="bk-container bk-narrow">
         <h1>Terms of Service</h1>
         <p className="bk-legal-meta">
-          <strong>Effective Date:</strong> January 1, 2026 &nbsp;|&nbsp;{" "}
-          <strong>Last Updated:</strong> January 1, 2026
+          <strong>Effective Date:</strong> January 16, 2026 &nbsp;|&nbsp;{" "}
+          <strong>Last Updated:</strong> September 7, 2026
         </p>
 
         <p>
           These Terms of Service ("Terms") govern your use of the BuzzKill Pest
-          Control website (www.pestbuzzkill.com) and our pest control services.
+          Control website ({SITE_HOSTNAME}) and our pest control services.
           By using the Site or scheduling Services, you agree to these Terms.
         </p>
 
         <h2>1. Definitions</h2>
         <p>
-          "Company" refers to BuzzKill Pest Control LLC. "You" refers to any
-          user of the Site. "Services" refers to pest control and related
-          offerings.
+          "Company" refers to {COMPANY.legalName}, the Massachusetts limited
+          liability company that operates the {COMPANY.brandName} brand,
+          provides the services described as {COMPANY.serviceDisplayName}, and
+          contracts for the Services. "You" refers to any user of the Site.
+          "Services" refers to pest control and related offerings.
         </p>
 
         <h2>2. Site Use &amp; Eligibility</h2>
@@ -39,12 +37,16 @@ export default function TermsOfService() {
         <h2>3. Quotes, Scheduling &amp; Service Requests</h2>
         <ul>
           <li>
-            Quotes are estimates subject to change after inspection or scope
-            clarification
+            Online quotes are priced from the property details you enter, and
+            when you book online your card is charged the amount shown. Quotes
+            prepared by our office are estimates subject to change after
+            inspection or scope clarification
           </li>
           <li>
-            Appointment requests require confirmation; submission alone does not
-            guarantee booking
+            Online bookings are confirmed at checkout and by the confirmation
+            email you receive. Contact-form, email, and phone requests require
+            confirmation from our office, and a request alone does not guarantee
+            a booking
           </li>
           <li>
             Customers must provide safe access, secure pets, and follow prep
@@ -61,14 +63,18 @@ export default function TermsOfService() {
 
         <h2>5. Payments &amp; Billing</h2>
         <ul>
-          <li>Charges are due unless stated otherwise</li>
+          <li>
+            For online bookings, your card is charged the amount shown when you
+            book. Other charges are due per the invoice unless stated otherwise
+          </li>
           <li>
             Third-party payment processors handle online transactions
           </li>
           <li>Late payments may incur fees per invoice terms</li>
           <li>
-            Refund eligibility depends on services rendered and written plan
-            terms
+            Refunds for online bookings follow the cancellation policy in
+            Section 7. Other refund eligibility depends on services rendered and
+            written plan terms
           </li>
         </ul>
 
@@ -83,7 +89,7 @@ export default function TermsOfService() {
           Mirrors the enforced booking policy: CANCEL_FULL_REFUND_DAYS in
           amplify/functions/shared/bookingTerms.ts, which is the same text a
           customer accepts at online checkout and the /cancel flow enforces.
-          Keep this sentence identical to BOOKING_TERMS_TEXT if that constant
+          Keep this sentence identical to VISIT_CANCELLATION_SENTENCE if that constant
           ever changes.
         */}
         <p>
@@ -151,11 +157,13 @@ export default function TermsOfService() {
 
         <h2>Contact</h2>
         <p>
-          420 Lakeside Ave, Suite 104, Marlborough, MA 01752
+          {COMPANY.legalName}
           <br />
-          <a href="tel:508-258-9294">508-258-9294</a>
+          {OFFICE_ADDRESS}
           <br />
-          <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a>
+          <a href={OFFICE_TEL}>{OFFICE_PHONE}</a>
+          <br />
+          <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a>
         </p>
       </div>
     </section>

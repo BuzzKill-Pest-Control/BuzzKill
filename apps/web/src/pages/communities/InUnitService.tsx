@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
+import { OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
   { img: "/images/01-reporting-pests.png",     text: "Residents keep reporting ants or roaches and nothing seems to fix it." },
@@ -58,7 +59,7 @@ const METHOD_STEPS = [
     method: "SOLVE",
     num: "02",
     title: "Treat The Source",
-    body: "Our licensed technicians target the problem inside each affected unit while respecting every resident's home and schedule.",
+    body: "Our licensed and insured team targets the problem inside each affected unit while respecting every resident's home and schedule.",
   },
   {
     method: "PROTECT",
@@ -100,7 +101,7 @@ const COMMUNITY_SERVICES = [
 const FAQS = [
   {
     q: "Do residents need to leave during treatment?",
-    a: "Most services allow residents to remain in their homes. Your technician will explain any preparation needed before the visit.",
+    a: "Many services allow residents to remain in their homes. Your technician follows the product label directions and will explain any preparation or re-entry guidance before the visit.",
   },
   {
     q: "How are appointments scheduled?",
@@ -120,7 +121,7 @@ const FAQS = [
   },
   {
     q: "What if pest activity returns between visits?",
-    a: "If covered pests return during your service period, we return at no additional cost. Your community should never feel like it is on its own.",
+    a: `${CALLBACK_POLICY_TEXT} Your community should never feel like it is on its own.`,
   },
 ];
 
@@ -141,22 +142,6 @@ export default function InUnitService() {
 
   return (
     <>
-      <SEO
-        title="In Unit Pest Control Services — MA & RI Communities"
-        description="Professional in unit pest control for apartments, condominiums, and HOA communities across Massachusetts and Rhode Island. Coordinated with management. Respectful of every resident."
-        jsonLd={[
-          buildServiceSchema(
-            "In Unit Pest Control Services",
-            "Professional in unit pest control for apartments, condominiums, and HOA communities across Massachusetts and Rhode Island.",
-            "/communities/in-unit",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home",        url: "/" },
-            { name: "Communities", url: "/communities" },
-            { name: "In Unit Service", url: "/communities/in-unit" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -176,7 +161,7 @@ export default function InUnitService() {
         headline="Pest Problems Start Inside. So Does The Solution."
         sub="BuzzKill provides professional in unit pest control for apartments, condominiums, and HOA communities across Massachusetts and Rhode Island. We coordinate with management, respect every resident's home, and help keep your community protected."
         primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
-        secondaryCta={{ label: "Talk To A Community Specialist", href: "tel:+15082589294" }}
+        secondaryCta={{ label: "Talk To A Community Specialist", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
 
@@ -185,7 +170,7 @@ export default function InUnitService() {
         <div className="bk-container">
           <p className="bk-eyebrow bk-center">Sound Familiar?</p>
           <h2 className="bk-h2 bk-center">Does This Sound Familiar?</h2>
-          <p className="bk-body-lead bk-center">These are the most common things property managers and community coordinators tell us before they call.</p>
+          <p className="bk-body-lead bk-center">These are the concerns we hear most often from property managers and community coordinators.</p>
 
           <div className="bk-com-who-carousel">
             <button className="bk-com-who-arrow" onClick={prevFamiliar} aria-label="Previous">

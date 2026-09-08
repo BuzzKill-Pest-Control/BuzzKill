@@ -30,6 +30,9 @@ applications:
               if [ "$AWS_BRANCH" != "main" ]; then
                 printf 'User-agent: *\nDisallow: /\n' > dist/robots.txt
                 find dist -name '*.html' -exec sed -i 's/<meta name="robots" content="[^"]*"/<meta name="robots" content="noindex, nofollow"/' {} +
+                # The sitemap lists production URLs; a staging host must not
+                # advertise them.
+                rm -f dist/sitemap.xml
               fi
       artifacts:
         baseDirectory: dist

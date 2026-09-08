@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 
 export default function QuoteCard() {
   return (
@@ -24,11 +25,11 @@ export default function QuoteCard() {
         <Link to="/quote" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">
           Get Free Instant Quote
         </Link>
-        <a href="tel:+15082589294" className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }} data-track-id="quote_card_phone">
+        <a href={OFFICE_TEL} className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }} data-track-id="quote_card_phone">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.74 21 3 13.26 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.24 1.01l-2.21 2.21z"/>
           </svg>
-          (508) 258-9294
+          {OFFICE_PHONE_PRETTY}
         </a>
       </div>
 
@@ -43,12 +44,14 @@ export default function QuoteCard() {
               BUZZKILL · BUZZKILL · BUZZKILL · BUZZKILL ·
             </textPath>
           </text>
-          <text x="52" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="26" fontFamily="'Alfa Slab One', serif" fill="#72E000">30</text>
-          <text x="52" y="66" textAnchor="middle" fontSize="7" fontFamily="'Copperplate Gothic', serif" fill="rgba(255,255,255,0.82)" letterSpacing="1">DAY GUARANTEE</text>
+          <text x="52" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="16" fontFamily="'Alfa Slab One', serif" fill="#72E000">MA · RI</text>
+          <text x="52" y="66" textAnchor="middle" fontSize="6" fontFamily="'Copperplate Gothic', serif" fill="rgba(255,255,255,0.82)" letterSpacing="0.5" textLength="74" lengthAdjust="spacingAndGlyphs">LICENSED &amp; INSURED</text>
         </svg>
       </div>
 
-      <p className="bk-quote-card-corner-terms">Terms &amp; conditions apply</p>
+      <p className="bk-quote-card-corner-terms">
+        <Link to="/licensed-insured" style={{ color: "inherit" }}>Licensed &amp; Insured</Link>
+      </p>
 
     </div>
   );

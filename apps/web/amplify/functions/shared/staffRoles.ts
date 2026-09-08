@@ -6,6 +6,8 @@
  * allowed.
  */
 
+import { Refused } from "./refusal";
+
 /** The internal staff roles, in canonical display order. Consolidated to two:
  *  OWNER (all office/finance/management work) and TECH (field). CUSTOMER is a
  *  portal role and is handled separately — it is never a "staff" role here. */
@@ -121,6 +123,21 @@ export function assertReasonCode(
  * `otherUsableOwners` is the number of OTHER logins that are enabled and in the
  * OWNER group right now. The handler computes it from Cognito — only it can see
  * the pool — and passes it here so the decision itself stays pure.
+ *
+ * Raises Refused, not Error. This one was argued both ways: an attempt to
+ * remove the last owner is serious enough that the instinct is to keep it
+ * loud. But the loudness available here is the crm-admin ERROR ALARM, which
+ * exists to say the function is broken — and the function is not broken, it is
+ * refusing, before a single thing has been touched. Both call sites hold the
+ * owner-serial mutex and are wrapped in a catch that writes a REFUSED row to
+ * the staff-access command ledger with this sentence in it; that ledger is a
+ * better and more durable record of "someone tried to remove the last owner"
+ * than a page ever was. Refused (rather than a returned envelope) so that
+ * catch still runs, still writes the row, and still releases the mutex.
+ *
+ * Safe as a refusal because the count is not a fail-closed read:
+ * countOtherUsableOwners lets a Cognito failure THROW rather than returning
+ * zero, so reaching 0 here means the pool answered.
  */
 export function assertOwnerRemains(opts: {
   targetLabel: string;
@@ -128,7 +145,7 @@ export function assertOwnerRemains(opts: {
   targetKeepsOwner: boolean;
 }): void {
   if (opts.targetKeepsOwner || opts.otherUsableOwners > 0) return;
-  throw new Error(
+  throw new Refused(
     `${opts.targetLabel} is the last active owner. This would leave BuzzKill with no one who can invite staff, approve charges, or change roles. Promote a second owner first, then retry — the launch bar is at least two named owners.`
   );
 }
