@@ -1,11 +1,9 @@
 User-agent: *
 Allow: /
 
-# Private resident-signup pages (per-property links shared by HOAs only)
-Disallow: /schedule/
+# Private booking steps and paid landing pages are excluded from search with
+# a noindex directive on the page itself (src/seo/pages.ts), not here: a path
+# blocked in robots.txt can still be indexed by URL, and the directive on the
+# page cannot be read through a block.
 
-# Ad landing pages (paid traffic only — should not compete with organic)
-Disallow: /lp/
-
-# Sitemap
 Sitemap: https://www.pestbuzzkill.com/sitemap.xml

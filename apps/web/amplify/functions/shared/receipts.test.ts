@@ -128,7 +128,7 @@ describe("sendRefundNotice", () => {
     ];
     expect(notice.template).toBe("refund-notice");
     expect(notice.subject).toContain("$299.00");
-    expect(notice.html).toContain("3–5 business days");
+    expect(notice.html).toContain("within 5 to 10 business days");
   });
 
   it("does not promise a card credit for money returned outside Stripe", async () => {

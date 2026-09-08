@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
@@ -67,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -75,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -147,22 +147,6 @@ export default function RodentEntrySealing() {
 
   return (
     <>
-      <SEO
-        title="Rodent Entry Point Sealing — MA & RI"
-        description="Professional rodent entry point sealing for Massachusetts and Rhode Island homes. We find and seal the gaps mice and rats use to get inside. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Rodent Entry Point Sealing",
-            "Professional rodent exclusion and entry point sealing for Massachusetts and Rhode Island homes, sealing the gaps mice and rats use to get inside.",
-            "/services/rodent-control/entry-sealing",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Rodent Control", url: "/services/rodent-control" },
-            { name: "Entry Point Sealing", url: "/services/rodent-control/entry-sealing" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -233,7 +217,7 @@ export default function RodentEntrySealing() {
         <div className="bk-container bk-narrow">
           <p className="bk-eyebrow" style={{ color: "var(--bk-green)" }}>The Real Issue</p>
           <h2 className="bk-h2 bk-on-dark">Here's What's Really Happening</h2>
-          <p className="bk-issue-intro">Most rodent problems start at gaps you'll never notice. Finding and sealing the entry points mice and rats use is the first step toward keeping them out for good, not just removing the ones already inside.</p>
+          <p className="bk-issue-intro">Most rodent problems start at gaps you'll never notice. Finding and sealing the entry points mice and rats use is the first step toward keeping them out long term, not just removing the ones already inside.</p>
 
           <div className="bk-issue-selector">
             {HAPPENING_CARDS.map((card, i) => (
@@ -268,7 +252,7 @@ export default function RodentEntrySealing() {
               <p className="bk-eyebrow">Root Causes</p>
               <h2 className="bk-h2">Where Pests Find A Way In</h2>
               <p className="bk-attract-intro">
-                Pests don't create openings, they find the ones that already exist. Identifying and sealing those access points is the most reliable form of long term protection.
+                Pests don't create openings, they find the ones that already exist. Identifying and sealing those access points is one of the most reliable forms of long term protection.
               </p>
               <div className="bk-accordion">
                 {ATTRACT_REASONS.map((r) => {

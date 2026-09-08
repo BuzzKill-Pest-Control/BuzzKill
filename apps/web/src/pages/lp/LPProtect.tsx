@@ -1,16 +1,22 @@
 /**
  * Landing Page 2: "Protect Your Community"
  *
- * Conversion strategy: PROBLEM → PAIN → SOLUTION + SOCIAL PROOF + URGENCY
+ * Conversion strategy: PROBLEM → PAIN → SOLUTION + FACTS + URGENCY
  * - Opens with the pain of uncontrolled pest issues in HOAs
  * - Shows consequences of inaction (complaints, health, property value)
- * - Social proof: number of communities served, trust signals
- * - Urgency: seasonal messaging, limited capacity
+ * - Facts, not statistics: what the plan covers, how it is priced, and the
+ *   credentials published on /licensed-insured
+ * - Urgency: we are booking new communities now
  * - Single CTA: the instant-quote funnel — community/HOA requests price
  *   instantly there as per-unit monthly plans and book online
  */
 import { Link } from "react-router-dom";
-import SEO from "../../components/SEO";
+import { COMPANY } from "../../../amplify/functions/shared/company";
+import {
+  OFFICE_ADDRESS,
+  OFFICE_PHONE_PRETTY,
+  OFFICE_TEL,
+} from "../../lib/contactInfo";
 
 const STATS = [
   {
@@ -28,8 +34,8 @@ const STATS = [
 ];
 
 const BENEFITS = [
-  "Common areas, basements, exteriors — covered",
-  "Optional discounted in-unit service for owners",
+  "Common areas, basements, and exteriors covered",
+  "Optional in-unit service for owners, with pricing that can be lower on days we're already working nearby",
   "Board-friendly documentation and scheduling",
   "Licensed & insured in MA and RI",
 ];
@@ -55,11 +61,6 @@ function CheckIcon() {
 export default function LPProtect() {
   return (
     <div className="bk-lp bk-lp--dark">
-      <SEO
-        title="Stop Pest Complaints Before They Escalate"
-        description="Professional HOA and condo pest control that protects your community, your residents, and your property value. Free assessment."
-        noindex
-      />
 
       <header className="bk-lp-header bk-lp-header--bordered">
         <img src="/images/logo.png" alt="BuzzKill Pest Control" />
@@ -84,8 +85,9 @@ export default function LPProtect() {
             className="bk-lp-lead"
             style={{ maxWidth: 560, margin: "0 auto", fontSize: 18 }}
           >
-            When pests show up in one unit, they&rsquo;re already in the walls.
-            One-off treatments don&rsquo;t fix building-wide problems.{" "}
+            When pests show up in one unit, the source is often somewhere else
+            in the building. One-off treatments rarely fix building-wide
+            problems.{" "}
             <strong style={{ color: "#fff" }}>
               Your community needs a plan.
             </strong>
@@ -93,7 +95,7 @@ export default function LPProtect() {
         </div>
       </section>
 
-      {/* Pain point stats */}
+      {/* Plan facts */}
       <section
         style={{
           padding: "0 24px 48px",
@@ -119,7 +121,7 @@ export default function LPProtect() {
             Building-Wide Protection.
             <br />
             <span style={{ color: "var(--bk-green)" }}>
-              Not Band-Aid Treatments.
+              Not Quick Fixes.
             </span>
           </h2>
           <ul className="bk-lp-bullets" style={{ marginTop: 28 }}>
@@ -135,8 +137,8 @@ export default function LPProtect() {
 
       {/* Urgency banner */}
       <div className="bk-lp-urgency">
-        Peak pest season is here. We&rsquo;re booking new communities now for
-        spring/summer coverage.
+        We&rsquo;re booking new communities now. Get your plan in place before
+        the next season starts.
       </div>
 
       {/* CTA — straight into the instant-quote funnel */}
@@ -147,9 +149,10 @@ export default function LPProtect() {
         >
           <h2 className="bk-lp-h2">Get Your Community a Plan</h2>
           <p className="bk-lp-lead" style={{ maxWidth: 440, margin: "0 auto" }}>
-            Start with our instant quote — tell us about your community, see
+            Start with our instant quote: tell us about your community, see
             your per-month price in seconds, and lock in your first visit
-            online. No obligation.
+            online. The quote is free and there&rsquo;s no obligation until you
+            book.
           </p>
 
           <Link
@@ -169,15 +172,15 @@ export default function LPProtect() {
           >
             Prefer to talk now? Call{" "}
             <a
-              href="tel:508-258-9294"
+              href={OFFICE_TEL}
               style={{ color: "var(--bk-green)", fontWeight: 600 }}
             >
-              508-258-9294
+              {OFFICE_PHONE_PRETTY}
             </a>
           </p>
 
           <div className="bk-lp-trust">
-            {["Priced online in seconds", "No obligation"].map(
+            {["Priced online in seconds", "No obligation until you book"].map(
               (t, i) => (
                 <div key={i} className="bk-lp-trust__item">
                   <svg
@@ -199,6 +202,25 @@ export default function LPProtect() {
           </div>
         </div>
       </section>
+
+      <footer
+        style={{
+          padding: "20px 24px 28px",
+          textAlign: "center",
+          fontSize: 12,
+          lineHeight: 1.6,
+          color: "rgba(255,255,255,0.5)",
+        }}
+      >
+        {COMPANY.legalName} &middot; {OFFICE_ADDRESS} &middot;{" "}
+        <Link to="/privacy-policy" style={{ color: "inherit" }}>
+          Privacy Policy
+        </Link>{" "}
+        &middot;{" "}
+        <Link to="/terms-of-service" style={{ color: "inherit" }}>
+          Terms of Service
+        </Link>
+      </footer>
     </div>
   );
 }

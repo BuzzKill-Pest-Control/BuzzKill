@@ -1,13 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import FAQ from "../components/FAQ";
+import { CONDO_FAQS } from "../data/faqs";
 import QuoteCTA from "../components/QuoteCTA";
-import SEO, { buildServiceSchema, buildBreadcrumbSchema, buildFAQSchema } from "../components/SEO";
-
-const CONDO_FAQS = [
-  { q: "Do you require owner participation?", a: "No. Owner participation is optional. The HOA contract remains separate from any owner in‑unit service." },
-  { q: "Can you service multiple buildings within a community?", a: "Yes. We can set up one program that covers all buildings and common areas, with clear scheduling." },
-  { q: "Do you provide reports or notes after service?", a: "Yes—service notes are provided in a format that works for property management and board records." },
-];
 
 export default function CondoServices() {
   const navigate = useNavigate();
@@ -18,22 +12,6 @@ export default function CondoServices() {
 
   return (
     <>
-      <SEO
-        title="HOA & Condo Common-Area Pest Control"
-        description="Reliable common-area pest control for condominiums, HOAs, and multi-unit communities in Massachusetts and Rhode Island. Preventative programs with board-friendly documentation."
-        jsonLd={[
-          buildServiceSchema(
-            "HOA & Condo Common-Area Pest Control",
-            "Preventative pest control for HOA-owned areas, building exteriors, basements, utility rooms, and shared spaces in multi-unit residential communities.",
-            "/condo-services",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Condo Services", url: "/condo-services" },
-          ]),
-          buildFAQSchema(CONDO_FAQS),
-        ]}
-      />
       {/* Hero */}
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
@@ -46,7 +24,7 @@ export default function CondoServices() {
             BuzzKill provides reliable common-area pest control for
             condominiums, HOAs, and multi-unit residential communities. Our
             programs are designed to reduce pest pressure at the building
-            level&mdash;so issues don&rsquo;t keep cycling back from shared
+            level, so issues don&rsquo;t keep cycling back from shared
             spaces.
           </p>
           <div style={{ display: "flex", gap: 14, marginTop: 24, flexWrap: "wrap" }}>
@@ -127,17 +105,15 @@ export default function CondoServices() {
           <div className="bk-eyebrow">How it works</div>
           <h2 className="bk-h2">Owner Add-On, Done Cleanly</h2>
           <ul className="bk-bullets">
-            <li>
-              Prior to the common-area visit, BuzzKill provides a
-              property-specific scheduling + payment link
-            </li>
-            <li>The property manager can send it as an announcement to owners</li>
+            <li>Unit owners can get their own instant quote and book online at any time</li>
+            <li>Property managers can share the instant quote link with owners</li>
             <li>Owners who want service schedule and pay online</li>
-            <li>{"In\u2011unit appointments are grouped onsite during the scheduled visit window"}</li>
+            <li>{"We coordinate in\u2011unit appointments with the community\u2019s scheduled service day whenever possible"}</li>
           </ul>
           <p className="bk-body-lead" style={{ marginTop: 16 }}>
-            This improves building-wide results while offering owners
-            convenience and a discount.
+            This helps improve building-wide results while giving owners a
+            convenient way to book, with pricing that can be lower on days we
+            are already working nearby.
           </p>
         </div>
       </section>
@@ -152,7 +128,7 @@ export default function CondoServices() {
             <li>Clear communication and professional onsite presence</li>
             <li>Documentation suitable for HOA records</li>
             <li>A simple owner upsell option (without the HOA handling payments)</li>
-            <li>An approach aligned with resident comfort and safety</li>
+            <li>An approach that follows product label directions and state regulations, with resident comfort in mind</li>
           </ul>
         </div>
       </section>
@@ -160,20 +136,7 @@ export default function CondoServices() {
       <FAQ
         eyebrow="HOA / Common-Area"
         title="FAQs"
-        items={[
-          {
-            q: "Do you require owner participation?",
-            a: "No. Owner participation is optional. The HOA contract remains separate from any owner in\u2011unit service.",
-          },
-          {
-            q: "Can you service multiple buildings within a community?",
-            a: "Yes. We can set up one program that covers all buildings and common areas, with clear scheduling.",
-          },
-          {
-            q: "Do you provide reports or notes after service?",
-            a: "Yes\u2014service notes are provided in a format that works for property management and board records.",
-          },
-        ]}
+        items={CONDO_FAQS}
       />
 
       <QuoteCTA

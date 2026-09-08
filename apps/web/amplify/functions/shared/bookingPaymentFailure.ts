@@ -1,4 +1,5 @@
 import { dataClient } from "./dataClient";
+import { SITE_ORIGIN } from "./company";
 import { emailShell, sendEmail } from "./email";
 import {
   bookingToPaymentFailed,
@@ -85,7 +86,7 @@ export async function recordFunnelPaymentFailure(opts: {
   // visit already happened).
   if (booking.email && (await claimPaymentFailedNotice(booking.id))) {
     const marketingUrl =
-      process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com";
+      process.env.MARKETING_URL ?? SITE_ORIGIN;
     const dateLine = booking.selectedDate
       ? `${esc(booking.selectedDate)} `
       : "";
@@ -93,16 +94,16 @@ export async function recordFunnelPaymentFailure(opts: {
       outcome === "POST_SERVICE"
         ? `<p>Hi ${esc(booking.name ?? "there")},</p>
          <p>Your ${dateLine}pest control visit was completed, but your bank payment of <strong>${formatMoney(((booking.amountCents ?? 0) as number))}</strong> didn't go through afterward (${esc(opts.reason)}).</p>
-         <p><strong>The amount is now an outstanding balance on your account.</strong> To settle it, reply to this email or call the office and we'll retry your bank payment or take a card over the phone — it takes about a minute. Our team will also reach out within one business day.</p>`
+         <p><strong>The amount is now an outstanding balance on your account.</strong> To settle it, reply to this email or call the office and we'll retry your bank payment or take a card over the phone. It takes about a minute. Our team will also reach out within one business day.</p>`
         : outcome === "PRE_SERVICE"
           ? `<p>Hi ${esc(booking.name ?? "there")},</p>
          <p>Your bank payment for the ${dateLine}pest control visit didn't go through (${esc(opts.reason)}), so <strong>that scheduled visit has been canceled and no money was collected</strong>.</p>
-         <p>You can pick a time and book again in about a minute:</p>
+         <p>You can pick a day and book again in about a minute:</p>
          <p><a href="${marketingUrl}/quote">Book your visit</a></p>
          <p>If you keep having trouble, reply to this email or give us a call and we'll help.</p>`
           : `<p>Hi ${esc(booking.name ?? "there")},</p>
          <p>We couldn't complete the payment for your ${dateLine}pest control booking, so <strong>the booking was not completed and you have not been charged</strong>.</p>
-         <p>Your slot is still open. You can pick a time and try again here:</p>
+         <p>You can pick a day and try again here:</p>
          <p><a href="${marketingUrl}/quote">Book your visit</a></p>
          <p>If you keep having trouble, reply to this email or give us a call and we'll help.</p>`;
     const sent = await sendEmail({

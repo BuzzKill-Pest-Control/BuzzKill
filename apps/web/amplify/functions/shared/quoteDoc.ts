@@ -28,6 +28,8 @@ export type QuotableBooking = {
   expiresAt?: string | null;
   createdAt?: string | null;
   quoteJson?: unknown;
+  /** The catalog service id the request was quoted for. */
+  service?: string | null;
 };
 
 /** Statuses that carry a real price worth printing. */
@@ -68,7 +70,10 @@ export async function renderQuotePdfForBooking(
     customerEmail: booking.email ?? null,
     customerPhone: booking.phone ?? null,
     serviceAddress,
+    serviceState: booking.state ?? null,
     serviceLabel: snap.serviceLabel,
+    // Coverage pictures come from the stored catalog id, never the label.
+    serviceId: booking.service ?? null,
     // Plan-only quotes (community common-area, seasonal) carry no one-time.
     oneTimeCents: snap.planOnly ? null : (snap.baseCents ?? null),
     plan: snap.recurringOffer ?? null,

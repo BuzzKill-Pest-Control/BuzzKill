@@ -1,8 +1,5 @@
 import { Link } from "react-router-dom";
-
-/** Office line — the human path for anyone who'd rather not self-serve. */
-const OFFICE_PHONE_DISPLAY = "(508) 258-9294";
-const OFFICE_PHONE_HREF = "tel:+15082589294";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 
 type QuoteCTAProps = {
   eyebrow?: string;
@@ -18,13 +15,12 @@ type QuoteCTAProps = {
  * fully booked month, research fallback) is captured for a specialist
  * call, so every prospect type still funnels through the same door.
  *
- * Keeps `id="form"` so the Footer's `/#form` link and every page's
- * scroll-to-form CTA still land here.
+ * Keeps `id="form"` so every page's scroll-to-form CTA still lands here.
  */
 export default function QuoteCTA({
   eyebrow = "Get Started",
   title = "See Your Price in Seconds",
-  intro = "Tell us about your pest problem and get an instant quote — pick a day, book online, done.",
+  intro = "Tell us about your pest problem and get an instant quote for most services, then pick a day and book online.",
 }: QuoteCTAProps) {
   return (
     <section className="bk-section bk-section-light" id="form">
@@ -33,8 +29,8 @@ export default function QuoteCTA({
         <h2 className="bk-h2">{title}</h2>
         <p className="bk-body-lead">{intro}</p>
         <p className="bk-p" style={{ maxWidth: 560, margin: "0 auto" }}>
-          Termites, wildlife, condo &amp; HOA, or commercial? Same quote,
-          same instant price, with a day picker for every open date.
+          Termites, wildlife, condo &amp; HOA, or commercial? Same quote flow,
+          with instant pricing for most services and a day picker for every open date.
         </p>
         <div
           style={{
@@ -48,8 +44,8 @@ export default function QuoteCTA({
           <Link to="/quote" className="bk-btn bk-btn-primary" data-track-id="quote_cta_primary">
             Get My Instant Quote &rarr;
           </Link>
-          <a href={OFFICE_PHONE_HREF} className="bk-btn bk-btn-outline" data-track-id="quote_cta_phone">
-            Or call {OFFICE_PHONE_DISPLAY}
+          <a href={OFFICE_TEL} className="bk-btn bk-btn-outline" data-track-id="quote_cta_phone">
+            Or call {OFFICE_PHONE_PRETTY}
           </a>
         </div>
 

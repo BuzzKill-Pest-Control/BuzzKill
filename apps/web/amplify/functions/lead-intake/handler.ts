@@ -1,4 +1,5 @@
 import type { Handler } from "aws-lambda";
+import { COMPANY } from "../shared/company";
 import { notifyLeads } from "../shared/email";
 import { createLead } from "../shared/leadLifecycle";
 import {
@@ -57,7 +58,7 @@ type LeadInput = {
   attribution?: Attribution;
 };
 
-const SUPPORT_PHONE = "(508) 258-9294";
+const SUPPORT_PHONE = COMPANY.phone.pretty;
 
 /**
  * No CORS headers here. The Function URL carries its own CORS config (see

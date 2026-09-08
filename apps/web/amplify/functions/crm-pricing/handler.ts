@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { SITE_ORIGIN } from "../shared/company";
 import type { AppSyncResolverEvent } from "aws-lambda";
 import {
   GetObjectCommand,
@@ -68,7 +69,7 @@ const BUCKET = () => {
  * converts themselves at /quote (price confirmed, day picked, paid by card).
  */
 const FUNNEL_URL = () =>
-  `${process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com"}/quote`;
+  `${process.env.MARKETING_URL ?? SITE_ORIGIN}/quote`;
 
 type Args = {
   inputText?: string | null;
@@ -582,7 +583,7 @@ async function composeReply(
 - Pest: ${facts.pest}${facts.town ? `\n- Town: ${facts.town}` : ""}
 ${facts.monthly ? `- Plan price: ${facts.monthly}/mo` : ""}
 ${facts.initial ? `- Initial service visit: ${facts.initial} (75-minute first service: inspection, interior flush-out, exterior barrier)` : ""}
-${facts.oneTime ? `- One-time price: ${facts.oneTime} flat (30-day guarantee)` : ""}
+${facts.oneTime ? `- One-time price: ${facts.oneTime} flat` : ""}
 ${facts.fallbackPlan ? `- Value fallback: ${facts.fallbackPlan}` : ""}
 ${facts.rodentAddon ? "- The plan price INCLUDES the rodent program (exterior bait stations, monitored and refilled every visit) — say so." : ""}
 ${facts.pivotedFromOneTime ? `- The lead asked for a one-time (${facts.pivotedFromOneTime}); position the plan as the better value: the ${facts.initial ?? "initial-visit"} first visit costs less than the one-time, and they're covered year-round. You MAY mention the one-time price ${facts.pivotedFromOneTime} for comparison.` : facts.oneTimeAsked ? "- The lead asked for a one-time; pitch the plan as the smarter option per the conversion script, then give the one-time price." : "- Plan-first framing: covered year-round, free re-treatments between visits, licensed & insured in MA & RI."}
@@ -664,7 +665,7 @@ export function templateReply(facts: {
     // hardcode "$99", quoting a fee that does not exist, in writing.
     return `For ${facts.pest}${where}, our ${freqLabel(facts.frequency)} plan is ${facts.monthly}/mo with no initial fee${assumed}. Any re-treatment between visits is free, and we're licensed and insured in MA & RI. ${bookOnline}`;
   }
-  return `For ${facts.pest}${where}, the price is ${facts.oneTime} flat with a 30-day guarantee${assumed}. We're licensed and insured in MA & RI. ${bookOnline} Ask about our quarterly plan if you'd like year-round coverage with free re-treatments.`;
+  return `For ${facts.pest}${where}, the price is ${facts.oneTime} flat${assumed}. We're licensed and insured in MA & RI. ${bookOnline} Ask about our quarterly plan if you'd like year-round coverage with free re-treatments.`;
 }
 
 // ---------- the main flow ----------

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../../components/SEO";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
   { emoji: "🦝", icon: "/images/badge-attic-squirrel.png",  text: "Something is definitely living in the attic." },
@@ -11,7 +12,7 @@ const FAMILIAR_ITEMS = [
   { emoji: "🦇", icon: "/images/badge-bats.png",            text: "I found bats where they shouldn't be." },
   { emoji: "🌙", icon: "/images/badge-night-noises.png",    text: "The noises only happen at night." },
   { emoji: "🏠", icon: "/images/badge-home-damage.png",     text: "I don't want wildlife damaging my home." },
-  { emoji: "🙏", icon: "/images/badge-humane-removal.png",  text: "I want them removed safely and humanely." },
+  { emoji: "🙏", icon: "/images/badge-humane-removal.png",  text: "I want them removed humanely and responsibly." },
 ];
 
 const HAPPENING_CARDS = [
@@ -30,7 +31,7 @@ const HAPPENING_CARDS = [
   {
     tag: "The Solution",
     title: "Removal Is Only The Beginning",
-    body: "Protecting your home means safely removing wildlife and preventing future access.",
+    body: "Protecting your home means removing wildlife humanely, following state wildlife rules, and helping prevent future access.",
     cta: "Let's Get Your Property BuzzKilled",
   },
 ];
@@ -53,7 +54,7 @@ const PROTECT_STEPS = [
   {
     method: "SOLVE",
     num: "02",
-    title: "Safe, humane removal.",
+    title: "Humane, responsible removal.",
     body: "Our approach focuses on resolving wildlife problems responsibly while protecting your home.",
   },
   {
@@ -66,7 +67,7 @@ const PROTECT_STEPS = [
 
 const BOOK_STEPS = [
   { num: "01", title: "Know the Price.", body: "Get your instant quote online in minutes. No callbacks. No waiting." },
-  { num: "02", title: "Pick Your Time.", body: "Choose the day that works best for you. We'll take care of the rest." },
+  { num: "02", title: "Pick Your Day.", body: "Choose the day that works best for you. We'll take care of the rest." },
   { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
   { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
 ];
@@ -74,7 +75,7 @@ const BOOK_STEPS = [
 const WHY_ITEMS = [
   { icon: "/images/why-protection.png",    title: "Protection With Purpose",       body: "Every treatment is tailored to your property and the pests you're facing." },
   { icon: "/images/why-local-experts.png", title: "Local Experts. Local Pests.",   body: "Licensed in Massachusetts and Rhode Island with solutions built for local pest activity." },
-  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: "If covered pests return during your service guarantee, so do we." },
+  { icon: "/images/why-guarantee.png",     title: "We Stand Behind Our Work",      body: CALLBACK_POLICY_TEXT },
   { icon: "/images/why-communication.png", title: "Clear Communication. Every Visit.", body: "You'll always know what we found, what we treated, and what comes next." },
 ];
 
@@ -99,8 +100,8 @@ const FAQS = [
     a: "They often enter through roof openings, vents, soffits, and damaged exterior areas.",
   },
   {
-    q: "Will the animals be removed safely?",
-    a: "Yes. Our approach focuses on safe and responsible wildlife removal.",
+    q: "Will the animals be removed humanely?",
+    a: "Yes. Our approach focuses on humane, responsible removal that follows Massachusetts and Rhode Island wildlife regulations.",
   },
   {
     q: "Can wildlife return after removal?",
@@ -151,22 +152,6 @@ export default function Wildlife() {
 
   return (
     <>
-      <SEO
-        title="Wildlife Removal Services — Squirrel, Raccoon & Bat | MA & RI"
-        description="BuzzKill provides safe, responsible wildlife removal for homes across Massachusetts and Rhode Island. Squirrel, raccoon, and bat exclusion by licensed technicians. Get an instant quote."
-        jsonLd={[
-          buildServiceSchema(
-            "Wildlife Removal Services",
-            "Safe and responsible wildlife removal for Massachusetts and Rhode Island homes. Squirrel, raccoon, and bat exclusion by licensed technicians.",
-            "/services/wildlife",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Services", url: "/services/wildlife" },
-            { name: "Wildlife Removal", url: "/services/wildlife" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -328,11 +313,11 @@ export default function Wildlife() {
                   <Link to="/quote" className="bk-btn bk-btn-primary bk-btn-full">
                     Get Free Instant Quote
                   </Link>
-                  <a href="tel:+15082589294" className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }}>
+                  <a href={OFFICE_TEL} className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.74 21 3 13.26 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.24 1.01l-2.21 2.21z"/>
                     </svg>
-                    (508) 258-9294
+                    {OFFICE_PHONE_PRETTY}
                   </a>
                 </div>
 
@@ -349,14 +334,14 @@ export default function Wildlife() {
                         BUZZKILL · BUZZKILL · BUZZKILL · BUZZKILL ·
                       </textPath>
                     </text>
-                    {/* Center number */}
-                    <text x="52" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="26" fontFamily="'Alfa Slab One', serif" fill="#72E000">30</text>
+                    {/* Center label: states served */}
+                    <text x="52" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="15" fontFamily="'Alfa Slab One', serif" fill="#72E000" letterSpacing="1">MA · RI</text>
                     {/* Center label */}
-                    <text x="52" y="66" textAnchor="middle" fontSize="7" fontFamily="'Copperplate Gothic', serif" fill="rgba(255,255,255,0.82)" letterSpacing="1">DAY GUARANTEE</text>
+                    <text x="52" y="66" textAnchor="middle" fontSize="5.5" fontFamily="'Copperplate Gothic', serif" fill="rgba(255,255,255,0.82)" letterSpacing="0.6">LICENSED &amp; INSURED</text>
                   </svg>
                 </div>
 
-                <p className="bk-quote-card-corner-terms">Terms &amp; conditions apply</p>
+                <p className="bk-quote-card-corner-terms"><Link to="/licensed-insured">Licensed &amp; Insured</Link></p>
 
               </div>
             </aside>
@@ -370,7 +355,7 @@ export default function Wildlife() {
         <div className="bk-container">
           <p className="bk-eyebrow bk-center">The BuzzKill Method</p>
           <h2 className="bk-h2 bk-center">How BuzzKill Protects Your Property</h2>
-          <p className="bk-body-lead bk-center">Wildlife belongs in nature, not inside your home. We remove unwanted animals safely while helping prevent them from returning.</p>
+          <p className="bk-body-lead bk-center">Wildlife belongs in nature, not inside your home. We remove unwanted animals humanely, following state wildlife rules, while helping prevent them from returning.</p>
           <div className="bk-method-track">
             {PROTECT_STEPS.map((s, i) => (
               <div key={i} className="bk-method-card">

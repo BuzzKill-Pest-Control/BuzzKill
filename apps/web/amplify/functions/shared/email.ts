@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { COMPANY, SITE_DOMAIN, SITE_ORIGIN, companyAddressOneLine } from "./company";
 import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
 import { dataClient } from "./dataClient";
 import { casGuardedUpdate } from "./atomicLock";
@@ -35,7 +36,7 @@ export type EmailAttachment = {
  * The signature is unchanged — callers pass a heading and a body fragment.
  */
 export function emailShell(heading: string, bodyHtml: string): string {
-  const site = (process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com").replace(
+  const site = (process.env.MARKETING_URL ?? SITE_ORIGIN).replace(
     /\/+$/,
     ""
   );
@@ -72,13 +73,13 @@ export function emailShell(heading: string, bodyHtml: string): string {
           </tr>
           <tr>
             <td style="border-top:1px solid #e6e8e3;background:#f6f7f4;padding:22px 34px;color:#6a6f66;font-size:12px;line-height:1.7;">
-              <div style="font-weight:700;color:#3a3d37;font-size:13px;">BuzzKill Pest Control</div>
-              420 Lakeside Ave, Suite 104, Marlborough, MA 01752<br>
-              <a href="tel:+15082589294" style="color:${linkGreen};text-decoration:none;font-weight:600;">(508) 258-9294</a>
+              <div style="font-weight:700;color:#3a3d37;font-size:13px;">${COMPANY.name}</div>
+              ${companyAddressOneLine()}<br>
+              <a href="${COMPANY.phone.href}" style="color:${linkGreen};text-decoration:none;font-weight:600;">${COMPANY.phone.pretty}</a>
               &nbsp;&middot;&nbsp;
-              <a href="${site}" style="color:${linkGreen};text-decoration:none;font-weight:600;">pestbuzzkill.com</a>
+              <a href="${site}" style="color:${linkGreen};text-decoration:none;font-weight:600;">${SITE_DOMAIN}</a>
               &nbsp;&middot;&nbsp;
-              <a href="mailto:info@pestbuzzkill.com" style="color:${linkGreen};text-decoration:none;font-weight:600;">info@pestbuzzkill.com</a>
+              <a href="${COMPANY.email.href}" style="color:${linkGreen};text-decoration:none;font-weight:600;">${COMPANY.email.address}</a>
             </td>
           </tr>
         </table>

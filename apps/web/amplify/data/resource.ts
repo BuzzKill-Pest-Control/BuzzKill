@@ -748,6 +748,10 @@ export const schema = a.schema({
       // server-stamped (never client-supplied); tcIp/tcUserAgent come from
       // the /book request itself.
       tcVersion: a.string(),
+      // The exact terms text the customer accepted (built for the offer they
+      // booked), so the agreement can quote it verbatim years later even if
+      // the wording changes again.
+      tcText: a.string(),
       tcAcceptedAt: a.datetime(),
       tcIp: a.string(),
       tcUserAgent: a.string(),

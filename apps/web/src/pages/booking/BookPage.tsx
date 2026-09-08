@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { acceptanceAfterPaymentModeChange, termsTextFor } from "../../lib/bookingTermsView";
 import { Link, useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import type { Stripe } from "@stripe/stripe-js";
@@ -30,12 +31,11 @@ import {
   type FunnelSelection,
 } from "../../lib/bookingFunnel";
 import { trackFormSubmit, trackPurchase, trackAdsConversion, ADS_CONVERSIONS } from "../../lib/analytics";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
 const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as
   | string
   | undefined;
-
-const OFFICE_PHONE = "508-258-9294";
 
 /**
  * Checkout: order summary, the cancellation terms rendered VERBATIM above
@@ -57,7 +57,15 @@ export default function BookPage() {
   const [termsChanged, setTermsChanged] = useState<string | null>(null);
   // Invoice-me (HOA/commercial only): "CARD" pays now; "INVOICE" books
   // card-less on net terms. Offered only when the quote is invoiceEligible.
-  const [payMode, setPayMode] = useState<"CARD" | "INVOICE">("CARD");
+  const [payMode, setPayModeState] = useState<"CARD" | "INVOICE">("CARD");
+  // Switching payment method changes the terms on screen, so any acceptance
+  // already ticked is for text the customer no longer holds: clear it.
+  const setPayMode = (next: "CARD" | "INVOICE") => {
+    setPayModeState((prev) => {
+      if (prev !== next) setAccepted(acceptanceAfterPaymentModeChange(prev, next));
+      return next;
+    });
+  };
   // Set once an invoice-me booking is placed so the finalizing/booked screens
   // say "invoice on its way" instead of "payment received / paid today".
   const [invoiced, setInvoiced] = useState(false);
@@ -182,7 +190,7 @@ export default function BookPage() {
         if (body.state === "RECOVERY") {
           setRecoveryMsg(
             body.message ??
-              `Your payment went through and our team is completing your booking — you will not be charged twice. We'll confirm by email, or call ${OFFICE_PHONE}.`
+              `Your payment went through and our team is completing your booking. You will not be charged twice. We'll confirm by email, or you can call ${OFFICE_PHONE_PRETTY}.`
           );
           setFinalizing(false);
           return;
@@ -216,7 +224,7 @@ export default function BookPage() {
     // Poll budget exhausted: the money moved; the booking is being completed.
     // Owned, honest copy — never an invitation to pay again.
     setRecoveryMsg(
-      `Your payment was received and your booking is being completed. You will not be charged twice — we'll email your confirmation shortly, or call ${OFFICE_PHONE}.`
+      `Your payment was received and your booking is being completed. You will not be charged twice. We'll email your confirmation as soon as it's done, or you can call ${OFFICE_PHONE_PRETTY}.`
     );
     setFinalizing(false);
   }
@@ -255,7 +263,7 @@ export default function BookPage() {
       if (piError || !paymentIntent) {
         setError(
           piError?.message ??
-            `We couldn't confirm your payment status — call ${OFFICE_PHONE} before paying again.`
+            `We couldn't confirm your payment status. Call ${OFFICE_PHONE_PRETTY} before paying again.`
         );
         return;
       }
@@ -275,7 +283,7 @@ export default function BookPage() {
           enterFinalizing(bookingId, token);
         } else {
           setRecoveryMsg(
-            `Your payment was received and your booking is being completed. We'll email your confirmation shortly, or call ${OFFICE_PHONE}.`
+            `Your payment was received and your booking is being completed. We'll email your confirmation as soon as it's done, or you can call ${OFFICE_PHONE_PRETTY}.`
           );
         }
       } else if (paymentIntent.status === "processing") {
@@ -293,7 +301,7 @@ export default function BookPage() {
         }
       } else {
         setError(
-          "Your payment wasn't completed — no charge was made. You can try again below."
+          "Your payment wasn't completed and no charge was made. You can try again below."
         );
       }
     });
@@ -379,7 +387,7 @@ export default function BookPage() {
           enterFinalizing(quote.bookingId, token);
         } else {
           setRecoveryMsg(
-            `Your visit is booked and an invoice is on its way. Questions? Call ${OFFICE_PHONE}.`
+            `Your visit is booked and an invoice is on its way. Questions? Call ${OFFICE_PHONE_PRETTY}.`
           );
         }
         return;
@@ -398,7 +406,7 @@ export default function BookPage() {
       setTerms(nextTerms);
       setAccepted(false);
       setTermsChanged(
-        result.body.error ?? "The booking terms were updated — please review them again."
+        result.body.error ?? "The booking terms were updated. Please review them again."
       );
       const updatedQuote = { ...quote, terms: nextTerms };
       setQuote(updatedQuote);
@@ -408,7 +416,7 @@ export default function BookPage() {
 
     const message =
       result.body.error ??
-      `Something went wrong (status ${result.status}). Please try again or call ${OFFICE_PHONE}.`;
+      `Something went wrong (status ${result.status}). Please try again or call ${OFFICE_PHONE_PRETTY}.`;
 
     if (result.status === 409 || result.status === 410 || result.status === 404) {
       // Day gone / quote expired / quote not found → back to a fresh quote.
@@ -450,7 +458,7 @@ export default function BookPage() {
             {booked.amountCents != null ? (
               <div className="bk-booking-price-card__meta">
                 {invoiced
-                  ? `${money(booked.amountCents)} invoiced — due per your terms`
+                  ? `${money(booked.amountCents)} invoiced, due per your terms`
                   : `${money(booked.amountCents)} paid today`}
               </div>
             ) : null}
@@ -478,8 +486,8 @@ export default function BookPage() {
           </h1>
           <p className="bk-body-lead">
             {invoiced
-              ? "We're scheduling your visit and preparing your invoice — this usually takes a few seconds. This page will update on its own."
-              : "Your payment went through and we're completing your booking — this usually takes a few seconds. Don't pay again; this page will update on its own."}
+              ? "We're scheduling your visit and preparing your invoice. This page will update on its own."
+              : "Your payment went through and we're completing your booking. Don't pay again; this page will update on its own."}
           </p>
         </div>
       </Shell>
@@ -517,7 +525,7 @@ export default function BookPage() {
           <div className="bk-eyebrow">Payment processing</div>
           <h1 className="bk-h2">
             {scheduled
-              ? "Your visit is scheduled — payment processing."
+              ? "Your visit is scheduled. Payment is processing."
               : "We're scheduling your visit."}
           </h1>
           {(processingInfo || (quote && selection)) && (
@@ -545,12 +553,12 @@ export default function BookPage() {
                 {processingInfo?.amountCents != null
                   ? money(processingInfo.amountCents)
                   : "the quoted amount"}{" "}
-                is processing — a bank debit can take a few business days
+                is processing. A bank debit can take a few business days
                 {processingInfo?.expectedBy
                   ? ` (expected by ${processingInfo.expectedBy})`
                   : ""}
                 . Your visit is scheduled and{" "}
-                <strong>you don&rsquo;t need to do anything — please
+                <strong>you don&rsquo;t need to do anything. Please
                 don&rsquo;t pay again</strong>. We&rsquo;ve emailed your
                 scheduling confirmation, and we&rsquo;ll email again the moment
                 the payment clears. If it doesn&rsquo;t go through, we&rsquo;ll
@@ -558,10 +566,10 @@ export default function BookPage() {
               </>
             ) : (
               <>
-                Your bank payment was submitted and is processing — a bank
+                Your bank payment was submitted and is processing. A bank
                 debit can take a few business days to settle. We&rsquo;re
                 scheduling your visit right now and will email your
-                confirmation within a few minutes.{" "}
+                confirmation as soon as it&rsquo;s done.{" "}
                 <strong>Please don&rsquo;t pay again.</strong> If the payment
                 doesn&rsquo;t go through, we&rsquo;ll email you right away with
                 what happens next.
@@ -612,8 +620,8 @@ export default function BookPage() {
         <div className="bk-eyebrow">Booking</div>
         <h1 className="bk-h2">That quote expired.</h1>
         <p className="bk-body-lead">
-          Quotes are held for 24 hours. Prices and availability may have moved
-          — it takes a minute to get a fresh one.
+          Quotes are held for 24 hours. Prices and availability may have moved,
+          so get a fresh one below.
         </p>
         <button type="button" className="bk-btn bk-btn-primary" onClick={freshQuote}>
           Get a fresh quote
@@ -642,15 +650,17 @@ export default function BookPage() {
 
   if (!publishableKey) {
     // Honest config-missing state (mirrors the CRM's CollectPaymentSheet):
-    // don't create a PaymentIntent we can never confirm.
+    // don't create a PaymentIntent we can never confirm. The cause (no
+    // VITE_STRIPE_PUBLISHABLE_KEY in this deployment) is an operator detail,
+    // so the customer sees plain copy and a way to book by phone.
     return (
       <Shell>
         <div className="bk-eyebrow">Booking</div>
         <h1 className="bk-h2">Online payment isn&rsquo;t available right now.</h1>
         <div className="bk-form-error" role="alert">
-          Stripe publishable key is not configured (VITE_STRIPE_PUBLISHABLE_KEY),
-          so this deployment can&rsquo;t take card payments. Call {OFFICE_PHONE}{" "}
-          and we&rsquo;ll book you directly.
+          We can&rsquo;t take card payments online at the moment. Call{" "}
+          <a href={OFFICE_TEL}>{OFFICE_PHONE_PRETTY}</a> and we&rsquo;ll book
+          you directly.
         </div>
       </Shell>
     );
@@ -690,7 +700,7 @@ export default function BookPage() {
             <li>
               <span className="bk-summary-key">First treatment</span>
               <span className="bk-summary-val">
-                April — we&rsquo;ll confirm the exact day with you
+                April, and we&rsquo;ll confirm the exact day with you
               </span>
             </li>
           )}
@@ -724,7 +734,7 @@ export default function BookPage() {
             <li>
               <span className="bk-summary-key">Then</span>
               <span className="bk-summary-val">
-                {money(offer.monthlyCents)}/mo &mdash;{" "}
+                {money(offer.monthlyCents)}/mo:{" "}
                 {quote.offSeason
                   ? "billed monthly year-round; treatments run April through October"
                   : `${FREQUENCY_LABELS[offer.frequency]} plan, starts after your first completed visit`}
@@ -803,7 +813,7 @@ export default function BookPage() {
               >
                 <div className="bk-choice-card__title">Pay by card now</div>
                 <div className="bk-choice-card__meta">
-                  Secure checkout, booked instantly
+                  Secure checkout, paid today
                 </div>
               </button>
               <button
@@ -814,7 +824,7 @@ export default function BookPage() {
               >
                 <div className="bk-choice-card__title">Invoice me</div>
                 <div className="bk-choice-card__meta">
-                  Book now, pay by invoice (net 30) — HOA &amp; commercial only
+                  Book now, pay by invoice (net 30). HOA &amp; commercial only.
                 </div>
               </button>
             </div>
@@ -830,7 +840,7 @@ export default function BookPage() {
               </div>
             )}
             <div className="bk-terms-box" tabIndex={0}>
-              {terms.text}
+              {termsTextFor(terms, { recurring: selection.recurring, payMode: invoiceMe ? "INVOICE" : "CARD" })}
             </div>
             <label className="bk-check-row">
               <input
@@ -844,7 +854,7 @@ export default function BookPage() {
           </>
         ) : (
           <div className="bk-form-error" role="alert">
-            This quote is missing its booking terms — request a fresh quote and
+            This quote is missing its booking terms. Request a fresh quote and
             we&rsquo;ll show them before you pay.
           </div>
         )}
@@ -905,7 +915,7 @@ export default function BookPage() {
                   enterFinalizing(quote.bookingId, token);
                 } else {
                   setRecoveryMsg(
-                    `Your payment was received and your booking is being completed. We'll email your confirmation shortly, or call ${OFFICE_PHONE}.`
+                    `Your payment was received and your booking is being completed. We'll email your confirmation as soon as it's done, or you can call ${OFFICE_PHONE_PRETTY}.`
                   );
                 }
               }}
@@ -924,7 +934,7 @@ export default function BookPage() {
       </div>
 
       <p style={{ fontSize: 13, color: "var(--fg2)", marginTop: 16, lineHeight: 1.55 }}>
-        Payment is handled by Stripe — BuzzKill never sees your card number.
+        Payment is handled by Stripe. BuzzKill never sees your card number.
       </p>
     </Shell>
   );
@@ -981,14 +991,14 @@ function PaymentForm({
       } else if (result.paymentIntent?.status === "processing") {
         onProcessing();
       } else {
-        setError("Your payment wasn't completed — no charge was made. Please try again.");
+        setError("Your payment wasn't completed and no charge was made. Please try again.");
       }
     } catch (err) {
       // confirmPayment throws (rather than returning an error) on
       // integration faults; those are ours, not the customer's card.
       console.error("confirmPayment threw", err);
       setError(
-        "Your payment could not be started — that's a fault on our side, and your card was not charged. Please try again shortly, or call (508) 258-9294 to book by phone."
+        `Your payment could not be started. That's a fault on our side, and your card was not charged. Please try again in a moment, or call ${OFFICE_PHONE_PRETTY} to book by phone.`
       );
     } finally {
       setBusy(false);
@@ -1002,7 +1012,7 @@ function PaymentForm({
         onLoadError={(ev) => {
           console.error("PaymentElement failed to load", ev.error);
           setLoadError(
-            "The payment form couldn't load — that's a fault on our side, not your card, and nothing was charged. Please try again shortly, or call (508) 258-9294 to book by phone."
+            `The payment form couldn't load. That's a fault on our side, not your card, and nothing was charged. Please try again in a moment, or call ${OFFICE_PHONE_PRETTY} to book by phone.`
           );
         }}
       />

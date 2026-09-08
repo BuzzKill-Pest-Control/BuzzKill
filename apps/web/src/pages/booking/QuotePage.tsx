@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { CALL_CONSENT_TEXT_VERSION } from "../../../amplify/functions/shared/consentText";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import SEO, { buildBreadcrumbSchema } from "../../components/SEO";
+import SEO from "../../components/SEO";
 import BugZapper from "../../components/BugZapper";
 import ContactMeForm from "../../components/ContactMeForm";
 import FormContactFooter from "../../components/FormContactFooter";
 import { AddressAutocompleteInput } from "../../lib/addressAutocomplete";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 import { WILDLIFE_REMOVAL_KINDS } from "../../../amplify/functions/shared/serviceCatalog";
 import { trackFormSubmit, trackGenerateLead, trackAdsConversion, ADS_CONVERSIONS } from "../../lib/analytics";
 import {
@@ -40,7 +41,6 @@ import {
   validateQuoteForm,
 } from "../../lib/bookingFunnel";
 
-const OFFICE_PHONE = "508-258-9294";
 const PENDING_QUOTE_KEY = "buzzkill.pendingQuote.v1";
 const LONG_WAIT_MS = 90_000;
 
@@ -265,7 +265,7 @@ export default function QuotePage() {
     if (isQuoteExpired(stored.quote.expiresAt)) {
       clearFunnelState(window.sessionStorage);
       setNotice(
-        "Your previous quote expired — prices are held for 24 hours. Fill the form in again for a fresh one."
+        "Your previous quote expired. Prices are held for 24 hours, so fill the form in again for a fresh one."
       );
       return;
     }
@@ -531,7 +531,7 @@ export default function QuotePage() {
     } else {
       setBanner(
         result.body.error ??
-          `Something went wrong (status ${result.status}). Please try again or call ${OFFICE_PHONE}.`
+          `Something went wrong (status ${result.status}). Please try again or call ${OFFICE_PHONE_PRETTY}.`
       );
       trackFormSubmit("quote", "error", { error: result.body.error ?? `status_${result.status}` });
     }
@@ -563,7 +563,7 @@ export default function QuotePage() {
     if (isQuoteExpired(priced.expiresAt)) {
       startOver();
       setNotice(
-        "This quote expired while you were choosing — prices are held for 24 hours. Fill the form in again for a fresh one."
+        "This quote expired while you were choosing. Prices are held for 24 hours, so fill the form in again for a fresh one."
       );
       return;
     }
@@ -594,7 +594,7 @@ export default function QuotePage() {
     return (
       <QuoteLoadingScreen
         eyebrow="Pricing your request"
-        message="We're pricing your service and checking real availability. This usually takes just a few seconds."
+        message="We're pricing your service and checking real availability. This page will update on its own the moment it's ready."
         step={1}
       />
     );
@@ -696,7 +696,7 @@ export default function QuotePage() {
             <h1 className="bk-h2">{priced.service}</h1>
             <p className="bk-body-lead">
               {offSeason
-                ? "Enroll now — no date to pick today. This quote is held until "
+                ? "Enroll now, no date to pick today. This quote is held until "
                 : planOnly
                   ? "Pick your first visit day. This quote is held until "
                   : "Pick a day. This quote is held until "}
@@ -735,7 +735,7 @@ export default function QuotePage() {
                   <h3 className="bk-form-step__title">Your seasonal plan</h3>
                   <div className="bk-booking-price-card">
                     <div className="bk-booking-price-card__label">
-                      Monthly plan — billed year-round
+                      Monthly plan, billed year-round
                     </div>
                     <div className="bk-booking-price-card__price">
                       {money(offer.monthlyCents)}
@@ -865,7 +865,7 @@ export default function QuotePage() {
                             today, then {money(offer.monthlyCents)}/mo
                           </div>
                           <div className="bk-choice-card__meta">
-                            {FREQUENCY_LABELS[offer.frequency]} plan — the monthly
+                            {FREQUENCY_LABELS[offer.frequency]} plan: the monthly
                             subscription starts after your first completed visit
                           </div>
                         </button>
@@ -916,14 +916,6 @@ export default function QuotePage() {
   // ── The quote form ────────────────────────────────────────────────
   return (
     <>
-      <SEO
-        title="Instant Pest Control Quote — Book Online"
-        description="Get an instant price for pest control in Massachusetts and Rhode Island and book your visit online in minutes."
-        jsonLd={buildBreadcrumbSchema([
-          { name: "Home", url: "/" },
-          { name: "Instant Quote", url: "/quote" },
-        ])}
-      />
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">
@@ -937,7 +929,7 @@ export default function QuotePage() {
           <p className="bk-body-lead">
             {mode === "CONTACT"
               ? "Leave your details and a local BuzzKill expert follows up. Or price it yourself in a couple of minutes with an instant quote."
-              : "Tell us what you're dealing with and where. Every service gets an exact price and open days immediately, whether it's your home, your community, or your business."}
+              : "Tell us what you're dealing with and where. Most services get an exact price and open days right away, whether it's your home, your community, or your business."}
           </p>
 
           <nav className="bk-mode-tabs" aria-label="How would you like to start?">
@@ -969,8 +961,8 @@ export default function QuotePage() {
           <div className="bk-form-card">
             {leadPrefilled && (
               <div className="bk-notice" role="status">
-                Contact and address details were loaded from the CRM. Confirm
-                them, then choose the actual service and property details.
+                Your contact and address details were loaded from your booking
+                link. Confirm them, then choose the service and property details.
               </div>
             )}
             <form className="bk-form-wizard" onSubmit={handleSubmit} noValidate>
@@ -1092,7 +1084,7 @@ export default function QuotePage() {
                       </option>
                     ))}
                     <option value="__DESCRIBE__">
-                      Not sure — tell us what you need
+                      Not sure? Tell us what you need
                     </option>
                   </select>
                   {fieldError("service")}
@@ -1107,7 +1099,7 @@ export default function QuotePage() {
                         maxLength={1000}
                         value={fields.describe}
                         onChange={(e) => set("describe")(e.target.value)}
-                        placeholder="e.g. Mice in the kitchen of my 2,000 sq ft house — I'd like ongoing service, not just one visit."
+                        placeholder="e.g. Mice in the kitchen of my 2,000 sq ft house. I'd like ongoing service, not just one visit."
                       />
                       <p className="bk-hint" style={{ marginTop: 4 }}>
                         Include the pest, the property size, and whether you
@@ -1364,7 +1356,7 @@ export default function QuotePage() {
                       value={fields.zip}
                       onChange={(e) => set("zip")(onlyDigits(e.target.value).slice(0, 5))}
                       autoComplete="postal-code"
-                      placeholder="01082"
+                      placeholder="01752"
                       maxLength={5}
                     />
                     {fieldError("address.zip")}
@@ -1483,13 +1475,17 @@ function QuoteLoadingScreen({
               </div>
             ) : (
               <p className="bk-p bk-quote-loading__hint">
-                Most quotes finish shortly. If you leave, we&rsquo;ll email a
-                secure link as soon as it&rsquo;s ready.
+                This page will update on its own. If you leave, we&rsquo;ll
+                email a secure link as soon as it&rsquo;s ready.
               </p>
             ))}
 
           <p className="bk-p">
-            Need help now? Call <strong>{OFFICE_PHONE}</strong>.
+            Need help now? Call{" "}
+            <a href={OFFICE_TEL}>
+              <strong>{OFFICE_PHONE_PRETTY}</strong>
+            </a>
+            .
           </p>
           {onChangeDetails && (
             <button

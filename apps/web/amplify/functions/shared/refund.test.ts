@@ -314,7 +314,7 @@ describe("refund notices", () => {
     ];
     expect(notice.to).toBe("dana@example.com");
     expect(notice.subject).toContain("$299.00");
-    expect(notice.html).toContain("3–5 business days");
+    expect(notice.html).toContain("within 5 to 10 business days");
   });
 
   it("announces the refunded amount, not the invoice total, on a partial refund", async () => {

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import FAQ from "../components/FAQ";
 import Hero from "../components/Hero";
-import SEO, { buildBreadcrumbSchema, buildServiceSchema } from "../components/SEO";
 
 const FAMILIAR_ITEMS = [
   { img: "/images/pm-01-complaints-piling.png",  text: "Resident complaints keep piling up." },
@@ -123,21 +122,6 @@ export default function PropertyManagers() {
 
   return (
     <>
-      <SEO
-        title="Pest Control for Property Managers — MA & RI Communities"
-        description="BuzzKill partners with property managers across Massachusetts and Rhode Island to reduce resident complaints, protect shared spaces, and keep communities running smoothly."
-        jsonLd={[
-          buildServiceSchema(
-            "Pest Control for Property Managers",
-            "Proactive pest control programs for property managers across Massachusetts and Rhode Island. Dependable service, clear communication, and community-focused protection.",
-            "/property-managers",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home",              url: "/" },
-            { name: "Property Managers", url: "/property-managers" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       <button
@@ -295,7 +279,7 @@ export default function PropertyManagers() {
         </div>
       </section>
 
-      {/* 6 — Prevention Tips */}
+      {/* 7 — Prevention Tips */}
       <section className="bk-section bk-section-cream">
         <div className="bk-container bk-narrow">
           <p className="bk-eyebrow">Stay One Step Ahead</p>
@@ -317,7 +301,7 @@ export default function PropertyManagers() {
         </div>
       </section>
 
-      {/* 7 — More Community Solutions */}
+      {/* 8 — More Community Solutions */}
       <section className="bk-section bk-section-dark">
         <div className="bk-container">
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>Explore More</p>
@@ -334,7 +318,7 @@ export default function PropertyManagers() {
         </div>
       </section>
 
-      {/* 8 — FAQ */}
+      {/* 9 — FAQ */}
       <div>
         <FAQ
           eyebrow="Before You Reach Out"

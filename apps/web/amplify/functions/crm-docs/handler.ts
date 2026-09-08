@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { SITE_ORIGIN } from "../shared/company";
 import type { AppSyncIdentity, AppSyncResolverEvent } from "aws-lambda";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -93,7 +94,7 @@ import {
   renderQuotePdfForBooking,
   type QuotableBooking,
 } from "../shared/quoteDoc";
-import { OFF_SEASON_MESSAGE } from "../shared/bookingTerms";
+import { CANCEL_FULL_REFUND_DAYS, OFF_SEASON_MESSAGE } from "../shared/bookingTerms";
 import { routingAddress } from "../shared/serviceAddress";
 import { queuePresenceReview } from "../shared/recovery";
 import {
@@ -155,7 +156,7 @@ const CRM_URL = () =>
   process.env.CRM_APP_URL ?? "https://app.pestbuzzkill.com";
 /** The public booking funnel — the only path a lead converts down. */
 const FUNNEL_URL = () =>
-  `${process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com"}/quote`;
+  `${process.env.MARKETING_URL ?? SITE_ORIGIN}/quote`;
 
 /** productsUsed is an AWSJSON field — may arrive as a JSON string. */
 function parseProducts(raw: unknown): ReportProduct[] {
@@ -1933,7 +1934,7 @@ async function sendCustomerEmail(
       <p>Before your first BuzzKill service visit, please add a payment method (card or bank account) to your account.</p>
       ${noteHtml}
       <p style="margin:20px 0;"><a href="${CRM_URL()}/portal/billing" style="background:#176b2c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Add payment method</a></p>
-      <p style="color:#666;font-size:13px;">Sign in with your BuzzKill account. Payment details are stored securely with Stripe — we never see your card or account number.</p>`;
+      <p style="color:#666;font-size:13px;">Sign in with your BuzzKill account. Payment details are stored securely with Stripe. We never see your card or account number.</p>`;
   } else if (kind === "portal-reminder") {
     subject = "Your BuzzKill customer portal";
     heading = "Your customer portal";
@@ -1959,7 +1960,7 @@ async function sendCustomerEmail(
     subject = "Get your exact price and book your BuzzKill visit online";
     heading = "Your price and your day, in about a minute";
     body = `${hi}
-      <p>You can see your exact price in seconds, pick the day that works for you, and pay online to lock in your visit — no paperwork, no back-and-forth.</p>
+      <p>You can see your exact price online, pick the day that works for you, and pay online to lock in your visit, with no paperwork and no back-and-forth.</p>
       ${noteHtml}
       <p style="margin:20px 0;"><a href="${funnelUrl}" style="background:#176b2c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Get my price &amp; book my visit</a></p>
       <p>If a fresh market rate is needed, the page will keep working on it and email you a secure link as soon as the price is ready.</p>
@@ -4152,7 +4153,7 @@ async function deliverServiceReport(
          <p>${technicianName} completed your <strong>${job.serviceType}</strong> service. Your full service report is attached${customer.portalUserSub ? ", and it's always available in your BuzzKill portal" : ""}.</p>
          ${
            nextIso
-             ? `<p><strong>Your next visit is planned for around ${prettyDate(nextIso)}</strong> — we'll confirm the exact time and send reminders as it gets closer.</p>`
+             ? `<p><strong>Your next visit is planned for around ${prettyDate(nextIso)}.</strong> We'll confirm the exact day and send reminders as it gets closer.</p>`
              : ""
          }
          ${
@@ -5172,7 +5173,7 @@ async function startJob(jobId: string) {
 
 /** The public site origin the customer's tracking link lives on. */
 const TRACK_SITE_URL = () =>
-  process.env.MARKETING_URL ?? "https://www.pestbuzzkill.com";
+  process.env.MARKETING_URL ?? SITE_ORIGIN;
 /** How long an On-My-Way session may broadcast before it auto-expires. */
 const TRACK_TTL_MS = 3 * 60 * 60 * 1000;
 
@@ -5238,8 +5239,8 @@ async function startOnMyWay(
       html: emailShell(
         `${techFirstSafe} is on the way`,
         `<p>Your BuzzKill technician is heading to your service address now.</p>
-         <p><a href="${trackUrl}">Track their arrival on a live map</a> — it updates as they drive and shows an estimated arrival time.</p>
-         <p class="muted">The link stops working once your technician arrives.</p>`
+         <p><a href="${trackUrl}">Track their arrival on a live map</a>. It updates as they drive and shows an estimated arrival time.</p>
+         <p style="color:#666;font-size:13px;">The link stops working once the visit starts, or after three hours.</p>`
       ),
     });
   }
@@ -5595,8 +5596,8 @@ async function reportNoAccess(args: {
         "We couldn't complete today's visit",
         `<p>Hi ${customer.displayName ?? "there"},</p>
          <p>Our technician arrived for your ${job.serviceType}${job.scheduledDate ? ` on ${job.scheduledDate}` : ""} but couldn't get access (${label.toLowerCase()}).</p>
-         <p>Under the cancellation policy, a visit we can't access counts as a same-day cancellation and <strong>isn't refundable</strong>${job.paidAt ? " — but your payment stays with your visit: we'll rebook it with you at no additional charge" : ""}.</p>
-         <p>Our office will reach out within one business day to set the new time — or just reply to this email with a day that works.</p>`
+         <p>Because the visit couldn't go ahead on the day, it falls under our cancellation policy (cancellations ${CANCEL_FULL_REFUND_DAYS} days or less before the visit are <strong>not refundable</strong>).${job.paidAt ? " Your payment stays with your visit, and we'll rebook it with you at no additional charge." : " We'll rebook it with you."}</p>
+         <p>Our office will reach out within one business day to set the new day, or just reply to this email with a day that works.</p>`
       ),
     }).catch(() => undefined);
   }
@@ -5733,8 +5734,8 @@ async function reportVisitNotPerformed(
     await sendEmail({
       to: customer.email,
       subject: isScope
-        ? "About today's visit — we need to adjust your service"
-        : "About today's visit — we couldn't treat yet",
+        ? "About today's visit: we need to adjust your service"
+        : "About today's visit: we couldn't treat yet",
       template: isScope ? "scope-mismatch-next-step" : "prep-missing-next-step",
       customerId: customer.id,
       relatedId: job.id,

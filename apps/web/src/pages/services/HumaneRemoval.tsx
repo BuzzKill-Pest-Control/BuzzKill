@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildServiceSchema, buildBreadcrumbSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
-  { emoji: "ðŸ¿", text: "I have a squirrel in the attic. I want it removed without hurting it." },
-  { emoji: "ðŸ¦", text: "A raccoon has been getting into the trash for weeks. I need it gone but I don't want to harm it." },
-  { emoji: "ðŸ¦‡", text: "I found bats in the attic and I know they're protected. I need a professional who knows the regulations." },
-  { emoji: "ðŸ¤·", text: "I bought a live trap but I don't know what I'm supposed to do after I catch it." },
-  { emoji: "ðŸ˜Ÿ", text: "The animal has what I think might be babies. I don't want to separate them or cause harm." },
-  { emoji: "ðŸ ", text: "I need this handled quickly but also correctly. I don't want them back next week." },
+  { emoji: "🐿", text: "I have a squirrel in the attic. I want it removed without hurting it." },
+  { emoji: "🦝", text: "A raccoon has been getting into the trash for weeks. I need it gone but I don't want to harm it." },
+  { emoji: "🦇", text: "I found bats in the attic and I know they're protected. I need a professional who knows the regulations." },
+  { emoji: "🤷", text: "I bought a live trap but I don't know what I'm supposed to do after I catch it." },
+  { emoji: "😟", text: "The animal has what I think might be babies. I don't want to separate them or cause harm." },
+  { emoji: "🏠", text: "I need this handled quickly but also correctly. I don't want them back next week." },
 ];
 
 const HAPPENING_CARDS = [
   {
     tag: "The Legal Problem",
     title: "Some wildlife species are protected by law",
-    body: "Bats in particular are protected species in Massachusetts and Rhode Island. Removal must follow specific seasonal restrictions and licensing requirements. Unlicensed removal can result in fines.",
+    body: "Bats are protected in Massachusetts and Rhode Island. Bat work is exclusion, not trapping, and state guidance restricts it during the summer maternity season. Improper removal can carry penalties, so it should be handled by professionals who follow the rules.",
   },
   {
     tag: "The Return Problem",
@@ -70,19 +71,19 @@ const PROTECT_STEPS = [
     method: "UNDERSTAND",
     num: "01",
     title: "We find the root cause first",
-    body: "Before any product is applied, we inspect your property. Entry points, nesting conditions, attractants. We build a clear picture of what is driving the problem before we treat it.",
+    body: "Before any work begins, we inspect your property. Entry points, nesting conditions, attractants. We build a clear picture of what is driving the problem before we act.",
   },
   {
     method: "SOLVE",
     num: "02",
-    title: "Targeted treatment at the source",
-    body: "We apply pet-safe treatments where pests live and travel, not just where they are visible. That means reaching the source rather than cleaning up what you see on the surface.",
+    title: "Humane removal at the source",
+    body: "We remove the animal humanely and seal the entry points it was using, not just the spot where you noticed it. That means resolving the source rather than the symptom.",
   },
   {
     method: "PROTECT",
     num: "03",
-    title: "Barriers that hold between visits",
-    body: "After treatment, we address the conditions that invited them in. Entry points sealed, problem areas noted, and a plan in place so they cannot simply return the same way.",
+    title: "Protection that helps hold between visits",
+    body: "After removal, we address the conditions that invited them in. Entry points sealed, problem areas noted, and a plan in place so they are far less likely to return the same way.",
   },
 ];
 
@@ -94,13 +95,13 @@ const BOOK_STEPS = [
   },
   {
     num: "02",
-    title: "Pick a time that works for you",
-    body: "Schedule at your convenience. Evenings and weekends are available.",
+    title: "Pick a day that works for you",
+    body: "Schedule at your convenience. Choose the day that works best for you and we'll take care of the rest.",
   },
   {
     num: "03",
     title: "We arrive prepared",
-    body: "Licensed technician, right products, clear plan. No guesswork on our end, no surprises on yours.",
+    body: "Licensed technician, right tools, clear plan. No guesswork on our end, no surprises on yours.",
   },
   {
     num: "04",
@@ -111,22 +112,22 @@ const BOOK_STEPS = [
 
 const WHY_ITEMS = [
   {
-    icon: "ðŸ›¡",
+    icon: "🛡",
     title: "Safe for Families. Tough on Pests.",
-    body: "Every treatment is designed around the people and pets in your home, not a one-size-fits-all schedule.",
+    body: "Every visit is planned around the people and pets in your home, follows state regulations, and comes with clear guidance for your household.",
   },
   {
-    icon: "ðŸ“",
+    icon: "📍",
     title: "Local and Licensed in MA and RI",
     body: "We know your region, your seasonal pest pressures, and the conditions that drive activity here.",
   },
   {
-    icon: "âœ…",
-    title: "30-Day Re-Treatment Guarantee",
-    body: "If pests return within 30 days of your treatment, so do we, at no additional charge.",
+    icon: "✅",
+    title: "We Stand Behind Our Work",
+    body: CALLBACK_POLICY_TEXT,
   },
   {
-    icon: "ðŸ’¬",
+    icon: "💬",
     title: "Clear Communication, Every Visit",
     body: "Your technician explains what they found, what they treated, and what to watch for. No mystery service.",
   },
@@ -149,7 +150,7 @@ const RELATED_SERVICES = [
   {
     label: "Wildlife Attic Restoration",
     to: "/services/rodent-control/attic-restoration",
-    desc: "After humane removal, we restore the attic to a clean and safe condition.",
+    desc: "After humane removal, we clean up contamination and restore the attic.",
   },
   {
     label: "Rodent Control",
@@ -159,22 +160,22 @@ const RELATED_SERVICES = [
   {
     label: "Entry Point Sealing",
     to: "/services/rodent-control/entry-sealing",
-    desc: "Exclusion sealing is the step that prevents recurrence after removal.",
+    desc: "Exclusion sealing is the step that helps prevent recurrence after removal.",
   },
 ];
 
 const FAQS = [
   {
     q: "Are bats really protected in Massachusetts?",
-    a: "Yes. Little brown bats and several other bat species are protected under state and federal regulations. Removal must be done outside specific seasonal windows and by licensed professionals. We are fully licensed for bat exclusion in MA and RI.",
+    a: "Yes. Several bat species are protected under state and federal regulations, and Massachusetts and Rhode Island restrict when exclusion work can be done. Bat work is exclusion, not trapping, and we inspect and advise on the right timing and approach for your home.",
   },
   {
     q: "What happens to the animal after it is removed?",
-    a: "Most wildlife is relocated to appropriate habitat away from the property. Relocation follows state guidelines for the specific species involved.",
+    a: "What happens next depends on the species and on state rules. Massachusetts and Rhode Island each regulate how problem wildlife may be handled, and we follow those rules for the species involved. Your technician will explain what applies to your situation.",
   },
   {
     q: "What if there are young animals in the attic?",
-    a: "We assess for young animals before beginning removal. If young are present, we modify the approach to ensure they are not separated from the mother or left behind.",
+    a: "We assess for young animals before beginning removal. If young are present, we adjust the approach so they are not separated from the mother or left behind.",
   },
   {
     q: "How do you find where the animal is getting in?",
@@ -182,7 +183,7 @@ const FAQS = [
   },
   {
     q: "Is your wildlife removal service licensed?",
-    a: "Yes. BuzzKill technicians hold the appropriate state wildlife control licenses for Massachusetts and Rhode Island. All work is performed in compliance with state regulations.",
+    a: "BuzzKill is licensed and insured in Massachusetts and Rhode Island, and wildlife work is performed in line with state regulations. See our Licensed & Insured page for the credentials we publish.",
   },
 ];
 
@@ -213,22 +214,6 @@ export default function HumaneRemoval() {
 
   return (
     <>
-      <SEO
-        title="Humane Wildlife Removal Services — MA & RI"
-        description="Licensed humane wildlife removal and exclusion for Massachusetts and Rhode Island homes. Safe for animals, effective for homeowners."
-        jsonLd={[
-          buildServiceSchema(
-            "Humane Wildlife Removal",
-            "Licensed humane wildlife removal and exclusion for Massachusetts and Rhode Island homes. Safe for animals, effective for homeowners.",
-            "/services/wildlife/humane-removal",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Wildlife", url: "/services/wildlife" },
-            { name: "Humane Removal", url: "/services/wildlife/humane-removal" },
-          ]),
-        ]}
-      />
 
       {/* Back to top */}
       {showBackToTop && (
@@ -237,16 +222,16 @@ export default function HumaneRemoval() {
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           aria-label="Back to top"
         >
-          â†‘
+          ↑
         </button>
       )}
 
       {/* Hero */}
       <Hero
-        image="/images/humane-removal-hero.png"
+        image="/images/wildlife-hero.png"
         eyebrow="Humane Removal"
         headline="Humane Wildlife Removal & Exclusion"
-        sub="Safe and humane removal for squirrels, raccoons, bats, and more. Licensed wildlife technicians serving Massachusetts and Rhode Island."
+        sub="Humane removal and exclusion for squirrels, raccoons, bats, and more. A licensed and insured team serving Massachusetts and Rhode Island."
         className="bk-hero--community"
       />
 
@@ -269,7 +254,7 @@ export default function HumaneRemoval() {
               {FAMILIAR_ITEMS.map((item, i) => (
                 <div key={i} className="bk-familiar-card">
                   <span className="bk-familiar-emoji">{item.emoji}</span>
-                  <p className="bk-familiar-text">{item.text}</p>
+                  <p className="bk-familiar-text">&ldquo;{item.text}&rdquo;</p>
                 </div>
               ))}
             </div>
@@ -321,7 +306,7 @@ export default function HumaneRemoval() {
               Why Humane Removal Requires More Than a Trap
             </h2>
             <p className="bk-section-intro">
-              Removing an animal humanely means doing it safely, legally, and in a way that prevents the same situation from happening again.
+              Removing an animal humanely means doing it responsibly, legally, and in a way that helps prevent the same situation from happening again.
             </p>
             <div className="bk-accordion">
               {ATTRACT_REASONS.map((item, i) => (
@@ -340,7 +325,7 @@ export default function HumaneRemoval() {
                     <span className="bk-accordion-label">{item.label}</span>
                     <span className="bk-accordion-title">{item.title}</span>
                     <span className="bk-accordion-chevron">
-                      {activeAccordion === i ? "âˆ’" : "+"}
+                      {activeAccordion === i ? "−" : "+"}
                     </span>
                   </button>
                   {activeAccordion === i && (
@@ -384,7 +369,7 @@ export default function HumaneRemoval() {
         <div className="bk-book-inner">
           <h2 className="bk-section-title">How Booking Works</h2>
           <p className="bk-section-intro">
-            Simple steps from first contact to a pest-free home.
+            Simple steps from first contact to a protected home.
           </p>
           <div className="bk-book-track">
             {BOOK_STEPS.map((step, i) => (
@@ -399,8 +384,8 @@ export default function HumaneRemoval() {
             <Link to="/quote" className="bk-btn bk-btn-primary">
               Get an Instant Quote
             </Link>
-            <a href="tel:+15082589294" className="bk-btn bk-btn-secondary">
-              Call (508) 258-9294
+            <a href={OFFICE_TEL} className="bk-btn bk-btn-secondary">
+              Call {OFFICE_PHONE_PRETTY}
             </a>
           </div>
         </div>
@@ -411,7 +396,7 @@ export default function HumaneRemoval() {
         <div className="bk-why-inner">
           <h2 className="bk-section-title">Why BuzzKill</h2>
           <p className="bk-section-intro">
-            BuzzKill Pest Control serves Massachusetts and Rhode Island with licensed, family-safe pest and wildlife solutions.
+            BuzzKill Pest Control serves Massachusetts and Rhode Island with licensed and insured pest and wildlife solutions built around the people and pets in your home.
           </p>
           <div className="bk-why-grid">
             {WHY_ITEMS.map((item, i) => (
@@ -435,7 +420,7 @@ export default function HumaneRemoval() {
           <ul className="bk-tips-list">
             {TIPS.map((tip, i) => (
               <li key={i} className="bk-tip-item">
-                <span className="bk-tip-marker">âœ“</span>
+                <span className="bk-tip-marker">✓</span>
                 <span className="bk-tip-text">{tip}</span>
               </li>
             ))}
@@ -455,7 +440,7 @@ export default function HumaneRemoval() {
               <Link key={i} to={svc.to} className="bk-related-card">
                 <span className="bk-related-label">{svc.label}</span>
                 <p className="bk-related-desc">{svc.desc}</p>
-                <span className="bk-related-arrow">â†’</span>
+                <span className="bk-related-arrow" aria-hidden="true">→</span>
               </Link>
             ))}
           </div>
@@ -465,8 +450,7 @@ export default function HumaneRemoval() {
       {/* FAQ */}
       <section id="faq" className="bk-faq-section">
         <div className="bk-faq-inner">
-          <h2 className="bk-section-title">Frequently Asked Questions</h2>
-          <FAQ items={FAQS} />
+          <FAQ eyebrow="Before You Book" title="Frequently Asked Questions" items={FAQS} />
         </div>
       </section>
 

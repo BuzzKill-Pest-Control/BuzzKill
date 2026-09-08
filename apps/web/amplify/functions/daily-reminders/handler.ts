@@ -105,11 +105,14 @@ const DUE_SOON_LEAD_DAYS = 3;
 /** Days before evidenceDueBy a dispute-deadline alert fires. */
 const DISPUTE_ALERT_LEAD_DAYS = 4;
 
+// Anchored at UTC noon and rendered in the shop's zone, so the weekday and
+// day a customer reads never depend on the Lambda's clock zone.
 const prettyDate = (isoDate: string) =>
-  new Date(`${isoDate}T12:00:00`).toLocaleDateString("en-US", {
+  new Date(`${isoDate}T12:00:00Z`).toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
+    timeZone: "America/New_York",
   });
 
 export const handler = async () => {
@@ -1256,8 +1259,11 @@ async function suspendPlanForDelinquency(inv: OwedInvoice): Promise<boolean> {
       customerId: inv.customerId,
       amountCents: inv.amountCents,
       description: inv.description,
-      reason:
-        "We've tried your card several times without success, so your service has been paused. Please update your payment method to resume.",
+      // Only a plan that was actually suspended is told its visits are paused;
+      // a one-time invoice has nothing to pause.
+      reason: suspended
+        ? "We've tried your card several times without success, so your plan visits are paused until this is settled. Please update your payment method to resume."
+        : "We've tried your card several times without success. Please update your payment method to settle this balance.",
       invoiceId: inv.id,
     });
   }

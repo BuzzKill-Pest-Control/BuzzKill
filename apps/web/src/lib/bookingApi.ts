@@ -122,7 +122,19 @@ export type RecurringOffer = {
   initialFeeCents: number;
 };
 
-export type BookingTerms = { version: string; text: string };
+/** The checkout terms for the quote: `text` applies to the default offer
+ *  (one-time, or the plan when the quote is plan-only or off-season) and
+ *  `recurringText` to the recurring plan when the customer selects it. */
+export type BookingTerms = {
+  version: string;
+  /** Card terms for the default offer. */
+  text: string;
+  /** Card terms for the recurring plan when a one-time quote also offers one. */
+  recurringText?: string;
+  /** Invoice terms, present only when the quote is invoice-eligible. */
+  invoiceText?: string;
+  invoiceRecurringText?: string;
+};
 
 export type PricedQuote = {
   bookingId: string;

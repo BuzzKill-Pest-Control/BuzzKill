@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import SEO from "../../components/SEO";
 import { checkTrack, type TrackResponse } from "../../lib/bookingApi";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
-/** The number customers should call if the link can't help. */
-const SUPPORT_PHONE = "(508) 258-9294";
 /** How often the page asks the server for the technician's new position. */
 const POLL_MS = 15000;
 /** Optional static-map key (same public key the site already ships). */
@@ -86,7 +85,7 @@ export default function TrackPage() {
           kind: "error",
           message:
             res.body.error ??
-            "We couldn't reach the tracking service — please try again.",
+            "We couldn't reach the tracking service. Please try again.",
         });
         timer = setTimeout(poll, POLL_MS);
         return;
@@ -192,9 +191,7 @@ export default function TrackPage() {
               <p className="bk-body-lead">
                 Your technician has either arrived or finished the visit. If you
                 need anything, give us a call at{" "}
-                <a href={`tel:${SUPPORT_PHONE.replace(/[^0-9]/g, "")}`}>
-                  {SUPPORT_PHONE}
-                </a>
+                <a href={OFFICE_TEL}>{OFFICE_PHONE_PRETTY}</a>
                 .
               </p>
             </>
@@ -206,9 +203,7 @@ export default function TrackPage() {
               <p className="bk-form-error">{phase.message}</p>
               <p className="bk-body-lead">
                 Please call us at{" "}
-                <a href={`tel:${SUPPORT_PHONE.replace(/[^0-9]/g, "")}`}>
-                  {SUPPORT_PHONE}
-                </a>{" "}
+                <a href={OFFICE_TEL}>{OFFICE_PHONE_PRETTY}</a>{" "}
                 and we'll let you know where your technician is.
               </p>
             </>

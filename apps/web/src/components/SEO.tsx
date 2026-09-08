@@ -1,25 +1,70 @@
-import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+/**
+ * The document head, managed from the route.
+ *
+ * `SiteHead` sits once in App.tsx, inside the router. On every navigation it
+ * resolves the path against the route registry (src/seo/pages.ts) and writes
+ * the title, description, robots directive, self-referential canonical, Open
+ * Graph and Twitter tags, and the page-level JSON-LD graph. A page never has
+ * to remember to do this, and every page gets the same rules.
+ *
+ * `SEO` is the per-page override: a booking step that wants its own title, or
+ * a private state that must be noindex. It registers overrides in context and
+ * `SiteHead` merges them, so the order in which effects fire cannot leave a
+ * stale title behind.
+ *
+ * The site-level entity graph (Organization, Person, WebSite) is NOT written
+ * here: it ships in the static HTML shell for every route (see vite.config.ts)
+ * so the business identity is present before any script runs.
+ */
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { COMPANY } from "../../amplify/functions/shared/company";
+import { normalizePath } from "../seo/canonical";
+import { computeHead, type HeadOverrides, type HeadState } from "../seo/head";
+import { resolvePage } from "../seo/pages";
 
-const SITE_URL = "https://www.pestbuzzkill.com";
-const SITE_NAME = "BuzzKill Pest Control";
-const DEFAULT_TITLE =
-  "BuzzKill Pest Control | HOA & Condo Pest Control in Massachusetts";
-const DEFAULT_DESCRIPTION =
-  "Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts and Rhode Island. Common-area pest management and optional in-unit service.";
-const DEFAULT_IMAGE = `${SITE_URL}/images/hero-home-1.jpg`;
+type HeadContextValue = {
+  overrides: HeadOverrides;
+  setOverrides: (next: HeadOverrides | null) => void;
+};
 
-interface SEOProps {
-  title?: string;
-  description?: string;
-  image?: string;
-  type?: string;
-  noindex?: boolean;
-  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+const HeadContext = createContext<HeadContextValue | null>(null);
+
+/**
+ * True when the HTML this document booted from was marked noindex: the staging
+ * build stamps every page that way (amplify.yml), and the client must never
+ * flip a deployment's own rule back to index.
+ */
+const BUILD_NOINDEX: boolean = (() => {
+  try {
+    const el = document.querySelector('meta[name="robots"]');
+    return /noindex/i.test(el?.getAttribute("content") ?? "");
+  } catch {
+    return false;
+  }
+})();
+
+export function HeadProvider({ children }: { children: ReactNode }) {
+  const [overrides, setState] = useState<HeadOverrides>({});
+  const value = useMemo<HeadContextValue>(
+    () => ({
+      overrides,
+      setOverrides: (next) => setState(next ?? {}),
+    }),
+    [overrides],
+  );
+  return <HeadContext.Provider value={value}>{children}</HeadContext.Provider>;
 }
 
-function setMeta(attr: string, key: string, content: string) {
-  let el = document.querySelector(`meta[${attr}="${key}"]`);
+function setMeta(attr: "name" | "property", key: string, content: string) {
+  let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute(attr, key);
@@ -28,273 +73,98 @@ function setMeta(attr: string, key: string, content: string) {
   el.setAttribute("content", content);
 }
 
-function setLink(rel: string, href: string) {
-  let el = document.querySelector(
-    `link[rel="${rel}"]`,
-  ) as HTMLLinkElement | null;
+function setCanonical(href: string) {
+  let el = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
   if (!el) {
     el = document.createElement("link");
-    el.setAttribute("rel", rel);
+    el.setAttribute("rel", "canonical");
     document.head.appendChild(el);
   }
-  el.href = href;
+  el.setAttribute("href", href);
 }
 
-const JSON_LD_ID = "bk-jsonld";
+const PAGE_JSON_LD_ID = "bk-jsonld";
 
-export default function SEO({
-  title,
-  description = DEFAULT_DESCRIPTION,
-  image = DEFAULT_IMAGE,
-  type = "website",
-  noindex = false,
-  jsonLd,
-}: SEOProps) {
-  const { pathname } = useLocation();
-  const fullTitle = title ? `${title} | ${SITE_NAME}` : DEFAULT_TITLE;
-  // Service pages are reachable at both /services/* and /residential/* (same
-  // component). Point the canonical at the /services/* version so Google
-  // indexes one URL instead of treating them as duplicates. The /residential
-  // landing page itself (exact) is a distinct page and is left untouched.
-  // The quote page's two doors (/quote/instant, /quote/contact-me) are the
-  // same page with a different tab open, so they canonicalize to /quote.
-  const canonicalPath = pathname.startsWith("/residential/")
-    ? pathname.replace("/residential/", "/services/")
-    : pathname.startsWith("/quote/")
-      ? "/quote"
-      : pathname;
-  const canonicalUrl = `${SITE_URL}${canonicalPath === "/" ? "" : canonicalPath}`;
-  const fullImage = image.startsWith("http") ? image : `${SITE_URL}${image}`;
+function setPageJsonLd(json: string) {
+  let el = document.getElementById(PAGE_JSON_LD_ID) as HTMLScriptElement | null;
+  if (!el) {
+    el = document.createElement("script");
+    el.id = PAGE_JSON_LD_ID;
+    el.type = "application/ld+json";
+    document.head.appendChild(el);
+  }
+  el.textContent = json;
+}
+
+/** Write a computed head into the live document. */
+function applyHead(head: HeadState): void {
+  document.title = head.title;
+  setMeta("name", "description", head.description);
+  setMeta("name", "robots", head.robots);
+  setCanonical(head.canonicalUrl);
+
+  setMeta("property", "og:type", head.ogType);
+  setMeta("property", "og:site_name", COMPANY.name);
+  setMeta("property", "og:locale", "en_US");
+  setMeta("property", "og:title", head.title);
+  setMeta("property", "og:description", head.description);
+  setMeta("property", "og:url", head.canonicalUrl);
+  setMeta("property", "og:image", head.image);
+  if (head.imageSize) {
+    setMeta("property", "og:image:width", String(head.imageSize.width));
+    setMeta("property", "og:image:height", String(head.imageSize.height));
+  } else {
+    document.head.querySelector('meta[property="og:image:width"]')?.remove();
+    document.head.querySelector('meta[property="og:image:height"]')?.remove();
+  }
+
+  setMeta("name", "twitter:card", "summary_large_image");
+  setMeta("name", "twitter:title", head.title);
+  setMeta("name", "twitter:description", head.description);
+  setMeta("name", "twitter:image", head.image);
+
+  setPageJsonLd(head.jsonLd);
+}
+
+/**
+ * Route-driven head management plus URL normalisation. Render once, inside
+ * the router and inside HeadProvider.
+ */
+export function SiteHead() {
+  const { pathname, search, hash } = useLocation();
+  const navigate = useNavigate();
+  const ctx = useContext(HeadContext);
+  const overrides = ctx?.overrides;
+
+  // A published page reached by a non-canonical spelling of its own URL
+  // (trailing slash, upper case, /index.html) is moved to the canonical one,
+  // so the address bar, the canonical tag, and the sitemap agree. Aliases
+  // that render another page are redirected by App.tsx; the two quote doors
+  // keep their own URLs on purpose.
+  useEffect(() => {
+    const normalized = normalizePath(pathname);
+    if (normalized !== pathname && resolvePage(normalized)) {
+      navigate(`${normalized}${search}${hash}`, { replace: true });
+    }
+  }, [pathname, search, hash, navigate]);
 
   useEffect(() => {
-    // Title
-    document.title = fullTitle;
-
-    // Core meta
-    setMeta("name", "description", description);
-    setMeta(
-      "name",
-      "robots",
-      noindex ? "noindex, nofollow" : "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1",
-    );
-
-    // Canonical
-    setLink("canonical", canonicalUrl);
-
-    // Open Graph
-    setMeta("property", "og:type", type);
-    setMeta("property", "og:title", fullTitle);
-    setMeta("property", "og:description", description);
-    setMeta("property", "og:url", canonicalUrl);
-    setMeta("property", "og:image", fullImage);
-    setMeta("property", "og:image:width", "1200");
-    setMeta("property", "og:image:height", "630");
-    setMeta("property", "og:site_name", SITE_NAME);
-    setMeta("property", "og:locale", "en_US");
-
-    // Twitter Card
-    setMeta("name", "twitter:card", "summary_large_image");
-    setMeta("name", "twitter:title", fullTitle);
-    setMeta("name", "twitter:description", description);
-    setMeta("name", "twitter:image", fullImage);
-
-    // Geo meta (local SEO)
-    setMeta("name", "geo.region", "US-MA");
-    setMeta("name", "geo.placename", "Marlborough, Massachusetts");
-
-    // JSON-LD
-    let scriptEl = document.getElementById(JSON_LD_ID) as HTMLScriptElement | null;
-    if (jsonLd) {
-      const ldArray = Array.isArray(jsonLd) ? jsonLd : [jsonLd];
-      const payload = JSON.stringify(
-        ldArray.length === 1 ? ldArray[0] : ldArray,
-      );
-      if (!scriptEl) {
-        scriptEl = document.createElement("script");
-        scriptEl.id = JSON_LD_ID;
-        scriptEl.type = "application/ld+json";
-        document.head.appendChild(scriptEl);
-      }
-      scriptEl.textContent = payload;
-    } else if (scriptEl) {
-      scriptEl.remove();
-    }
-  }, [fullTitle, description, canonicalUrl, fullImage, type, noindex, jsonLd]);
+    applyHead(computeHead(pathname, overrides ?? {}, BUILD_NOINDEX));
+  }, [pathname, overrides]);
 
   return null;
 }
 
-// ── Reusable JSON-LD builders ────────────────────────────────────────
-
-export const ORG_SCHEMA = {
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  "@id": `${SITE_URL}/#organization`,
-  name: SITE_NAME,
-  url: SITE_URL,
-  logo: {
-    "@type": "ImageObject",
-    url: `${SITE_URL}/images/logo.png`,
-    width: 184,
-    height: 84,
-  },
-  image: `${SITE_URL}/images/hero-home-1.jpg`,
-  description: DEFAULT_DESCRIPTION,
-  telephone: "+1-508-258-9294",
-  email: "info@pestbuzzkill.com",
-  address: {
-    "@type": "PostalAddress",
-    streetAddress: "420 Lakeside Ave, Suite 104",
-    addressLocality: "Marlborough",
-    addressRegion: "MA",
-    postalCode: "01752",
-    addressCountry: "US",
-  },
-  sameAs: [
-    "https://www.instagram.com/buzzkill_pestcontrol/",
-    "https://www.facebook.com/people/BuzzKill-Pest-Control/61584954290487/",
-    "https://www.linkedin.com/company/buzzkill-pest-control/",
-  ],
-};
-
-export const LOCAL_BUSINESS_SCHEMA = {
-  "@context": "https://schema.org",
-  "@type": "PestControlService",
-  "@id": `${SITE_URL}/#localbusiness`,
-  name: SITE_NAME,
-  url: SITE_URL,
-  logo: `${SITE_URL}/images/logo.png`,
-  image: `${SITE_URL}/images/hero-home-1.jpg`,
-  description:
-    "Professional pest control for condominiums, HOAs, and shared living communities. Common-area pest management for boards and property managers with optional discounted in-unit service.",
-  telephone: "+1-508-258-9294",
-  email: "info@pestbuzzkill.com",
-  priceRange: "$$",
-  address: {
-    "@type": "PostalAddress",
-    streetAddress: "420 Lakeside Ave, Suite 104",
-    addressLocality: "Marlborough",
-    addressRegion: "MA",
-    postalCode: "01752",
-    addressCountry: "US",
-  },
-  geo: {
-    "@type": "GeoCoordinates",
-    latitude: 42.3459,
-    longitude: -71.5523,
-  },
-  areaServed: [
-    { "@type": "State", name: "Massachusetts" },
-    { "@type": "State", name: "Rhode Island" },
-  ],
-  openingHoursSpecification: {
-    "@type": "OpeningHoursSpecification",
-    dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-    opens: "07:00",
-    closes: "18:00",
-  },
-  aggregateRating: undefined, // Add when reviews are collected
-};
-
-export const WEBSITE_SCHEMA = {
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  "@id": `${SITE_URL}/#website`,
-  url: SITE_URL,
-  name: SITE_NAME,
-  publisher: { "@id": `${SITE_URL}/#organization` },
-  potentialAction: {
-    "@type": "SearchAction",
-    target: {
-      "@type": "EntryPoint",
-      urlTemplate: `${SITE_URL}/pest-control/{search_term}`,
-    },
-    "query-input": "required name=search_term",
-  },
-};
-
-export function buildFAQSchema(
-  items: { q: string; a: string }[],
-): Record<string, unknown> {
-  return {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: items.map((item) => ({
-      "@type": "Question",
-      name: item.q,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: item.a,
-      },
-    })),
-  };
-}
-
-export function buildServiceSchema(
-  name: string,
-  description: string,
-  url: string,
-): Record<string, unknown> {
-  return {
-    "@context": "https://schema.org",
-    "@type": "Service",
-    name,
-    description,
-    url: `${SITE_URL}${url}`,
-    provider: { "@id": `${SITE_URL}/#organization` },
-    areaServed: [
-      { "@type": "State", name: "Massachusetts" },
-      { "@type": "State", name: "Rhode Island" },
-    ],
-    serviceType: "Pest Control",
-  };
-}
-
-export function buildBreadcrumbSchema(
-  items: { name: string; url: string }[],
-): Record<string, unknown> {
-  return {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: items.map((item, i) => ({
-      "@type": "ListItem",
-      position: i + 1,
-      name: item.name,
-      item: `${SITE_URL}${item.url}`,
-    })),
-  };
-}
-
-export function buildCitySchema(
-  city: string,
-  stateAbbr: string,
-  state: string,
-  slug: string,
-): Record<string, unknown> {
-  return {
-    "@context": "https://schema.org",
-    "@type": "PestControlService",
-    name: `BuzzKill Pest Control - ${city}, ${stateAbbr}`,
-    url: `${SITE_URL}/pest-control/${slug}`,
-    description: `Professional HOA and condo pest control in ${city}, ${stateAbbr}. Common-area pest management and optional in-unit service for ${city} communities.`,
-    telephone: "+1-508-258-9294",
-    email: "info@pestbuzzkill.com",
-    address: {
-      "@type": "PostalAddress",
-      streetAddress: "420 Lakeside Ave, Suite 104",
-      addressLocality: "Marlborough",
-      addressRegion: "MA",
-      postalCode: "01752",
-      addressCountry: "US",
-    },
-    areaServed: {
-      "@type": "City",
-      name: city,
-      containedInPlace: {
-        "@type": "State",
-        name: state,
-      },
-    },
-    parentOrganization: { "@id": `${SITE_URL}/#organization` },
-  };
+/**
+ * Per-page overrides. Everything a page does not set comes from the registry.
+ * Mount it anywhere below HeadProvider; the overrides clear on unmount.
+ */
+export default function SEO({ title, description, image, noindex }: HeadOverrides) {
+  const ctx = useContext(HeadContext);
+  const setOverrides = ctx?.setOverrides;
+  useEffect(() => {
+    setOverrides?.({ title, description, image, noindex });
+    return () => setOverrides?.(null);
+  }, [setOverrides, title, description, image, noindex]);
+  return null;
 }

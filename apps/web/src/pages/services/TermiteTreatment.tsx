@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callbackPolicy";
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import SEO, { buildServiceSchema, buildBreadcrumbSchema } from "../../components/SEO";
 import QuoteCard from "../../components/QuoteCard";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../../lib/contactInfo";
 
 const FAMILIAR_ITEMS = [
   { emoji: "📋", icon: "/images/icon-termite-know-whats-going-on.png", text: "I just got the inspection report and it confirmed termites. I do not know what the next steps are." },
@@ -27,8 +28,8 @@ const HAPPENING_CARDS = [
   },
   {
     tag: "The Recurrence Problem",
-    title: "Treatment without monitoring leaves gaps",
-    body: "Termites can reestablish from adjacent colonies or from areas not reached in the initial treatment. Ongoing monitoring after treatment is the only way to confirm lasting protection.",
+    title: "Treatment without follow-up leaves gaps",
+    body: "Termites can reestablish from adjacent colonies or from areas not reached in the initial treatment. Follow-up inspections after treatment are the best way to catch any new activity early.",
   },
 ];
 
@@ -49,19 +50,19 @@ const ATTRACT_REASONS = [
     num: "03",
     label: "Structural Access",
     title: "Treatment must reach where termites live",
-    body: "Effective treatment requires access to the areas where the colony is active. This may include soil treatment around the foundation, targeted wood treatments, or bait systems depending on the situation.",
+    body: "Effective treatment requires access to the areas where the colony is active. The method is chosen after inspection, matched to the credentials that cover it, and explained to you before any work begins.",
   },
   {
     num: "04",
-    label: "Monitoring",
-    title: "Post-treatment monitoring confirms success",
-    body: "Termite populations can recover if treatment does not reach the full colony. Monitoring stations placed around the property after treatment track activity and flag any recurrence early.",
+    label: "Follow-Up",
+    title: "Treatment is followed by re-inspection",
+    body: "Termite populations can recover if treatment does not reach the full colony. Follow-up inspections after treatment check for new activity and flag any recurrence early.",
   },
   {
     num: "05",
     label: "Documentation",
     title: "Treatment records protect your investment",
-    body: "A documented treatment record is valuable for real estate transactions and future inspections. We provide a certificate of treatment that verifies the work completed and the protection in place.",
+    body: "A documented treatment record is valuable for real estate transactions and future inspections. We provide a written service report documenting the work completed, which you can keep on file.",
   },
 ];
 
@@ -76,13 +77,13 @@ const PROTECT_STEPS = [
     method: "SOLVE",
     num: "02",
     title: "Targeted treatment at the source",
-    body: "We apply pet-safe treatments where pests live and travel, not just where they are visible. That means reaching the source rather than cleaning up what you see on the surface.",
+    body: "We apply targeted treatments where pests live and travel, not just where they are visible. That means reaching the source rather than cleaning up what you see on the surface.",
   },
   {
     method: "PROTECT",
     num: "03",
-    title: "Barriers that hold between visits",
-    body: "After treatment, we address the conditions that invited them in. Entry points sealed, problem areas noted, and a plan in place so they cannot simply return the same way.",
+    title: "Protection that helps hold between visits",
+    body: "After treatment, we address the conditions that invited them in. Entry points sealed, problem areas noted, and a plan in place to help keep them from returning the same way.",
   },
 ];
 
@@ -94,8 +95,8 @@ const BOOK_STEPS = [
   },
   {
     num: "02",
-    title: "Pick a time that works for you",
-    body: "Schedule at your convenience. Evenings and weekends are available.",
+    title: "Pick a day that works for you",
+    body: "Schedule at your convenience. Choose the day that works best for you and we'll take care of the rest.",
   },
   {
     num: "03",
@@ -111,22 +112,22 @@ const BOOK_STEPS = [
 
 const WHY_ITEMS = [
   {
-    icon: "ðŸ›¡",
+    icon: "🛡",
     title: "Safe for Families. Tough on Pests.",
     body: "Every treatment is designed around the people and pets in your home, not a one-size-fits-all schedule.",
   },
   {
-    icon: "ðŸ“",
+    icon: "📍",
     title: "Local and Licensed in MA and RI",
     body: "We know your region, your seasonal pest pressures, and the conditions that drive activity here.",
   },
   {
-    icon: "âœ…",
-    title: "30-Day Re-Treatment Guarantee",
-    body: "If pests return within 30 days of your treatment, so do we, at no additional charge.",
+    icon: "✅",
+    title: "We Stand Behind Our Work",
+    body: CALLBACK_POLICY_TEXT,
   },
   {
-    icon: "ðŸ’¬",
+    icon: "💬",
     title: "Clear Communication, Every Visit",
     body: "Your technician explains what they found, what they treated, and what to watch for. No mystery service.",
   },
@@ -135,9 +136,9 @@ const WHY_ITEMS = [
 const TIPS = [
   "Begin treatment as soon as activity is confirmed. Delay increases structural damage and colony size.",
   "Follow pre-treatment preparation instructions provided by your technician to ensure maximum product effectiveness.",
-  "Keep monitoring stations accessible after treatment so post-treatment inspection can confirm colony elimination.",
+  "Keep treated and inspected areas accessible after treatment so follow-up inspections can check for new activity.",
   "Address conducive conditions identified during the inspection to reduce the risk of re-infestation.",
-  "Schedule a follow-up inspection 12 months after treatment to verify that the colony has been fully eliminated.",
+  "Schedule a follow-up inspection about 12 months after treatment to check for any new activity.",
 ];
 
 const RELATED_SERVICES = [
@@ -150,23 +151,23 @@ const RELATED_SERVICES = [
 const FAQS = [
   {
     q: "What is the most effective termite treatment method?",
-    a: "Liquid soil treatments and bait systems are both highly effective for subterranean termites. The best choice depends on the colony location, soil conditions, and the structure of the home. We recommend a method after inspecting the specific situation.",
+    a: "Treatment methods vary with the species, where the colony is active, and the structure of the home. We recommend an approach after inspecting the specific situation and tell you exactly what it involves, and who performs it, before work begins.",
   },
   {
     q: "How long does termite treatment last?",
-    a: "Liquid soil treatments typically provide protection for five or more years when applied correctly. Bait systems require ongoing monitoring to remain effective. We will outline the expected protection timeline for whatever method is used.",
+    a: "How long protection lasts depends on the method used, the product label, and conditions around your home. We will outline the expected protection timeline for whatever method is used.",
   },
   {
     q: "Will treatment cause damage to my home or landscaping?",
-    a: "Modern treatment methods are designed to minimize disruption. Soil treatment does not require extensive excavation. We will walk you through exactly what to expect before work begins.",
+    a: "Modern treatment methods are designed to minimize disruption. We will walk you through exactly what to expect before work begins.",
   },
   {
     q: "Do I need to leave my home during treatment?",
-    a: "Most termite treatments do not require vacating the home. Your technician will advise based on the specific products and application areas involved.",
+    a: "That depends on the products and application areas involved. Your technician will tell you before work begins whether anyone, including pets, needs to stay out of certain areas and for how long, following the product label directions.",
   },
   {
     q: "How will I know the treatment worked?",
-    a: "Follow-up monitoring and a scheduled re-inspection confirm colony elimination. Mud tube activity and wood damage progression stop when treatment is effective. We document findings at every follow-up visit.",
+    a: "Follow-up inspections check for new mud tube activity or damage progression. When treatment is working, that activity stops. We document findings at every follow-up visit.",
   },
 ];
 
@@ -197,22 +198,6 @@ export default function TermiteTreatment() {
 
   return (
     <>
-      <SEO
-        title="Termite Treatment Plans — MA & RI"
-        description="Professional termite treatment and colony elimination for Massachusetts and Rhode Island homes. Licensed, targeted, lasting structural protection."
-        jsonLd={[
-          buildServiceSchema(
-            "Termite Treatment",
-            "Professional termite treatment and colony elimination for Massachusetts and Rhode Island homes. Licensed, targeted, lasting structural protection.",
-            "/services/termite/treatment",
-          ),
-          buildBreadcrumbSchema([
-            { name: "Home", url: "/" },
-            { name: "Termite", url: "/services/termite" },
-            { name: "Treatment", url: "/services/termite/treatment" },
-          ]),
-        ]}
-      />
 
       {/* Back to Top */}
       {showBackToTop && (
@@ -221,7 +206,7 @@ export default function TermiteTreatment() {
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           aria-label="Back to top"
         >
-          â†‘
+          ↑
         </button>
       )}
 
@@ -229,8 +214,8 @@ export default function TermiteTreatment() {
       <Hero
         image="/images/termite-hero.png"
         eyebrow="Termite Treatment"
-        headline="Termite Treatment & Colony Elimination"
-        sub="Targeted termite treatment plans for Massachusetts and Rhode Island homeowners. Eliminate the colony and protect the structure."
+        headline="Termite Treatment & Colony Control"
+        sub="Targeted termite treatment plans for Massachusetts and Rhode Island homeowners. Target the colony and protect the structure."
         className="bk-hero--community"
       />
 
@@ -253,7 +238,7 @@ export default function TermiteTreatment() {
               {FAMILIAR_ITEMS.map((item, i) => (
                 <div key={i} className="bk-familiar-card">
                   {item.icon ? <img src={item.icon} alt="" className="bk-familiar-icon" /> : <span className="bk-familiar-emoji" aria-hidden="true">{item.emoji}</span>}
-                  <p className="bk-familiar-text">{item.text}</p>
+                  <p className="bk-familiar-text">&ldquo;{item.text}&rdquo;</p>
                 </div>
               ))}
             </div>
@@ -318,7 +303,7 @@ export default function TermiteTreatment() {
                     <span className="bk-accordion-label">{item.label}</span>
                     <span className="bk-accordion-title">{item.title}</span>
                     <span className="bk-accordion-chevron" aria-hidden="true">
-                      {activeAccordion === i ? "âˆ’" : "+"}
+                      {activeAccordion === i ? "−" : "+"}
                     </span>
                   </button>
                   {activeAccordion === i && (
@@ -342,7 +327,7 @@ export default function TermiteTreatment() {
         <div className="bk-protects-inner">
           <h2 className="bk-section-title">How We Treat Termite Problems</h2>
           <p className="bk-section-intro">
-            Every treatment follows the same three-step approach, adapted to your specific situation.
+            Every BuzzKill treatment follows the BuzzKill Method: Understand. Solve. Protect. Each step is adapted to your specific situation.
           </p>
           <div className="bk-method-track">
             {PROTECT_STEPS.map((step, i) => (
@@ -377,8 +362,8 @@ export default function TermiteTreatment() {
             <Link to="/quote" className="bk-btn bk-btn-primary">
               Get Your Instant Quote
             </Link>
-            <a href="tel:+15082589294" className="bk-btn bk-btn-secondary">
-              Call (508) 258-9294
+            <a href={OFFICE_TEL} className="bk-btn bk-btn-secondary">
+              Call {OFFICE_PHONE_PRETTY}
             </a>
           </div>
         </div>
@@ -428,14 +413,14 @@ export default function TermiteTreatment() {
         <div className="bk-related-inner">
           <h2 className="bk-section-title">More Services</h2>
           <p className="bk-section-intro">
-            Termite treatment is most effective as part of a complete inspection and monitoring program.
+            Termite treatment works best when it starts with a thorough inspection and is followed by periodic re-inspection.
           </p>
           <div className="bk-related-grid">
             {RELATED_SERVICES.map((svc, i) => (
               <Link key={i} to={svc.to} className="bk-related-card">
                 <span className="bk-related-label">{svc.label}</span>
                 <span className="bk-related-desc">{svc.desc}</span>
-                <span className="bk-related-arrow" aria-hidden="true">â†’</span>
+                <span className="bk-related-arrow" aria-hidden="true">&#x2192;</span>
               </Link>
             ))}
           </div>

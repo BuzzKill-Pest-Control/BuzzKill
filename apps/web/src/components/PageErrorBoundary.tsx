@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 import { isChunkLoadError } from "../lib/lazyPage";
 
 /**
@@ -59,8 +60,8 @@ export default class PageErrorBoundary extends Component<
           </div>
           {/* Never a dead end: a customer mid-checkout can still reach a human. */}
           <p className="bk-body" style={{ marginTop: 20 }}>
-            Still stuck? Call <a href="tel:+15082589294">(508) 258-9294</a> or
-            email <a href="mailto:info@pestbuzzkill.com">info@pestbuzzkill.com</a>.
+            Still stuck? Call <a href={OFFICE_TEL}>{OFFICE_PHONE_PRETTY}</a> or
+            email <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a>.
           </p>
         </div>
       </section>

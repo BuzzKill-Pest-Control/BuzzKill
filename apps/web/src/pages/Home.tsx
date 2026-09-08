@@ -1,13 +1,9 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import Hero from "../components/Hero";
 import FAQ from "../components/FAQ";
-import SEO, {
-  ORG_SCHEMA,
-  LOCAL_BUSINESS_SCHEMA,
-  WEBSITE_SCHEMA,
-  buildFAQSchema,
-} from "../components/SEO";
+import { HOME_FAQS } from "../data/faqs";
+import { OFFICE_PHONE, OFFICE_TEL } from "../lib/contactInfo";
 
 const PESTS = [
   { name: "Ants",            img: "/images/pest-ants.png",        description: "One trail today can become tomorrow's colony.",                                          cta: "Protect My Home"         },
@@ -22,25 +18,6 @@ const PESTS = [
   { name: "Wildlife",        img: "/images/pest-wildlife.png",    description: "Let's keep wildlife where it belongs, in the wild.",                                      cta: "Protect My Property"     },
 ];
 
-const HOME_FAQS = [
-  {
-    q: "How do I know which pest control service I need?",
-    a: "You don’t have to figure it out on your own. Whether you’re dealing with ants, rodents, termites, mosquitoes, or something you can’t identify, BuzzKill will help match your property with the right pest control service. Most services can be quoted instantly online, so you can get started without waiting for a call.",
-  },
-  {
-    q: "Are your pest control treatments safe for children and pets?",
-    a: "Yes. Safe for Families. Tough on Pests. is more than our tagline, it’s how we approach every service. Our treatments are thoughtfully applied with your family, pets, and everyday life in mind while effectively targeting the pests you’re trying to eliminate.",
-  },
-  {
-    q: "Can I get an instant quote online?",
-    a: "Absolutely. Most of our residential pest control services include an instant online quote, allowing you to see pricing, choose a plan, and schedule your service in just a few clicks. A few specialized services may require additional information before pricing can be provided.",
-  },
-  {
-    q: "Will one treatment solve the problem permanently?",
-    a: "Every pest problem is different. Some issues can be resolved with a single visit, while others benefit from ongoing pest management to help prevent pests from returning. We identify what’s attracting pests, treat the problem at its source, and recommend the best plan to help keep your property protected.",
-  },
-];
-
 export default function Home() {
   const navigate = useNavigate();
   const [activePest, setActivePest] = useState(PESTS[0].name);
@@ -48,10 +25,6 @@ export default function Home() {
 
   return (
     <>
-      <SEO
-        description="Professional pest control for condominiums, HOAs, and shared living communities across Massachusetts and Rhode Island. Common-area pest management and optional discounted in-unit service."
-        jsonLd={[ORG_SCHEMA, LOCAL_BUSINESS_SCHEMA, WEBSITE_SCHEMA, buildFAQSchema(HOME_FAQS)]}
-      />
       <Hero
         announceBanner
         image="/images/hero-home-2-main.png"
@@ -77,14 +50,14 @@ export default function Home() {
               More Than Pest Control. Property Protection You Can Trust.
             </h2>
             <p className="bk-protect-subtitle">
-              Safe for families. Mindful of pets. Trusted to protect homes and communities across Massachusetts &amp; Rhode Island.
+              Thoughtful around families. Mindful of pets. Protecting homes and communities across Massachusetts and Rhode Island.
             </p>
           </div>
 
           <div className="bk-protect-grid">
             <div className="bk-protect-card">
               <img src="/images/icon-family.png" alt="" className="bk-protect-icon-img" aria-hidden="true" />
-              <h3 className="bk-protect-card-title">Safe for Families</h3>
+              <h3 className="bk-protect-card-title">Families in Mind</h3>
               <p className="bk-protect-card-body">Targeted treatments designed with your household in mind.</p>
             </div>
             <div className="bk-protect-card">
@@ -149,7 +122,7 @@ export default function Home() {
           <div className="bk-stagger-tile">
             <div className="bk-stagger-img">
               <div className="bk-stagger-img-photo">
-                <img src="/images/service1.webp" alt="Residential neighborhood protected by pet-safe pest control services in Massachusetts and Rhode Island" />
+                <img src="/images/service1.webp" alt="Residential neighborhood served by BuzzKill Pest Control in Massachusetts and Rhode Island" />
               </div>
               <img src="/images/shield.png" alt="" className="bk-stagger-badge" aria-hidden="true" />
             </div>
@@ -166,7 +139,7 @@ export default function Home() {
           <div className="bk-stagger-tile bk-stagger-tile--reverse">
             <div className="bk-stagger-img">
               <div className="bk-stagger-img-photo">
-                <img src="/images/service2.webp" alt="Pet-friendly condominium community protected by Buzzkill pest control services" />
+                <img src="/images/service2.webp" alt="Condominium community served by BuzzKill Pest Control" />
               </div>
               <img src="/images/shield.png" alt="" className="bk-stagger-badge" aria-hidden="true" />
             </div>
@@ -213,8 +186,6 @@ export default function Home() {
         </div>
       </section>
 
-
-
       {/* Protection With Purpose section */}
       <section className="bk-why-section">
         <div className="bk-why-inner">
@@ -246,8 +217,8 @@ export default function Home() {
       <section className="bk-cta-banner">
         <div className="bk-cta-banner-inner">
           <p className="bk-cta-banner-text">
-            Serving MA &amp; RI — speak with a local pest control expert at{" "}
-            <a href="tel:+15082589294" className="bk-cta-banner-phone">508-258-9294</a>
+            Serving MA &amp; RI. Speak with a local pest control expert at{" "}
+            <a href={OFFICE_TEL} className="bk-cta-banner-phone">{OFFICE_PHONE}</a>
           </p>
           <span className="bk-cta-banner-or">or</span>
           <Link to="/quote" className="bk-cta-banner-btn">Get Instant Quote</Link>
@@ -369,7 +340,7 @@ export default function Home() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Ready to Get Started?</p>
               <h2 className="bk-schedule-title">Get Started Today</h2>
-              <p className="bk-schedule-sub">Appointments that work around your schedule — not ours. Available across Massachusetts &amp; Rhode Island.</p>
+              <p className="bk-schedule-sub">Appointments on the day that works for you. Available across Massachusetts and Rhode Island.</p>
               <button type="button" className="bk-btn bk-schedule-cta" onClick={goToForm}>
                 Get an Instant Quote
               </button>

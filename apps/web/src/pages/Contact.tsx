@@ -1,11 +1,17 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
-import SEO, { buildBreadcrumbSchema } from "../components/SEO";
 import FormContactFooter from "../components/FormContactFooter";
 import { CALL_CONSENT_TEXT } from "../../amplify/functions/shared/consentText";
 import { submitLead } from "../lib/leadIntakeApi";
 import { trackFormSubmit, trackGenerateLead, trackAdsConversion, ADS_CONVERSIONS } from "../lib/analytics";
+import {
+  OFFICE_ADDRESS_LINES,
+  OFFICE_EMAIL,
+  OFFICE_MAILTO,
+  OFFICE_PHONE_PRETTY,
+  OFFICE_TEL,
+} from "../lib/contactInfo";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
@@ -60,14 +66,6 @@ export default function Contact() {
 
   return (
     <>
-      <SEO
-        title="Contact Us"
-        description="Questions or ready to get started? Reach the BuzzKill team — local, licensed, and easy to reach across Massachusetts and Rhode Island."
-        jsonLd={buildBreadcrumbSchema([
-          { name: "Home", url: "/" },
-          { name: "Contact", url: "/contact" },
-        ])}
-      />
 
       <section className="bk-section bk-section-cream bk-contact-hero">
         <div className="bk-container bk-contact-layout">
@@ -88,10 +86,22 @@ export default function Contact() {
               what&rsquo;s going on and a local BuzzKill expert will follow up.
             </p>
 
+            <address className="bk-p" style={{ fontStyle: "normal", marginBottom: 24 }}>
+              <strong>BuzzKill Pest Control</strong>
+              <br />
+              {OFFICE_ADDRESS_LINES[0]}
+              <br />
+              {OFFICE_ADDRESS_LINES[1]}
+              <br />
+              <a href={OFFICE_TEL}>{OFFICE_PHONE_PRETTY}</a>
+              <br />
+              <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a>
+            </address>
+
             {status === "success" ? (
               <div className="bk-contact-success">
                 <h2>We&rsquo;ve got it!</h2>
-                <p>Someone from our team will reach out to you shortly.</p>
+                <p>Someone from our team will reach out to you by phone or email.</p>
                 <FormContactFooter lead="Need help right now?" />
               </div>
             ) : (
@@ -115,7 +125,7 @@ export default function Contact() {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     autoComplete="tel"
-                    placeholder="(508) 258-9294"
+                    placeholder="Your phone number"
                   />
                 </div>
 
@@ -199,7 +209,7 @@ export default function Contact() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Ready to Get Started?</p>
               <h2 className="bk-schedule-title">Get an Instant Quote</h2>
-              <p className="bk-schedule-sub">Skip the wait — price your service online in minutes.</p>
+              <p className="bk-schedule-sub">Skip the wait and price your service online in minutes.</p>
               <Link to="/quote" className="bk-btn bk-schedule-cta">
                 Get an Instant Quote
               </Link>

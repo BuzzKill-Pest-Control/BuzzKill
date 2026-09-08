@@ -226,8 +226,15 @@ vi.mock("./email", () => ({
     return true;
   },
 }));
+/** Every agreement input the finalizer hands the PDF renderer, so the tests
+ *  below can inspect the covered grid, the money rows, and the absence of
+ *  any initial term. */
+const agreementInputs: Record<string, unknown>[] = [];
 vi.mock("./pdf", () => ({
-  renderAgreementPdf: async () => Buffer.from("pdf"),
+  renderAgreementPdf: async (opts: Record<string, unknown>) => {
+    agreementInputs.push(opts);
+    return Buffer.from("pdf");
+  },
 }));
 vi.mock("./stripeClient", () => ({
   stripeClient: () => ({
@@ -287,7 +294,7 @@ vi.mock("./ownedWork", () => ({
   workItemId: (kind: string, key: string) => `${kind}:${key}`,
 }));
 
-const { finalizeBooking, retryBookingFinalization } = await import(
+const { finalizeBooking, retryBookingFinalization, GENERAL_PLAN_COVERED_PESTS } = await import(
   "./bookingFinalize"
 );
 // GL-06: the shared failure path (webhook + reconcile sweep) under the same
@@ -1883,5 +1890,135 @@ describe("GL-17 — a date-less off-season enrollment finalizes with an April ob
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("the agreement PDF inputs promise only what the plan sold delivers", () => {
+  const rows = (box: unknown) => ((box as { rows: { label: string }[] } | undefined)?.rows ?? []).map((r) => r.label);
+
+  it("a one-time job gets no coverage grid, no initial term, and no tax row", async () => {
+    agreementInputs.length = 0;
+    await finalizeBooking({ bookingRequestId: "b1", paymentIntentId: "pi_1", amountReceived: 31300 });
+    expect(agreementInputs).toHaveLength(1);
+    const a = agreementInputs[0];
+    expect(a.coveredPests).toBeUndefined();
+    expect(a).not.toHaveProperty("initialTermMonths");
+    expect(rows(a.initial)).not.toContain("Tax (0%)");
+    expect(a.recurring).toBeUndefined();
+  });
+
+  it("a MOSQUITO plan covers mosquitoes only", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-09T15:00:00Z"));
+      booking.quoteJson = JSON.stringify({
+        serviceLabel: "Mosquito plan (Apr–Oct)",
+        recurringOffer: { frequency: "MONTHLY", monthlyCents: 11900, initialFeeCents: 11900 },
+        planOnly: true,
+        offSeason: true,
+      });
+      booking.selectedDate = null;
+      booking.recurring = true;
+      booking.amountCents = 11900;
+      agreementInputs.length = 0;
+      await finalizeBooking({ bookingRequestId: "b1", paymentIntentId: "pi_1", amountReceived: 11900 });
+      const a = agreementInputs[0];
+      expect(a.coveredPests).toEqual(["Mosquitoes"]);
+      expect(JSON.stringify(a)).not.toMatch(/flea/i);
+      expect(a).not.toHaveProperty("initialTermMonths");
+      expect(rows(a.initial)).not.toContain("Tax (0%)");
+      expect(rows(a.recurring)).not.toContain("Tax (0%)");
+      expect(String(a.bodyText)).toContain("may be canceled at any time");
+      expect(String(a.bodyText)).not.toMatch(/12[- ]month|initial period/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a MOSQUITO_TICK plan covers mosquitoes and ticks only", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-09T15:00:00Z"));
+      booking.quoteJson = JSON.stringify({
+        serviceLabel: "Mosquito + tick plan (Apr–Oct)",
+        recurringOffer: { frequency: "MONTHLY", monthlyCents: 14900, initialFeeCents: 14900 },
+        planOnly: true,
+        offSeason: true,
+      });
+      booking.selectedDate = null;
+      booking.recurring = true;
+      booking.amountCents = 14900;
+      agreementInputs.length = 0;
+      await finalizeBooking({ bookingRequestId: "b1", paymentIntentId: "pi_1", amountReceived: 14900 });
+      const a = agreementInputs[0];
+      expect(a.coveredPests).toEqual(["Mosquitoes", "Ticks"]);
+      expect(JSON.stringify(a)).not.toMatch(/flea/i);
+      expect(a).not.toHaveProperty("initialTermMonths");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a general recurring plan keeps the verified general lineup and no initial term", async () => {
+    booking.quoteJson = JSON.stringify({
+      serviceLabel: "Community common-area pest control — 24 units",
+      recurringOffer: { frequency: "QUARTERLY", monthlyCents: 28800, initialFeeCents: 28800 },
+      planOnly: true,
+    });
+    booking.recurring = true;
+    booking.amountCents = 28800;
+    agreementInputs.length = 0;
+    await finalizeBooking({ bookingRequestId: "b1", paymentIntentId: "pi_1", amountReceived: 28800 });
+    const a = agreementInputs[0];
+    expect(a.coveredPests).toEqual([...GENERAL_PLAN_COVERED_PESTS]);
+    expect(a.coveredPests as string[]).not.toContain("Fleas");
+    expect(a).not.toHaveProperty("initialTermMonths");
+    expect(rows(a.initial)).not.toContain("Tax (0%)");
+    expect(rows(a.recurring)).not.toContain("Tax (0%)");
+    expect(String(a.paymentAuthText)).toContain("until the plan is canceled");
+    expect(String(a.paymentAuthText)).toContain("BuzzKill Pest Control LLC");
+  });
+});
+
+describe("the agreement quotes the accepted terms for the payment method actually used", () => {
+  it("an invoiced plan agreement quotes invoice terms and never a card charge", async () => {
+    booking.propertyKind = "COMMUNITY";
+    booking.stripePaymentIntentId = undefined; // no card intent behind an invoiced booking
+    booking.quoteJson = JSON.stringify({
+      serviceLabel: "Community common-area pest control — 24 units",
+      recurringOffer: { frequency: "QUARTERLY", monthlyCents: 28800, initialFeeCents: 28800 },
+      planOnly: true,
+    });
+    booking.recurring = true;
+    booking.amountCents = 28800;
+    booking.tcVersion = "2026-09-08.1";
+    booking.tcText = "BuzzKill Pest Control LLC invoices you the amount shown when the booking is made. The invoice is payable on Net 30 terms. That amount is the plan's initial fee (for community common-area plans, your first month).";
+    agreementInputs.length = 0;
+    await finalizeBooking({
+      bookingRequestId: "b1",
+      paymentIntentId: "invoice-b1",
+      amountReceived: 28800,
+      invoice: { terms: "NET_30", dueDate: "2026-08-21" },
+    });
+    const a = agreementInputs[0];
+    const body = String(a.bodyText);
+    expect(body).toContain("ACCEPTED TERMS (version 2026-09-08.1)");
+    expect(body).toContain(String(booking.tcText));
+    expect(body).toMatch(/PAYMENT\. .*invoiced at booking/);
+    expect(body).not.toMatch(/charges your card|paid online at booking|charge the payment method/i);
+    expect(String(a.paymentAuthText)).toContain("chose to be invoiced");
+    expect(String(a.paymentAuthText)).not.toMatch(/charge the payment method|card/i);
+    expect(a).not.toHaveProperty("initialTermMonths");
+  });
+
+  it("a card booking agreement quotes card terms and never invoicing", async () => {
+    booking.tcVersion = "2026-09-08.1";
+    booking.tcText = "BuzzKill Pest Control LLC charges your card the amount shown today, when you book.";
+    agreementInputs.length = 0;
+    await finalizeBooking({ bookingRequestId: "b1", paymentIntentId: "pi_1", amountReceived: 31300 });
+    const body = String(agreementInputs[0].bodyText);
+    expect(body).toContain(String(booking.tcText));
+    expect(body).toContain("paid online at booking");
+    expect(body).not.toMatch(/invoiced at booking|Net 30/i);
   });
 });

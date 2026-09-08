@@ -208,7 +208,7 @@ describe("sendCustomerEmail kind booking-link", () => {
     await send("booking-link");
 
     const [email] = sentEmails;
-    expect(email.html).toMatch(/exact price in seconds/i);
+    expect(email.html).toMatch(/exact price online/i);
     expect(email.html).toMatch(/pick the day/i);
     expect(email.html).toMatch(/pay online/i);
     expect(email.html).toMatch(/keep working on it/i);

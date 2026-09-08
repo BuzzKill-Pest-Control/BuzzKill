@@ -10,7 +10,12 @@
  *   lead consented to a call and left a number, otherwise by email (GL-03)
  */
 import { Link } from "react-router-dom";
-import SEO from "../../components/SEO";
+import { COMPANY } from "../../../amplify/functions/shared/company";
+import {
+  OFFICE_ADDRESS,
+  OFFICE_PHONE_PRETTY,
+  OFFICE_TEL,
+} from "../../lib/contactInfo";
 
 function CheckIcon() {
   return (
@@ -32,11 +37,6 @@ function CheckIcon() {
 export default function LPQuote() {
   return (
     <div className="bk-lp bk-lp--light">
-      <SEO
-        title="Get Your Instant Pest Control Quote"
-        description="See your pest control price in seconds. No waiting, no sales calls — just your quote, bookable online."
-        noindex
-      />
 
       <header className="bk-lp-header bk-lp-header--dark-on-light">
         <img src="/images/logo.png" alt="BuzzKill Pest Control" />
@@ -46,8 +46,9 @@ export default function LPQuote() {
         <div className="bk-lp-eyebrow">Instant Quote</div>
         <h1 className="bk-lp-h1">See Your Price in Seconds</h1>
         <p className="bk-lp-lead" style={{ maxWidth: 460, margin: "0 auto" }}>
-          No sales calls. No waiting. Answer a few quick questions, see your
-          customized price, and book your visit online — all in one sitting.
+          No pressure, no waiting on a callback. Answer a few quick questions,
+          see your customized price, and book your visit online, all in one
+          sitting.
         </p>
 
         <Link
@@ -83,14 +84,34 @@ export default function LPQuote() {
           <div className="bk-lp-trust__item">
             <CheckIcon />
             <a
-              href="tel:508-258-9294"
+              href={OFFICE_TEL}
               style={{ color: "inherit", textDecoration: "none" }}
             >
-              508-258-9294
+              {OFFICE_PHONE_PRETTY}
             </a>
           </div>
         </div>
       </main>
+
+      <footer
+        style={{
+          marginTop: "auto",
+          padding: "20px 24px 28px",
+          textAlign: "center",
+          fontSize: 12,
+          lineHeight: 1.6,
+          color: "var(--fg2)",
+        }}
+      >
+        {COMPANY.legalName} &middot; {OFFICE_ADDRESS} &middot;{" "}
+        <Link to="/privacy-policy" style={{ color: "inherit" }}>
+          Privacy Policy
+        </Link>{" "}
+        &middot;{" "}
+        <Link to="/terms-of-service" style={{ color: "inherit" }}>
+          Terms of Service
+        </Link>
+      </footer>
     </div>
   );
 }

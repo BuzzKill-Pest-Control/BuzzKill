@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 
 type Props = {
   title: string;
@@ -14,7 +15,7 @@ export default function ComingSoon({ title, subtitle }: Props) {
         {subtitle && <p className="bk-coming-soon-sub">{subtitle}</p>}
         <div className="bk-coming-soon-actions">
           <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
-          <a href="tel:+15082589294" className="bk-btn bk-btn-outline-light">Call (508) 258-9294</a>
+          <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light">Call {OFFICE_PHONE_PRETTY}</a>
         </div>
         <p className="bk-coming-soon-tagline">BuzzKill Protects More Than Property</p>
       </div>

@@ -10,6 +10,8 @@ import ScrollDepthTracker from "./components/ScrollDepthTracker";
 import ScrollProgress from "./components/ScrollProgress";
 import { TalkToExpertProvider } from "./components/TalkToExpertModal";
 import PageErrorBoundary from "./components/PageErrorBoundary";
+import { HeadProvider, SiteHead } from "./components/SEO";
+import { REDIRECT_ROUTES } from "./seo/pages";
 import lazyPage from "./lib/lazyPage";
 
 // Pages are code-split (lazyPage) so each route loads only its own JS chunk
@@ -65,6 +67,7 @@ const QuotePage        = lazyPage(() => import("./pages/booking/QuotePage"));
 const BookPage         = lazyPage(() => import("./pages/booking/BookPage"));
 const CancelPage       = lazyPage(() => import("./pages/booking/CancelPage"));
 const TrackPage        = lazyPage(() => import("./pages/booking/TrackPage"));
+const NotFound         = lazyPage(() => import("./pages/NotFound"));
 
 /** Brief, on-brand loader shown while a page's chunk loads (self-contained, no CSS needed). */
 function PageFallback() {
@@ -131,7 +134,12 @@ export default function App() {
 
   return (
     <TalkToExpertProvider>
+    <HeadProvider>
     <BrowserRouter>
+      {/* Title, description, canonical, social tags, and page JSON-LD for
+          every route, driven by src/seo/pages.ts; also moves a non-canonical
+          spelling of a URL (trailing slash, upper case) to the canonical one. */}
+      <SiteHead />
       <ScrollToTop />
       <AnalyticsTracker />
       <ClickTracker />
@@ -153,21 +161,6 @@ export default function App() {
 
           {/* Audience pages */}
           <Route path="/residential"                                       element={<Residential />} />
-          <Route path="/residential/general-pest"                          element={<AntsSpiders />} />
-          <Route path="/residential/cockroach"                             element={<Cockroach />} />
-          <Route path="/residential/flea-silverfish"                       element={<FleaSilverfish />} />
-          <Route path="/residential/wasp-hornet-bee"                       element={<WaspHornetBee />} />
-          <Route path="/residential/rodent-control"                        element={<RodentControl />} />
-          <Route path="/residential/rodent-control/entry-sealing"          element={<RodentEntrySealing />} />
-          <Route path="/residential/rodent-control/attic"                  element={<RodentAttic />} />
-          <Route path="/residential/rodent-control/attic-restoration"      element={<AtticRestoration />} />
-          <Route path="/residential/mosquito-tick"                         element={<MosquitoTick />} />
-          <Route path="/residential/mosquito-tick/tick"                    element={<TickProgram />} />
-          <Route path="/residential/termite"                               element={<Termite />} />
-          <Route path="/residential/termite/treatment"                     element={<TermiteTreatment />} />
-          <Route path="/residential/termite/wood-boring"                   element={<WoodBoring />} />
-          <Route path="/residential/wildlife"                              element={<Wildlife />} />
-          <Route path="/residential/wildlife/humane-removal"               element={<HumaneRemoval />} />
           <Route path="/communities"                      element={<Communities />} />
           <Route path="/communities/common-areas"         element={<CommonAreaProtection />} />
           <Route path="/communities/in-unit"              element={<InUnitService />} />
@@ -230,11 +223,23 @@ export default function App() {
           <Route path="/quote/contact-me" element={<QuotePage />} />
           <Route path="/book" element={<BookPage />} />
           <Route path="/cancel" element={<CancelPage />} />
-          {/* The redesign's quote page — the funnel is the one front door. */}
-          <Route path="/request-quote" element={<Navigate to="/quote" replace />} />
+          {/* Aliases and retired URLs, redirected from the route registry so a
+              duplicate of a page can never be indexed alongside it: the old
+              /residential/<service> copies of /services/<service> and the
+              redesign's /request-quote. Search engines are given the target
+              as the canonical URL; visitors are moved there. */}
+          {Object.entries(REDIRECT_ROUTES).map(([from, to]) => (
+            <Route key={from} path={from} element={<Navigate to={to} replace />} />
+          ))}
+
+          {/* Anything else is a page the site does not publish: a real
+              not-found page, marked noindex by the head manager, instead of an
+              empty shell served with a 200. */}
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </HeadProvider>
     </TalkToExpertProvider>
   );
 }

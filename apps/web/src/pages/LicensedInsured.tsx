@@ -1,9 +1,22 @@
 import { Link } from "react-router-dom";
-import SEO, { buildBreadcrumbSchema } from "../components/SEO";
+import {
+  holderLabel,
+  isoToday,
+  publicCredentials,
+  publicStatus,
+  type Credential,
+} from "../../amplify/functions/shared/credentials";
+import { OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE, OFFICE_TEL } from "../lib/contactInfo";
 
-const VERIFY_MA =
-  "https://www.mass.gov/how-to/look-up-and-confirm-a-massachusetts-pesticide-license";
-const VERIFY_RI = "https://demri.my.site.com/agr/s/";
+/**
+ * The credentials page renders the same structured records the agreements
+ * and PDFs print (amplify/functions/shared/credentials.ts), so a number, a
+ * holder, a status, or a date can only ever be published one way. Both
+ * Massachusetts credentials name their holder, Jacob Greasley, because they
+ * are his credentials, not company licences; the Rhode Island registration
+ * names BuzzKill Pest Control LLC. Status is date-aware: nothing reads Active
+ * past its stated expiration without renewal data.
+ */
 
 const ShieldIcon = () => (
   <svg
@@ -107,18 +120,33 @@ function CredentialCard({
   );
 }
 
+const DATE = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+
+/** The rows a credential record renders, in display order. */
+function detailsFor(c: Credential, asOf: string): CredentialCardProps["details"] {
+  const rows: CredentialCardProps["details"] = [
+    { label: c.jurisdiction === "RI" ? "Registration #" : "License #", value: c.number },
+    { label: "Type", value: c.type },
+    { label: c.holder.kind === "company" ? "Registrant" : "Holder", value: holderLabel(c) },
+  ];
+  if (c.category) rows.push({ label: "Category", value: c.category });
+  rows.push({ label: "Agency", value: c.issuer });
+  if (c.issuedOn) rows.push({ label: "Issued", value: DATE(c.issuedOn) });
+  // An expiration is shown only when the issuer supplied one; none is invented.
+  if (c.validThrough) rows.push({ label: "Valid through", value: DATE(c.validThrough) });
+  const status = publicStatus(c, asOf);
+  rows.push({
+    label: "Status",
+    value: status === "Active" ? <span className="bk-credential-status">{status}</span> : status,
+  });
+  return rows;
+}
+
 export default function LicensedInsured() {
+  const asOf = isoToday();
   return (
     <>
-      <SEO
-        title="Licensed & Insured"
-        description="BuzzKill Pest Control is fully licensed and registered in Massachusetts and Rhode Island. View our state credentials and request our Certificate of Insurance."
-        jsonLd={buildBreadcrumbSchema([
-          { name: "Home", url: "/" },
-          { name: "Licensed & Insured", url: "/licensed-insured" },
-        ])}
-      />
-
       {/* Hero */}
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-credentials-layout">
@@ -126,9 +154,13 @@ export default function LicensedInsured() {
             <div className="bk-eyebrow">Credentials</div>
             <h1 className="bk-h1-lower">Licensed &amp; Insured</h1>
             <p className="bk-body-lead">
-              BuzzKill Pest Control operates under full state licensure and
-              registration in every jurisdiction we serve. Our credentials are
-              verifiable through the official state agency portals linked below.
+              BuzzKill Pest Control works under the state credentials listed
+              below and carries insurance. Each credential names the agency
+              that issued it and who holds it, and can be checked through the
+              official state portal linked on its card. The Massachusetts
+              credentials are held personally by our founder, Jacob Greasley;
+              the Rhode Island registration is held by BuzzKill Pest Control
+              LLC.
             </p>
           </div>
           <div className="bk-credentials-visual">
@@ -147,68 +179,17 @@ export default function LicensedInsured() {
         <div className="bk-container" style={{ maxWidth: 880 }}>
           <h2 className="bk-h2">State Credentials</h2>
           <div className="bk-credential-grid">
-            <CredentialCard
-              icon={<ShieldIcon />}
-              title="Rhode Island Pesticide Company Registration"
-              accent
-              details={[
-                { label: "Registration #", value: "CP-PCR-000045" },
-                {
-                  label: "Agency",
-                  value:
-                    "Rhode Island Department of Environmental Management (RIDEM), Division of Agriculture and Forest Environment",
-                },
-                {
-                  label: "Status",
-                  value: <span className="bk-credential-status">Active</span>,
-                },
-              ]}
-              verifyUrl={VERIFY_RI}
-              verifyLabel="Verify on RIDEM Portal"
-            />
-
-            <CredentialCard
-              icon={<DocIcon />}
-              title="Massachusetts Pesticide Commercial Certification"
-              accent
-              details={[
-                { label: "License #", value: "CC-0060592" },
-                {
-                  label: "Category",
-                  value: "41 — General Pest Control",
-                },
-                {
-                  label: "Agency",
-                  value:
-                    "Massachusetts Department of Agricultural Resources (MDAR), Pesticide Program",
-                },
-                {
-                  label: "Status",
-                  value: <span className="bk-credential-status">Active</span>,
-                },
-              ]}
-              verifyUrl={VERIFY_MA}
-              verifyLabel="Look Up on Mass.gov"
-            />
-
-            <CredentialCard
-              icon={<DocIcon />}
-              title="Massachusetts Applicator (Core) License"
-              details={[
-                { label: "License #", value: "AL-0060551" },
-                {
-                  label: "Agency",
-                  value:
-                    "Massachusetts Department of Agricultural Resources (MDAR), Pesticide Program",
-                },
-                {
-                  label: "Status",
-                  value: <span className="bk-credential-status">Active</span>,
-                },
-              ]}
-              verifyUrl={VERIFY_MA}
-              verifyLabel="Look Up on Mass.gov"
-            />
+            {publicCredentials(asOf).map((c) => (
+              <CredentialCard
+                key={c.id}
+                icon={c.jurisdiction === "RI" ? <ShieldIcon /> : <DocIcon />}
+                title={c.title}
+                accent={c.primaryForDocuments}
+                details={detailsFor(c, asOf)}
+                verifyUrl={c.verifyUrl}
+                verifyLabel={c.verifyLabel}
+              />
+            ))}
 
             <CredentialCard
               icon={<InsuranceIcon />}
@@ -242,19 +223,22 @@ export default function LicensedInsured() {
             </div>
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Need a Certificate of Insurance?</p>
-              <h2 className="bk-schedule-title">We'll Have It To You Within One Business Day</h2>
+              <h2 className="bk-schedule-title">Request It and We&rsquo;ll Email It to You</h2>
               <p className="bk-schedule-sub">HOA boards and property managers can request our COI at any time.</p>
               <div className="bk-com-cta-row">
                 <a
-                  href="mailto:info@pestbuzzkill.com?subject=COI%20Request&body=Hi%20BuzzKill%2C%0A%0AI%20would%20like%20to%20request%20a%20Certificate%20of%20Insurance%20for%20our%20property.%0A%0AProperty%20Name%3A%20%0AProperty%20Address%3A%20%0AContact%20Name%3A%20%0APhone%3A%20%0A%0AThank%20you!"
+                  href={`${OFFICE_MAILTO}?subject=COI%20Request&body=Hi%20BuzzKill%2C%0A%0AI%20would%20like%20to%20request%20a%20Certificate%20of%20Insurance%20for%20our%20property.%0A%0AProperty%20Name%3A%20%0AProperty%20Address%3A%20%0AContact%20Name%3A%20%0APhone%3A%20%0A%0AThank%20you!`}
                   className="bk-btn bk-schedule-cta"
                 >
                   Request Certificate of Insurance
                 </a>
-                <a href="tel:508-258-9294" className="bk-btn bk-btn-outline-light bk-com-talk-btn">
-                  Call 508-258-9294
+                <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light bk-com-talk-btn">
+                  Call {OFFICE_PHONE}
                 </a>
               </div>
+              <p className="bk-schedule-sub" style={{ marginTop: 12 }}>
+                Questions about a credential? Email <a href={OFFICE_MAILTO}>{OFFICE_EMAIL}</a>.
+              </p>
             </div>
           </div>
         </div>
