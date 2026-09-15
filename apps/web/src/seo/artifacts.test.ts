@@ -4,6 +4,7 @@ import { CITIES } from "../data/cities";
 import { artifactFileFor, artifactHtml, routeArtifacts } from "./artifacts";
 import { allPages, indexablePages } from "./pages";
 import { renderShellHead } from "./shell";
+import { renderRouteBody } from "./prerender";
 
 /**
  * The production build writes one HTML file per route so the raw HTML the
@@ -22,6 +23,26 @@ function robotsOf(html: string): string | null {
 }
 
 describe("route artifacts", () => {
+  it("ships visible About and founder content with the route head before JavaScript", () => {
+    const html = artifactHtml(SHELL, byFile.get("about.html")!, renderRouteBody("/about"));
+    const body = html.split("<body>")[1];
+    expect(body).toContain('<main id="main-content">');
+    expect(body).toContain("About BuzzKill Pest Control</h1>");
+    expect(body).toContain("Founded by Jake Greasley</h2>");
+    expect(body).toContain("Jacob Charles Greasley");
+    expect(body).toContain('href="https://jakegreasley.com/"');
+    expect(body).toContain('href="/licensed-insured"');
+    expect(body).not.toContain('<div id="root"></div>');
+    expect(canonicalOf(html)).toBe(`${SITE_ORIGIN}/about`);
+    expect(html.match(/<title>/g)).toHaveLength(1);
+  });
+
+  it("does not leak the About body into other routes and fails if the shell cannot receive it", () => {
+    expect(renderRouteBody("/")).toBe("");
+    expect(renderRouteBody("/book")).toBe("");
+    expect(() => artifactHtml(SHELL.replace('<div id="root"></div>', ""), byFile.get("about.html")!, renderRouteBody("/about"))).toThrow("empty React root");
+  });
+
   it("map clean paths to concrete .html files, root to index.html", () => {
     expect(artifactFileFor("/")).toBe("index.html");
     expect(artifactFileFor("/about")).toBe("about.html");
