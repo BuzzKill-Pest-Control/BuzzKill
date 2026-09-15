@@ -36,9 +36,7 @@ export const ORGANIZATION_ID = `${SITE_ORIGIN}/#organization`;
 export const ORGANIZATION_TYPE = "HomeAndConstructionBusiness";
 export const WEBSITE_ID = `${SITE_ORIGIN}/#website`;
 export const LOGO_ID = `${SITE_ORIGIN}/#logo`;
-/** The founder's Person id lives on the visible founder section of /about.
- *  Move it to https://jakegreasley.com/#person only once that site is deployed
- *  and answers 200 with a matching Person; a dead id is worse than none. */
+/** Stable local Person id; sameAs connects it to Jake's external identity pages. */
 export const PERSON_ID = absoluteUrl("/about") + "#jake-greasley";
 
 export type Crumb = { name: string; url: string };

@@ -31,6 +31,8 @@ describe("route artifacts", () => {
     expect(body).toContain("Founded by Jake Greasley</h2>");
     expect(body).toContain("Jacob Charles Greasley");
     expect(body).toContain('href="https://jakegreasley.com/"');
+    expect(body.match(/href="https:\/\/jakegreasley\.com\/"/g)).toHaveLength(1);
+    expect(body).toContain('href="https://www.wikidata.org/wiki/Q141443360"');
     expect(body).toContain('href="/licensed-insured"');
     expect(body).not.toContain('<div id="root"></div>');
     expect(canonicalOf(html)).toBe(`${SITE_ORIGIN}/about`);
