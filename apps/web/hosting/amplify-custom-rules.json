@@ -1,0 +1,27 @@
+[
+  {
+    "source": "https://pestbuzzkill.com",
+    "target": "https://www.pestbuzzkill.com",
+    "status": "301"
+  },
+  {
+    "source": "/about",
+    "target": "/about.html",
+    "status": "200"
+  },
+  {
+    "source": "/about/",
+    "target": "/about.html",
+    "status": "200"
+  },
+  {
+    "source": "</^[^.]+$/>",
+    "target": "/index.html",
+    "status": "200"
+  },
+  {
+    "source": "/<*>",
+    "target": "/index.html",
+    "status": "404-200"
+  }
+]
