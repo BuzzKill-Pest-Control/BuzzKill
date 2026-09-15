@@ -99,13 +99,14 @@ export const COMPANY = {
     familyName: "Greasley",
     /** The legal name and its short form, so all three resolve to one person. */
     alternateNames: ["Jacob Greasley", "Jacob Charles Greasley"],
-    /** The visible founder section on the About page (the Person entity's home
-     *  until jakegreasley.com is deployed and answers 200). */
+    /** Stable local founder section; external identity pages belong in sameAs. */
     profilePath: "/about#jake-greasley",
     role: "Founder",
     /** Jake's own verified profiles. Personal only: the company's Instagram,
      *  Facebook, and LinkedIn pages belong to `socialProfiles`, never here. */
     sameAs: [
+      { url: "https://jakegreasley.com/", label: "Jake Greasley’s personal website" },
+      { url: "https://www.wikidata.org/wiki/Q141443360", label: "Wikidata" },
       { url: "https://www.linkedin.com/in/jake-greasley", label: "LinkedIn" },
       { url: "https://github.com/JakeGreasleyGIM", label: "GitHub" },
       { url: "https://www.instagram.com/jake.greasley/", label: "Instagram" },

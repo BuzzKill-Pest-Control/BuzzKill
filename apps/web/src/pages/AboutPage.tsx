@@ -65,11 +65,6 @@ export default function AboutPage() {
           </p>
           <p className="bk-p">Jake elsewhere online:</p>
           <ul className="bk-bullets bk-founder-links">
-            <li>
-              <a href="https://jakegreasley.com/" rel="me noopener noreferrer" target="_blank">
-                Jake Greasley’s personal website
-              </a>
-            </li>
             {founder.sameAs.map((p) => (
               <li key={p.url}>
                 <a href={p.url} rel="me noopener noreferrer" target="_blank">
