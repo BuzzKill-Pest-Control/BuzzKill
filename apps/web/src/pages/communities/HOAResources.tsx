@@ -140,7 +140,7 @@ export default function HOAResources() {
         eyebrow="HOA & BOARD RESOURCES"
         headline="Better Decisions. Stronger Communities."
         sub="Protecting a community takes more than responding to pest problems. BuzzKill helps HOA boards make informed decisions with proactive pest protection, clear communication, and local expertise you can count on. Protection With Purpose."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Community Specialist", href: "/contact" }}
         className="bk-hero--community"
       />
@@ -193,7 +193,7 @@ export default function HOAResources() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Let's Build A Better Plan</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Let's Build A Better Plan</Link>
           </div>
         </div>
       </section>
@@ -233,7 +233,7 @@ export default function HOAResources() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
         </div>
       </section>
@@ -264,7 +264,7 @@ export default function HOAResources() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -343,7 +343,7 @@ export default function HOAResources() {
               <h2 className="bk-schedule-title">Strong Communities Start With Smart Protection.</h2>
               <p className="bk-schedule-sub">Whether you're planning ahead or responding to resident concerns, BuzzKill helps your board make confident decisions with protection built around your community.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">

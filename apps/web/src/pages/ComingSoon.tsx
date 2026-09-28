@@ -14,7 +14,7 @@ export default function ComingSoon({ title, subtitle }: Props) {
         <h1 className="bk-coming-soon-title">{title}</h1>
         {subtitle && <p className="bk-coming-soon-sub">{subtitle}</p>}
         <div className="bk-coming-soon-actions">
-          <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+          <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light">Call {OFFICE_PHONE_PRETTY}</a>
         </div>
         <p className="bk-coming-soon-tagline">BuzzKill Protects More Than Property</p>

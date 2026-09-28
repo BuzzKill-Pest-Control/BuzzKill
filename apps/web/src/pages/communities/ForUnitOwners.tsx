@@ -141,7 +141,7 @@ export default function ForUnitOwners() {
         eyebrow="FOR UNIT OWNERS"
         headline="Pest Problems In Your Home? Let's Get It BuzzKilled."
         sub="Whether it's ants in the kitchen, mice in the attic, or wasps on the patio, you shouldn't have to guess what to do next. BuzzKill helps homeowners across Massachusetts and Rhode Island understand the problem, solve it at the source, and protect what matters most. Safe for Families. Tough on Pests."
-        primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Local Expert", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -194,7 +194,7 @@ export default function ForUnitOwners() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Know The Price. Book In Minutes.</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Know The Price. Book In Minutes.</Link>
           </div>
         </div>
       </section>
@@ -234,7 +234,7 @@ export default function ForUnitOwners() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Ready To Get BuzzKilled?</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Ready To Get BuzzKilled?</Link>
           </div>
         </div>
       </section>
@@ -265,7 +265,7 @@ export default function ForUnitOwners() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -344,7 +344,7 @@ export default function ForUnitOwners() {
               <h2 className="bk-schedule-title">Your Home Should Feel Comfortable. Not Shared With Pests.</h2>
               <p className="bk-schedule-sub">From one unexpected ant trail to recurring pest problems, BuzzKill helps you understand the issue, solve it at the source, and keep your home protected.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Get Instant Quote
                 </Link>
                 <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light bk-com-talk-btn">

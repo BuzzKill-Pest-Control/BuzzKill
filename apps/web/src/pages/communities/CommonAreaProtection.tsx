@@ -160,7 +160,7 @@ export default function CommonAreaProtection() {
         eyebrow="COMMON AREA PEST PROTECTION"
         headline="Protect the Spaces That Shape Every Resident's Experience"
         sub="Safe for Families. Tough on Pests."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk to Our Team", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -213,7 +213,7 @@ export default function CommonAreaProtection() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 32 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See How We Help Communities</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">See How We Help Communities</Link>
           </div>
         </div>
       </section>
@@ -239,7 +239,7 @@ export default function CommonAreaProtection() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
         </div>
       </section>
@@ -310,7 +310,7 @@ export default function CommonAreaProtection() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See How We Protect Communities</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">See How We Protect Communities</Link>
           </div>
         </div>
       </section>
@@ -341,7 +341,7 @@ export default function CommonAreaProtection() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -426,7 +426,7 @@ export default function CommonAreaProtection() {
               <h2 className="bk-schedule-title">Help Protect the Spaces Everyone Shares</h2>
               <p className="bk-schedule-sub">Mindful of residents. Tough on pests. Let BuzzKill build a protection plan your entire community can count on.</p>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
                 <a href={OFFICE_TEL} className="bk-btn bk-schedule-cta bk-schedule-cta--outline">

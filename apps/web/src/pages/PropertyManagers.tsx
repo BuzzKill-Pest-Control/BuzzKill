@@ -140,7 +140,7 @@ export default function PropertyManagers() {
         eyebrow="PROPERTY MANAGER PEST CONTROL"
         headline="Protect More. Manage Less."
         sub="Managing a community is challenging enough. Pest control shouldn't add to the workload. BuzzKill partners with property managers across Massachusetts and Rhode Island to help reduce resident complaints, protect shared spaces, and keep communities running smoothly through dependable service and clear communication."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To Our Team", href: "/contact" }}
         className="bk-hero--community"
       />
@@ -192,7 +192,7 @@ export default function PropertyManagers() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Let's Make Pest Control Easier</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Let's Make Pest Control Easier</Link>
           </div>
         </div>
       </section>
@@ -211,7 +211,7 @@ export default function PropertyManagers() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See The BuzzKill Difference</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">See The BuzzKill Difference</Link>
           </div>
         </div>
       </section>
@@ -232,7 +232,7 @@ export default function PropertyManagers() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
         </div>
       </section>
@@ -263,7 +263,7 @@ export default function PropertyManagers() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -342,7 +342,7 @@ export default function PropertyManagers() {
               <h2 className="bk-schedule-title">Let's Make Pest Control One Less Thing To Manage.</h2>
               <p className="bk-schedule-sub">When pest control is proactive, dependable, and built around your community, everyone benefits. BuzzKill helps you protect more while managing less.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">

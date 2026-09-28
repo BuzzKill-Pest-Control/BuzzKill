@@ -157,7 +157,7 @@ export default function Communities() {
         eyebrow="Community Pest Protection"
         headline="Protecting Communities Starts With The Right Partner"
         sub="Proactive pest control, clear communication, and dependable service across Massachusetts and Rhode Island."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
         secondaryCta={{ label: "Explore Community Services", href: "#community-services" }}
         className="bk-hero--community"
       />
@@ -262,7 +262,7 @@ export default function Communities() {
           <p className="bk-eyebrow bk-center">Community Solutions</p>
           <h2 className="bk-h2 bk-center">Protection Where Your Community Needs It Most</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-com-services-grid">
             {SERVICE_CARDS.map((s, i) => (
@@ -291,7 +291,7 @@ export default function Communities() {
             Instead of waiting for complaints, BuzzKill focuses on helping communities stay ahead of pest problems through proactive service, dependable communication, and long term planning.
           </p>
           <div className="bk-center" style={{ marginBottom: 32 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See How We Protect Communities</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">See How We Protect Communities</Link>
           </div>
           <div className="bk-com-approach-tabs">
             {APPROACH_STEPS.map((s, i) => (
@@ -349,7 +349,7 @@ export default function Communities() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -413,7 +413,7 @@ export default function Communities() {
               <h2 className="bk-schedule-title">Protect Your Community With Confidence</h2>
               <p className="bk-schedule-sub">From common areas to individual homes, BuzzKill helps communities stay protected with dependable service, clear communication, and solutions built around the way your property operates.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">

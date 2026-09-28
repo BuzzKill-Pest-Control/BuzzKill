@@ -160,7 +160,7 @@ export default function InUnitService() {
         eyebrow="IN UNIT PEST CONTROL"
         headline="Pest Problems Start Inside. So Does The Solution."
         sub="BuzzKill provides professional in unit pest control for apartments, condominiums, and HOA communities across Massachusetts and Rhode Island. We coordinate with management, respect every resident's home, and help keep your community protected."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Community Specialist", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -213,7 +213,7 @@ export default function InUnitService() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 32 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Protect Every Unit</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Protect Every Unit</Link>
           </div>
         </div>
       </section>
@@ -239,7 +239,7 @@ export default function InUnitService() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Stop Problems Before They Spread</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Stop Problems Before They Spread</Link>
           </div>
         </div>
       </section>
@@ -310,7 +310,7 @@ export default function InUnitService() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Schedule In Unit Service</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Schedule In Unit Service</Link>
           </div>
         </div>
       </section>
@@ -341,7 +341,7 @@ export default function InUnitService() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -426,7 +426,7 @@ export default function InUnitService() {
               <h2 className="bk-schedule-title">Protect Your Community With Confidence</h2>
               <p className="bk-schedule-sub">From individual units to shared spaces, BuzzKill helps communities stay protected with dependable service, clear communication, and solutions built around the way your property operates.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Request Community Proposal
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">

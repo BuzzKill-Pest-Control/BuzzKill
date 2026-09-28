@@ -381,7 +381,7 @@ export default function HumaneRemoval() {
             ))}
           </div>
           <div className="bk-book-cta">
-            <Link to="/quote" className="bk-btn bk-btn-primary">
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">
               Get an Instant Quote
             </Link>
             <a href={OFFICE_TEL} className="bk-btn bk-btn-secondary">
@@ -472,7 +472,7 @@ export default function HumaneRemoval() {
               <p className="bk-schedule-sub">
                 Appointments that work around your schedule, not ours. Available across Massachusetts &amp; Rhode Island.
               </p>
-              <Link to="/quote" className="bk-btn bk-schedule-cta">
+              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                 Get an Instant Quote
               </Link>
             </div>

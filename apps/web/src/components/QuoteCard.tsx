@@ -22,7 +22,7 @@ export default function QuoteCard() {
       </div>
 
       <div className="bk-quote-card-cta" style={{ paddingTop: 12, paddingBottom: 12 }}>
-        <Link to="/quote" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">
+        <Link to="/quote/instant" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">
           Get Free Instant Quote
         </Link>
         <a href={OFFICE_TEL} className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }} data-track-id="quote_card_phone">
