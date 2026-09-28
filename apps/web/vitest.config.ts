@@ -7,9 +7,8 @@ import { defineConfig } from "vitest/config";
  * Not included in any Lambda bundle: Amplify's esbuild starts from each
  * function's `entry` and follows imports, and nothing imports a `.test.ts`.
  *
- * `src/**` covers the booking funnel's pure client logic (validation,
- * storage codec, formatting) — extracted side-effect free, so it runs in
- * the same node environment.
+ * `src/**` also covers client logic and rendered pages. Tests run in node
+ * by default; client effect tests opt into jsdom with a per-file directive.
  */
 export default defineConfig({
   test: {

@@ -70,10 +70,10 @@ const METHOD_STEPS = [
 ];
 
 const PROCESS_STEPS = [
-  { num: "01", title: "Tell us about your community.", body: "Share the details of your property and what you're looking for in a pest control partner." },
-  { num: "02", title: "We'll learn what you need.", body: "We take the time to understand your buildings, layouts, and the unique pressures your community faces." },
-  { num: "03", title: "Build the right protection plan.", body: "We put together a program built around your community's schedule, spaces, and residents." },
-  { num: "04", title: "Help keep your community protected.", body: "Ongoing service with clear communication so pest management stays one less thing to worry about." },
+  { num: "01", title: "Choose your property and service.", body: "Start an instant quote and tell us whether you need common-area or individual-unit service." },
+  { num: "02", title: "Enter your details.", body: "Add the property information, service address, and contact details requested in the form." },
+  { num: "03", title: "Review your price.", body: "For services available to book online, review your price and available appointment dates." },
+  { num: "04", title: "Choose a date and book.", body: "Pick an available date and complete your booking online." },
 ];
 
 const WHY_CARDS = [
@@ -105,7 +105,7 @@ const FAQS = [
   },
   {
     q: "How are appointments scheduled?",
-    a: "We coordinate directly with property management to make scheduling simple and consistent for all residents.",
+    a: "For services available online, start with an instant quote, review the price, and choose an available date. We also coordinate with property management when arranging service across multiple units.",
   },
   {
     q: "Can you treat multiple units on the same visit?",
@@ -160,7 +160,7 @@ export default function InUnitService() {
         eyebrow="IN UNIT PEST CONTROL"
         headline="Pest Problems Start Inside. So Does The Solution."
         sub="BuzzKill provides professional in unit pest control for apartments, condominiums, and HOA communities across Massachusetts and Rhode Island. We coordinate with management, respect every resident's home, and help keep your community protected."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote/instant" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Community Specialist", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -213,7 +213,7 @@ export default function InUnitService() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 32 }}>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Protect Every Unit</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -239,7 +239,7 @@ export default function InUnitService() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Stop Problems Before They Spread</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -341,7 +341,7 @@ export default function InUnitService() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -427,7 +427,7 @@ export default function InUnitService() {
               <p className="bk-schedule-sub">From individual units to shared spaces, BuzzKill helps communities stay protected with dependable service, clear communication, and solutions built around the way your property operates.</p>
               <div className="bk-com-cta-row">
                 <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
-                  Request Community Proposal
+                  Get Instant Quote
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">
                   Talk To A Specialist

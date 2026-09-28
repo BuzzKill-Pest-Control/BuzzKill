@@ -61,10 +61,10 @@ const WHY_CARDS = [
 ];
 
 const PROCESS_STEPS = [
-  { num: "01", title: "Tell us about your community.", body: "Share the details of your property and what you're looking for in a pest control partner." },
-  { num: "02", title: "We'll learn what you need.", body: "We take the time to understand your buildings, layouts, and the unique pressures your community faces." },
-  { num: "03", title: "Build the right protection plan.", body: "We put together a program built around your community's schedule, spaces, and residents." },
-  { num: "04", title: "Help keep your community protected.", body: "Ongoing service with clear communication so pest management stays one less thing to worry about." },
+  { num: "01", title: "Choose your property and service.", body: "Start an instant quote and tell us whether you need common-area or individual-unit service." },
+  { num: "02", title: "Enter your details.", body: "Add the property information, service address, and contact details requested in the form." },
+  { num: "03", title: "Review your price.", body: "For services available to book online, review your price and available appointment dates." },
+  { num: "04", title: "Choose a date and book.", body: "Pick an available date and complete your booking online." },
 ];
 
 const PREVENTION_TIPS = [
@@ -105,7 +105,7 @@ const FAQS = [
   },
   {
     q: "How do I get started?",
-    a: "Know the Price. Book in Minutes. Request your instant quote online and let BuzzKill handle the rest.",
+    a: "Choose Condo / HOA Community and One unit in our instant quote form, then enter your service and property details. Most services show pricing and available dates so you can book online.",
   },
 ];
 
