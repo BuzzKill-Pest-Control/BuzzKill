@@ -3,6 +3,7 @@ import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callback
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
+import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
 const FAMILIAR_ITEMS = [
@@ -289,24 +290,17 @@ export default function AtticRestoration() {
 
             {/* Right: quote card */}
             <aside className="bk-attract-sidebar">
-              <div className="bk-quote-card">
-                <div className="bk-quote-card-pitch" style={{ paddingTop: 18, paddingBottom: 12 }}>
-                  <p className="bk-quote-card-eyebrow">Pest Control &amp; Attic Restoration</p>
-                  <h3 className="bk-quote-card-headline">
-                    <span className="bk-quote-headline-block">Pest Control Online.</span>
-                    <span className="bk-quote-headline-block">Restoration by Inspection.</span>
-                  </h3>
-                  <ul className="bk-quote-card-checklist">
-                    <li>Pest control: get your quote and book online</li>
-                    <li>Attic restoration: request an inspection first</li>
-                    <li>Restoration pricing follows your inspection</li>
-                  </ul>
-                </div>
-                <div className="bk-quote-card-cta" style={{ paddingTop: 12, paddingBottom: 12 }}>
-                  <Link to="/quote/instant" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">Get Pest Control Instant Quote</Link>
-                  <button type="button" className="bk-btn bk-btn-outline-light bk-btn-full" style={{ marginTop: 12 }} onClick={requestInspection}>Request Restoration Inspection</button>
-                </div>
-              </div>
+              <QuoteCard
+                eyebrow="Pest Control & Attic Restoration"
+                headline={["Pest Control Online.", "Restoration by Inspection."]}
+                checklist={[
+                  "Pest control: get your quote and book online",
+                  "Attic restoration: request an inspection first",
+                  "Restoration pricing follows your inspection",
+                ]}
+                primaryLabel="Get Pest Control Instant Quote"
+                secondaryCta={{ label: "Request Restoration Inspection", onClick: requestInspection }}
+              />
             </aside>
 
           </div>

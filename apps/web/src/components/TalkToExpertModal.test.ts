@@ -2,8 +2,10 @@
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { submitLead } from "../lib/leadIntakeApi";
+import AtticRestoration from "../pages/services/AtticRestoration";
 import { TalkToExpertProvider, useTalkToExpert } from "./TalkToExpertModal";
 
 vi.mock("../lib/leadIntakeApi", () => ({ submitLead: vi.fn() }));
@@ -18,14 +20,9 @@ const submitLeadMock = vi.mocked(submitLead);
 let container: HTMLDivElement;
 let root: Root;
 
-function RequestButtons() {
-  const { open, openForRequest } = useTalkToExpert();
-  return createElement(
-    "div",
-    null,
-    createElement("button", { id: "inspection", onClick: () => openForRequest("Attic restoration inspection") }, "Request inspection"),
-    createElement("button", { id: "generic", onClick: open }, "Talk to an expert")
-  );
+function GenericCallbackButton() {
+  const { open } = useTalkToExpert();
+  return createElement("button", { id: "generic", onClick: open }, "Talk to an expert");
 }
 
 async function click(selector: string) {
@@ -55,7 +52,13 @@ beforeEach(async () => {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(TalkToExpertProvider, { children: createElement(RequestButtons) }));
+    root.render(createElement(
+      MemoryRouter,
+      { initialEntries: ["/services/rodent-control/attic-restoration"] },
+      createElement(TalkToExpertProvider, {
+        children: createElement("div", null, createElement(AtticRestoration), createElement(GenericCallbackButton)),
+      })
+    ));
   });
 });
 
@@ -65,9 +68,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe("service-specific callback requests", () => {
-  it("submits the inspection reason and clears it for a later generic callback", async () => {
-    await click("#inspection");
+describe("attic restoration callback requests", () => {
+  it.each([
+    ['button[data-track-id="hero_secondary"]', "hero"],
+    [".bk-attract-sidebar button", "sidebar"],
+  ])("submits the inspection reason from %s (%s) and clears it for a later generic callback", async (selector) => {
+    expect(container.querySelector(selector)?.textContent).toBe("Request Restoration Inspection");
+    await click(selector);
     await submitContact();
 
     expect(submitLeadMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -88,7 +95,7 @@ describe("service-specific callback requests", () => {
   });
 
   it("clears the service reason when a generic request replaces an open request", async () => {
-    await click("#inspection");
+    await click('button[data-track-id="hero_secondary"]');
     await click("#generic");
     await submitContact();
 
