@@ -165,7 +165,7 @@ export default function Termite() {
         eyebrow="Termite Inspection Services"
         headline="Concerned About Hidden Termite Damage?"
         sub="Early termite inspections help catch problems before costly repairs begin. BuzzKill provides professional termite inspections across Massachusetts &amp; Rhode Island."
-        primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk to a Local Expert", onClick: openTalkToExpert }}
         className="bk-hero--community"
       />
@@ -207,7 +207,7 @@ export default function Termite() {
             </button>
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -235,7 +235,7 @@ export default function Termite() {
           <div className="bk-issue-content" key={activeHappening}>
             <h3 className="bk-issue-title">{HAPPENING_CARDS[activeHappening].title}</h3>
             <p className="bk-issue-body">{HAPPENING_CARDS[activeHappening].body}</p>
-            <Link to="/quote" className="bk-btn bk-btn-primary" style={{ marginTop: 28, display: "inline-block" }}>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary" style={{ marginTop: 28, display: "inline-block" }}>
               {HAPPENING_CARDS[activeHappening].cta}
             </Link>
           </div>
@@ -331,7 +331,7 @@ export default function Termite() {
           </div>
           <div className="bk-center" style={{ marginTop: 48 }}>
             <p className="bk-book-cta-label">Ready to Get BuzzKilled?</p>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -419,7 +419,7 @@ export default function Termite() {
               <p className="bk-schedule-eyebrow">Ready to Get BuzzKilled?</p>
               <h2 className="bk-schedule-title">Let's Get Your Property BuzzKilled</h2>
               <p className="bk-schedule-sub">Safe for families. Tough on pests. Get your Instant Quote today and protect your property with BuzzKill.</p>
-              <Link to="/quote" className="bk-btn bk-schedule-cta">
+              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                 Get My Instant Quote
               </Link>
             </div>

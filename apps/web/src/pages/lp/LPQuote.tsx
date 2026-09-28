@@ -52,7 +52,7 @@ export default function LPQuote() {
         </p>
 
         <Link
-          to="/quote"
+          to="/quote/instant"
           className="bk-btn bk-btn-primary bk-lp-cta bk-lp-cta--lg"
           style={{ maxWidth: 380, margin: "28px auto 0", display: "block" }}
         >

@@ -29,7 +29,7 @@ export default function CondoServices() {
           </p>
           <div style={{ display: "flex", gap: 14, marginTop: 24, flexWrap: "wrap" }}>
             <button type="button" className="bk-btn bk-btn-primary" onClick={goToForm}>
-              Request HOA Proposal
+              Get Instant Quote
             </button>
           </div>
         </div>
@@ -141,7 +141,7 @@ export default function CondoServices() {
 
       <QuoteCTA
         eyebrow="For HOA Boards & Property Managers"
-        title="Start Your HOA Proposal"
+        title="Start Your Instant Quote"
         intro="Tell us about your community in our instant quote form, see your common-area plan price in seconds, and lock in your first visit online."
       />
     </>

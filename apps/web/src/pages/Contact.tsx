@@ -210,7 +210,7 @@ export default function Contact() {
               <p className="bk-schedule-eyebrow">Ready to Get Started?</p>
               <h2 className="bk-schedule-title">Get an Instant Quote</h2>
               <p className="bk-schedule-sub">Skip the wait and price your service online in minutes.</p>
-              <Link to="/quote" className="bk-btn bk-schedule-cta">
+              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                 Get an Instant Quote
               </Link>
             </div>

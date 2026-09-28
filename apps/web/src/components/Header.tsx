@@ -349,7 +349,7 @@ export default function Header() {
 
             <span className="bk-nav-spacer" aria-hidden="true" />
 
-            <Link to="/quote" className="bk-btn bk-btn-primary bk-nav-cta-btn" onClick={closeAll} data-track-id="nav_get_instant_quote">
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary bk-nav-cta-btn" onClick={closeAll} data-track-id="nav_get_instant_quote">
               Get Instant Quote
             </Link>
 

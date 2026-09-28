@@ -61,10 +61,10 @@ const WHY_CARDS = [
 ];
 
 const PROCESS_STEPS = [
-  { num: "01", title: "Tell us about your community.", body: "Share the details of your property and what you're looking for in a pest control partner." },
-  { num: "02", title: "We'll learn what you need.", body: "We take the time to understand your buildings, layouts, and the unique pressures your community faces." },
-  { num: "03", title: "Build the right protection plan.", body: "We put together a program built around your community's schedule, spaces, and residents." },
-  { num: "04", title: "Help keep your community protected.", body: "Ongoing service with clear communication so pest management stays one less thing to worry about." },
+  { num: "01", title: "Choose your property and service.", body: "Start an instant quote and tell us whether you need common-area or individual-unit service." },
+  { num: "02", title: "Enter your details.", body: "Add the property information, service address, and contact details requested in the form." },
+  { num: "03", title: "Review your price.", body: "For services available to book online, review your price and available appointment dates." },
+  { num: "04", title: "Choose a date and book.", body: "Pick an available date and complete your booking online." },
 ];
 
 const PREVENTION_TIPS = [
@@ -105,7 +105,7 @@ const FAQS = [
   },
   {
     q: "How do I get started?",
-    a: "Know the Price. Book in Minutes. Request your instant quote online and let BuzzKill handle the rest.",
+    a: "Choose Condo / HOA Community and One unit in our instant quote form, then enter your service and property details. Most services show pricing and available dates so you can book online.",
   },
 ];
 
@@ -141,7 +141,7 @@ export default function ForUnitOwners() {
         eyebrow="FOR UNIT OWNERS"
         headline="Pest Problems In Your Home? Let's Get It BuzzKilled."
         sub="Whether it's ants in the kitchen, mice in the attic, or wasps on the patio, you shouldn't have to guess what to do next. BuzzKill helps homeowners across Massachusetts and Rhode Island understand the problem, solve it at the source, and protect what matters most. Safe for Families. Tough on Pests."
-        primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Local Expert", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -194,7 +194,7 @@ export default function ForUnitOwners() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Know The Price. Book In Minutes.</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Know The Price. Book In Minutes.</Link>
           </div>
         </div>
       </section>
@@ -234,7 +234,7 @@ export default function ForUnitOwners() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Ready To Get BuzzKilled?</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Ready To Get BuzzKilled?</Link>
           </div>
         </div>
       </section>
@@ -265,7 +265,7 @@ export default function ForUnitOwners() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -344,7 +344,7 @@ export default function ForUnitOwners() {
               <h2 className="bk-schedule-title">Your Home Should Feel Comfortable. Not Shared With Pests.</h2>
               <p className="bk-schedule-sub">From one unexpected ant trail to recurring pest problems, BuzzKill helps you understand the issue, solve it at the source, and keep your home protected.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Get Instant Quote
                 </Link>
                 <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light bk-com-talk-btn">

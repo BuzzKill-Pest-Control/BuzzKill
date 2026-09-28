@@ -192,7 +192,7 @@ export default function AboutPage() {
               <h2 className="bk-schedule-title">Get an Instant Quote</h2>
               <p className="bk-schedule-sub">Price your service online in minutes, or call and talk to us.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                   Get an Instant Quote
                 </Link>
                 <a href={OFFICE_TEL} className="bk-btn bk-btn-outline-light bk-com-talk-btn">

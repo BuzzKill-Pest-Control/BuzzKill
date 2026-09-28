@@ -112,7 +112,7 @@ export default function Footer() {
             <Link className="bk-footer-link" to="/contact">
               Contact
             </Link>
-            <Link className="bk-footer-link" to="/quote" data-track-id="footer_start_service">
+            <Link className="bk-footer-link" to="/quote/instant" data-track-id="footer_start_service">
               Start Service
             </Link>
           </div>
