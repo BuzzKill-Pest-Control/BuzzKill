@@ -1,30 +1,45 @@
 import { Link } from "react-router-dom";
 import { OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 
-export default function QuoteCard() {
+type QuoteCardProps = {
+  eyebrow?: string;
+  headline?: string[];
+  checklist?: string[];
+  primaryLabel?: string;
+  secondaryCta?: { label: string; onClick: () => void };
+};
+
+export default function QuoteCard({
+  eyebrow = "⚡ Instant Pricing Available",
+  headline = ["Know the Price.", "Book in Minutes."],
+  checklist = ["No phone tag", "No waiting", "See your quote online", "Choose a plan, get on the schedule"],
+  primaryLabel = "Get Free Instant Quote",
+  secondaryCta,
+}: QuoteCardProps) {
   return (
     <div className="bk-quote-card">
 
       <div className="bk-quote-card-pitch" style={{ paddingTop: 18, paddingBottom: 12 }}>
         <div style={{ textAlign: "center" }}>
-          <p className="bk-quote-card-eyebrow bk-quote-card-eyebrow--flash">&#x26A1; Instant Pricing Available</p>
+          <p className="bk-quote-card-eyebrow bk-quote-card-eyebrow--flash">{eyebrow}</p>
         </div>
         <h3 className="bk-quote-card-headline">
-          <span className="bk-quote-headline-block">Know the Price.</span>
-          <span className="bk-quote-headline-block">Book in Minutes.</span>
+          {headline.map((line) => <span key={line} className="bk-quote-headline-block">{line}</span>)}
         </h3>
         <ul className="bk-quote-card-checklist">
-          <li>No phone tag</li>
-          <li>No waiting</li>
-          <li>See your quote online</li>
-          <li>Choose a plan, get on the schedule</li>
+          {checklist.map((item) => <li key={item}>{item}</li>)}
         </ul>
       </div>
 
       <div className="bk-quote-card-cta" style={{ paddingTop: 12, paddingBottom: 12 }}>
         <Link to="/quote/instant" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">
-          Get Free Instant Quote
+          {primaryLabel}
         </Link>
+        {secondaryCta && (
+          <button type="button" className="bk-btn bk-btn-outline-light bk-btn-full" style={{ marginTop: 12 }} onClick={secondaryCta.onClick}>
+            {secondaryCta.label}
+          </button>
+        )}
         <a href={OFFICE_TEL} className="bk-quote-card-phone bk-quote-card-phone--flash" style={{ fontSize: 17 }} data-track-id="quote_card_phone">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.74 21 3 13.26 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.24 1.01l-2.21 2.21z"/>
