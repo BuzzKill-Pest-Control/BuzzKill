@@ -3,7 +3,6 @@ import { CALLBACK_POLICY_TEXT } from "../../../amplify/functions/shared/callback
 import { Link } from "react-router-dom";
 import FAQ from "../../components/FAQ";
 import Hero from "../../components/Hero";
-import QuoteCard from "../../components/QuoteCard";
 import { useTalkToExpert } from "../../components/TalkToExpertModal";
 
 const FAMILIAR_ITEMS = [
@@ -20,19 +19,16 @@ const HAPPENING_CARDS = [
     tag: "The Damage",
     title: "The Damage Doesn't Leave With The Rodents",
     body: "Even after rodents are removed, damaged insulation, nesting material, and contamination can remain hidden throughout your attic.",
-    cta: "Request a Quote",
   },
   {
     tag: "The Insulation",
     title: "Insulation Loses Its Performance",
     body: "Compressed or contaminated insulation cannot perform the way it was designed, making your home less comfortable and less energy efficient.",
-    cta: "Ready to Get BuzzKilled?",
   },
   {
     tag: "The Restoration",
     title: "Cleaning Alone Isn't Restoration",
     body: "Removing debris is only one step. Proper attic restoration addresses damaged materials and helps return the space to a healthier condition.",
-    cta: "Let's Get Your Property BuzzKilled",
   },
 ];
 
@@ -66,10 +62,10 @@ const PROTECT_STEPS = [
 ];
 
 const BOOK_STEPS = [
-  { num: "01", title: "Request Your Quote.", body: "Tell us about your attic online in minutes. Restoration is quoted after your inspection." },
-  { num: "02", title: "Pick Your Day.", body: "We'll set up an inspection on a day that works for you." },
-  { num: "03", title: "We'll Do the BuzzKilling.", body: "Your local BuzzKill technician arrives ready to Understand. Solve. Protect." },
-  { num: "04", title: "Get Back to Living.", body: "Enjoy a home that's protected so pests stay out of your daily routine." },
+  { num: "01", title: "Request an Inspection.", body: "Leave your contact details and our team will reach out to arrange an attic inspection." },
+  { num: "02", title: "We Assess Your Attic.", body: "Your technician checks insulation, contamination, and damaged materials." },
+  { num: "03", title: "Review Your Restoration Quote.", body: "After the inspection, we explain the recommended work and its price." },
+  { num: "04", title: "Schedule Your Restoration.", body: "Once you approve the work, our team will arrange your restoration visit." },
 ];
 
 const WHY_ITEMS = [
@@ -117,12 +113,13 @@ const FAQS = [
   },
   {
     q: "Can I get an Instant Quote?",
-    a: "Attic restoration is quoted after an inspection. Use Talk to a Local Expert on this page and we'll reach out to set up your visit. If restoration is needed, your BuzzKill technician will give you a clear recommendation and next steps.",
+    a: "Instant quotes are available for pest control. Attic restoration is quoted after an inspection. Choose Request Restoration Inspection on this page and our team will contact you to arrange a visit and explain the next steps.",
   },
 ];
 
 export default function AtticRestoration() {
-  const { open: openTalkToExpert } = useTalkToExpert();
+  const { openForRequest } = useTalkToExpert();
+  const requestInspection = () => openForRequest("Attic restoration inspection");
   const [showBackToTop, setShowBackToTop]     = useState(false);
   const [activeAccordion, setActiveAccordion] = useState<string | null>("01");
   const [activeHappening, setActiveHappening] = useState(0);
@@ -164,9 +161,9 @@ export default function AtticRestoration() {
         image="/images/attic-restoration-hero.png"
         eyebrow="Attic Restoration Services"
         headline="Restore Your Attic. Restore Your Peace of Mind."
-        sub="Rodents may be gone, but the mess they leave behind can continue affecting your home. BuzzKill restores attics across Massachusetts and Rhode Island by removing damaged materials, replacing insulation, and helping return your attic to a cleaner, healthier condition."
-        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
-        secondaryCta={{ label: "Talk to a Local Expert", onClick: openTalkToExpert }}
+        sub="Rodents may be gone, but the mess they leave behind can continue affecting your home. BuzzKill restores attics across Massachusetts and Rhode Island by removing damaged materials and replacing insulation. Instant quotes are available for pest control; attic restoration is quoted after an inspection."
+        primaryCta={{ label: "Get Pest Control Instant Quote", href: "/quote/instant" }}
+        secondaryCta={{ label: "Request Restoration Inspection", onClick: requestInspection }}
         className="bk-hero--community"
       />
 
@@ -207,7 +204,11 @@ export default function AtticRestoration() {
             </button>
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <p>Instant quotes cover pest control. Attic restoration is quoted after an inspection.</p>
+            <div className="bk-com-cta-row" style={{ justifyContent: "center" }}>
+              <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Pest Control Instant Quote</Link>
+              <button type="button" className="bk-btn bk-btn-outline" onClick={requestInspection}>Request Restoration Inspection</button>
+            </div>
           </div>
         </div>
       </section>
@@ -235,9 +236,11 @@ export default function AtticRestoration() {
           <div className="bk-issue-content" key={activeHappening}>
             <h3 className="bk-issue-title">{HAPPENING_CARDS[activeHappening].title}</h3>
             <p className="bk-issue-body">{HAPPENING_CARDS[activeHappening].body}</p>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary" style={{ marginTop: 28, display: "inline-block" }}>
-              {HAPPENING_CARDS[activeHappening].cta}
-            </Link>
+            <p className="bk-issue-body">Instant quotes cover pest control. Attic restoration is quoted after an inspection.</p>
+            <div className="bk-com-cta-row" style={{ marginTop: 28 }}>
+              <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Pest Control Instant Quote</Link>
+              <button type="button" className="bk-btn bk-btn-outline-light" onClick={requestInspection}>Request Restoration Inspection</button>
+            </div>
           </div>
         </div>
       </section>
@@ -286,7 +289,24 @@ export default function AtticRestoration() {
 
             {/* Right: quote card */}
             <aside className="bk-attract-sidebar">
-              <QuoteCard />
+              <div className="bk-quote-card">
+                <div className="bk-quote-card-pitch" style={{ paddingTop: 18, paddingBottom: 12 }}>
+                  <p className="bk-quote-card-eyebrow">Pest Control &amp; Attic Restoration</p>
+                  <h3 className="bk-quote-card-headline">
+                    <span className="bk-quote-headline-block">Pest Control Online.</span>
+                    <span className="bk-quote-headline-block">Restoration by Inspection.</span>
+                  </h3>
+                  <ul className="bk-quote-card-checklist">
+                    <li>Pest control: get your quote and book online</li>
+                    <li>Attic restoration: request an inspection first</li>
+                    <li>Restoration pricing follows your inspection</li>
+                  </ul>
+                </div>
+                <div className="bk-quote-card-cta" style={{ paddingTop: 12, paddingBottom: 12 }}>
+                  <Link to="/quote/instant" className="bk-btn bk-btn-primary bk-btn-full" data-track-id="quote_card_cta">Get Pest Control Instant Quote</Link>
+                  <button type="button" className="bk-btn bk-btn-outline-light bk-btn-full" style={{ marginTop: 12 }} onClick={requestInspection}>Request Restoration Inspection</button>
+                </div>
+              </div>
             </aside>
 
           </div>
@@ -312,12 +332,12 @@ export default function AtticRestoration() {
         </div>
       </section>
 
-      {/* 6. What Happens When You Book */}
+      {/* 6. How Attic Restoration Starts */}
       <section id="book" className="bk-section bk-section-dark">
         <div className="bk-container">
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
-          <h2 className="bk-h2 bk-on-dark bk-center">What Happens When You Book</h2>
-          <p className="bk-body-lead bk-on-dark bk-center">Protection Starts in Just a Few Clicks.</p>
+          <h2 className="bk-h2 bk-on-dark bk-center">How Attic Restoration Starts</h2>
+          <p className="bk-body-lead bk-on-dark bk-center">An inspection gives us the details to quote your restoration.</p>
           <div className="bk-book-track">
             {BOOK_STEPS.map((s, i) => (
               <div key={i} className="bk-book-step">
@@ -331,7 +351,11 @@ export default function AtticRestoration() {
           </div>
           <div className="bk-center" style={{ marginTop: 48 }}>
             <p className="bk-book-cta-label">Ready to Get BuzzKilled?</p>
-            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <p>Instant quotes cover pest control. Attic restoration is quoted after an inspection.</p>
+            <div className="bk-com-cta-row" style={{ justifyContent: "center" }}>
+              <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Pest Control Instant Quote</Link>
+              <button type="button" className="bk-btn bk-btn-outline-light" onClick={requestInspection}>Request Restoration Inspection</button>
+            </div>
           </div>
         </div>
       </section>
@@ -418,10 +442,11 @@ export default function AtticRestoration() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Ready to Get BuzzKilled?</p>
               <h2 className="bk-schedule-title">Let's Get Your Property BuzzKilled</h2>
-              <p className="bk-schedule-sub">Safe for families. Tough on pests. Get your Instant Quote today and protect your property with BuzzKill.</p>
-              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
-                Get My Instant Quote
-              </Link>
+              <p className="bk-schedule-sub">Get an instant quote for pest control online. Attic restoration is quoted after an inspection; request one and our team will contact you to arrange a visit.</p>
+              <div className="bk-com-cta-row">
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">Get Pest Control Instant Quote</Link>
+                <button type="button" className="bk-btn bk-btn-outline-light" onClick={requestInspection}>Request Restoration Inspection</button>
+              </div>
             </div>
           </div>
         </div>

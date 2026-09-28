@@ -5,7 +5,10 @@ import { trackFormSubmit, trackGenerateLead, trackAdsConversion, ADS_CONVERSIONS
 import FormContactFooter from "./FormContactFooter";
 import { CALL_CONSENT_TEXT } from "../../amplify/functions/shared/consentText";
 
-type Ctx = { open: () => void };
+type Ctx = {
+  open: () => void;
+  openForRequest: (reason: string) => void;
+};
 const TalkToExpertContext = createContext<Ctx | null>(null);
 
 export function useTalkToExpert(): Ctx {
@@ -23,6 +26,7 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [reason, setReason] = useState<string | undefined>();
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
@@ -33,13 +37,18 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
     setName("");
     setPhone("");
     setEmail("");
+    setReason(undefined);
   };
 
-  const open = () => {
+  const openForRequest = (requestReason: string) => {
+    setReason(requestReason.trim() || undefined);
     setIsOpen(true);
     setStatus("idle");
     setErrorMsg(null);
   };
+
+  // Keep event-handler callers generic; only explicit requests carry context.
+  const open = () => openForRequest("");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -74,6 +83,7 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
       formId: "talk-to-expert",
+      reason,
       // GL-03: the request itself is the basis for replying. consentText.ts
       // records that, since the form shows no consent notice.
       consentToContact: true,
@@ -93,7 +103,7 @@ export function TalkToExpertProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <TalkToExpertContext.Provider value={{ open }}>
+    <TalkToExpertContext.Provider value={{ open, openForRequest }}>
       {children}
       {isOpen && (
         <div
