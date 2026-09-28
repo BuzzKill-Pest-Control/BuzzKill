@@ -1,7 +1,8 @@
 # BuzzKill CRM — deployment setup
 
 What Jake needs to configure in the consoles before the CRM's Stripe billing
-goes live. Everything else deploys automatically with the repo.
+goes live, plus the app-wide hosting rules maintained separately from builds.
+Application code deploys automatically with the repo.
 
 ## 1. Stripe (required for billing)
 
@@ -80,6 +81,82 @@ aws cognito-idp admin-add-user-to-group --user-pool-id <POOL> \
 
 (Add `TECH` too for a "both" role.) After that, everyone else is invited from
 More → Invite a staff member, or per-customer with "Invite to portal".
+
+## 6. CRM hosting routes
+
+The CRM is a single-page app. Direct visits to `/dashboard`, customer records,
+and portal pages must serve `index.html` with HTTP 200 so the browser router
+can select the screen. Its reviewed rules are in
+[`apps/crm/hosting/amplify-custom-rules.json`](../apps/crm/hosting/amplify-custom-rules.json).
+The rewrite excludes static asset extensions so JavaScript, CSS, icons, and
+the web manifest continue to resolve as files.
+It follows [AWS's SPA rewrite guidance](https://docs.aws.amazon.com/amplify/latest/userguide/redirect-rewrite-examples.html#redirects-for-single-page-web-apps-spa),
+with the CRM's asset extensions preserved.
+
+| Amplify app | App ID | App root | Purpose |
+| --- | --- | --- | --- |
+| BuzzKill CRM | `d5ln2hbbp9s2j` | `apps/crm` | `app.pestbuzzkill.com` and customer portal |
+| BuzzKill | `d26qpsjewk0bee` | `apps/web` | Public website and shared backend |
+
+Both apps use `us-east-1`. Amplify custom rules are **app-wide**: changing CRM
+rules affects both `main` and `staging`. The build does not apply this JSON;
+deploying code alone does not repair or replace hosting rules.
+
+Keep the website's canonical-domain, legacy marketing-route, and static-page
+rules on the web app. The CRM does not generate `404.html` or `track.html`.
+On September 28, 2026, web-only rules on the CRM app sent requests to a missing
+`404.html` and caused a `/404/` redirect loop. Replacing them with the CRM SPA
+rewrite restored direct routes without changing application code.
+
+Run these commands from the repository root. First confirm the returned app
+ID and app root match the CRM row above, then save a fresh rules backup:
+
+```bash
+aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+  --query 'app.{appId:appId,name:name,appRoot:environmentVariables.AMPLIFY_MONOREPO_APP_ROOT,customRules:customRules}' \
+  --output json
+crm_rules_backup="/tmp/buzzkill-crm-custom-rules-$(date +%Y%m%d-%H%M%S).json"
+aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+  --query 'app.customRules' --output json > "$crm_rules_backup"
+```
+
+Apply the CRM file to that exact app and read the persisted rules back:
+
+```bash
+aws amplify update-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+  --custom-rules file://apps/crm/hosting/amplify-custom-rules.json \
+  --query 'app.customRules' --output json
+aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+  --query 'app.customRules' --output json
+```
+
+After propagation, verify both production and staging without following
+redirects. Each result below must be HTTP 200 with an empty redirect URL:
+
+```bash
+for crm_host in https://app.pestbuzzkill.com https://staging.d5ln2hbbp9s2j.amplifyapp.com; do
+  for crm_path in / /dashboard /customers/test /portal/docs /welcome /404/; do
+    curl --max-redirs 0 -sS -o /dev/null \
+      -w '%{http_code} %{redirect_url} %{url_effective}\n' "$crm_host$crm_path"
+  done
+done
+```
+
+Also inspect the HTML response to confirm it is the CRM shell, then request
+the current JavaScript and CSS URLs referenced by that shell and
+`/manifest.webmanifest`. They must remain their original file types, not HTML
+fallbacks. Open a nested CRM URL in a browser and reload it to confirm the
+login or authorized screen loads. These HTTP and browser checks verify the
+deployed rules; a successful build alone does not.
+
+If a later rules change needs rollback, use a verified working backup:
+
+```bash
+aws amplify update-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+  --custom-rules "file://$crm_rules_backup" --query 'app.customRules' --output json
+```
+
+Do not restore the incident's web-only rules backup; retain it as evidence.
 
 ## What was E2E-verified in the sandbox (2026-07-14)
 
