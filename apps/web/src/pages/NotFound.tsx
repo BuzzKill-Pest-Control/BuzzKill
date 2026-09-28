@@ -19,7 +19,7 @@ export default function NotFound() {
         </p>
         <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", marginTop: 28 }}>
           <Link to="/" className="bk-btn bk-btn-primary">Back to Home</Link>
-          <Link to="/quote" className="bk-btn bk-btn-outline">Get an Instant Quote</Link>
+          <Link to="/quote/instant" className="bk-btn bk-btn-outline">Get an Instant Quote</Link>
           <Link to="/service-areas" className="bk-btn bk-btn-outline">Service Areas</Link>
         </div>
         <p className="bk-p" style={{ marginTop: 28 }}>

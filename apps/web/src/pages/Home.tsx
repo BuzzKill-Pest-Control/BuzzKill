@@ -21,7 +21,7 @@ const PESTS = [
 export default function Home() {
   const navigate = useNavigate();
   const [activePest, setActivePest] = useState(PESTS[0].name);
-  const goToForm = () => navigate("/quote");
+  const goToForm = () => navigate("/quote/instant");
 
   return (
     <>
@@ -148,7 +148,7 @@ export default function Home() {
               <h3 className="bk-stagger-title">HOA &amp; Condominium Pest Management</h3>
               <p className="bk-stagger-body">Protect shared spaces, simplify community pest management, and support happier residents with proactive service, detailed reporting, and optional in-unit protection.</p>
               <button type="button" className="bk-btn bk-btn-primary" onClick={goToForm}>
-                Request Community Proposal
+                Get Instant Quote
               </button>
             </div>
           </div>
@@ -221,7 +221,7 @@ export default function Home() {
             <a href={OFFICE_TEL} className="bk-cta-banner-phone">{OFFICE_PHONE}</a>
           </p>
           <span className="bk-cta-banner-or">or</span>
-          <Link to="/quote" className="bk-cta-banner-btn">Get Instant Quote</Link>
+          <Link to="/quote/instant" className="bk-cta-banner-btn">Get Instant Quote</Link>
         </div>
       </section>
 

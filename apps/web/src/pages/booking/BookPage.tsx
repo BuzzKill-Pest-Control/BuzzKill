@@ -434,7 +434,7 @@ export default function BookPage() {
 
   function freshQuote() {
     clearFunnelState(window.sessionStorage);
-    navigate("/quote");
+    navigate("/quote/instant");
   }
 
   // ── Terminal / empty states ───────────────────────────────────────
@@ -607,7 +607,7 @@ export default function BookPage() {
           Start with an instant quote — pick your day there, then come back here
           to pay.
         </p>
-        <Link to="/quote" className="bk-btn bk-btn-primary">
+        <Link to="/quote/instant" className="bk-btn bk-btn-primary">
           Get an instant quote
         </Link>
       </Shell>
@@ -870,7 +870,7 @@ export default function BookPage() {
             <button
               type="button"
               className="bk-btn bk-btn-outline"
-              onClick={() => navigate("/quote")}
+              onClick={() => navigate("/quote/instant")}
             >
               &larr; Change day
             </button>

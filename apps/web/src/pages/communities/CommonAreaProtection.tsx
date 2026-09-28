@@ -70,10 +70,10 @@ const METHOD_STEPS = [
 ];
 
 const PROCESS_STEPS = [
-  { num: "01", title: "Tell us about your community.", body: "Share the details of your property and what you're looking for in a pest control partner." },
-  { num: "02", title: "We'll learn what you need.", body: "We take the time to understand your buildings, layouts, and the unique pressures your community faces." },
-  { num: "03", title: "Build the right protection plan.", body: "We put together a program built around your community's schedule, spaces, and residents." },
-  { num: "04", title: "Help keep your community protected.", body: "Ongoing service with clear communication so pest management stays one less thing to worry about." },
+  { num: "01", title: "Choose your property and service.", body: "Start an instant quote and tell us whether you need common-area or individual-unit service." },
+  { num: "02", title: "Enter your details.", body: "Add the property information, service address, and contact details requested in the form." },
+  { num: "03", title: "Review your price.", body: "For services available to book online, review your price and available appointment dates." },
+  { num: "04", title: "Choose a date and book.", body: "Pick an available date and complete your booking online." },
 ];
 
 const WHY_CARDS = [
@@ -160,7 +160,7 @@ export default function CommonAreaProtection() {
         eyebrow="COMMON AREA PEST PROTECTION"
         headline="Protect the Spaces That Shape Every Resident's Experience"
         sub="Safe for Families. Tough on Pests."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk to Our Team", href: OFFICE_TEL }}
         className="bk-hero--community"
       />
@@ -213,7 +213,7 @@ export default function CommonAreaProtection() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 32 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See How We Help Communities</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -239,7 +239,7 @@ export default function CommonAreaProtection() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -310,7 +310,7 @@ export default function CommonAreaProtection() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">See How We Protect Communities</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -341,7 +341,7 @@ export default function CommonAreaProtection() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -424,10 +424,10 @@ export default function CommonAreaProtection() {
             <div className="bk-schedule-content">
               <p className="bk-schedule-eyebrow">Ready to Protect Your Community?</p>
               <h2 className="bk-schedule-title">Help Protect the Spaces Everyone Shares</h2>
-              <p className="bk-schedule-sub">Mindful of residents. Tough on pests. Let BuzzKill build a protection plan your entire community can count on.</p>
+              <p className="bk-schedule-sub">Mindful of residents. Tough on pests. Start with an instant quote for common-area service and review your options online.</p>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
-                  Request Community Proposal
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
+                  Get Instant Quote
                 </Link>
                 <a href={OFFICE_TEL} className="bk-btn bk-schedule-cta bk-schedule-cta--outline">
                   Talk to Our Team

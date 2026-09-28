@@ -55,7 +55,7 @@ export default function ServiceAreas() {
         eyebrow="Where We Protect"
         headline={<>Proudly Serving Massachusetts &amp; Rhode Island</>}
         subtitle={<>From Marlborough to the coast, BuzzKill brings careful, thoughtful pest control to homes, HOAs, and businesses across both states.</>}
-        primaryCta={{ label: "Get an Instant Quote", href: "/quote" }}
+        primaryCta={{ label: "Get an Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Find Your Town", href: "#directory" }}
       />
 
@@ -105,7 +105,7 @@ export default function ServiceAreas() {
           {query.trim() !== "" && directoryCities.length === 0 && (
             <p className="bk-areas-empty">
               We couldn't find a match for "{query}", but we may still service your area.{" "}
-              <Link to="/quote">Request a quote</Link> and we'll confirm.
+              <Link to="/quote/instant">Request a quote</Link> and we'll confirm.
             </p>
           )}
 
@@ -242,7 +242,7 @@ export default function ServiceAreas() {
               <p className="bk-schedule-eyebrow">Don't See Your Town?</p>
               <h2 className="bk-schedule-title">We're Probably Already Nearby</h2>
               <p className="bk-schedule-sub">Our coverage across Massachusetts and Rhode Island goes beyond the towns listed above. Reach out and we'll confirm coverage for your property.</p>
-              <Link to="/quote" className="bk-btn bk-schedule-cta">
+              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                 Get an Instant Quote
               </Link>
             </div>

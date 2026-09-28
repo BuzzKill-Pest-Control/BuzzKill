@@ -219,7 +219,7 @@ export default function Residential() {
         headline="Protect What Matters Most"
         sub="Safe for Families. Tough on Pests."
         body="Whether you're protecting your family, your pets, or the place you call home, BuzzKill delivers residential pest control built around your property, your lifestyle, and lasting peace of mind across Massachusetts and Rhode Island."
-        primaryCta={{ label: "Get Instant Quote", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Explore Services", href: "#services" }}
         className="bk-hero--community"
       />
@@ -334,7 +334,7 @@ export default function Residential() {
             </button>
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -399,7 +399,7 @@ export default function Residential() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 48 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -527,7 +527,7 @@ export default function Residential() {
               <p className="bk-schedule-eyebrow">Ready to Get BuzzKilled?</p>
               <h2 className="bk-schedule-title">Let's Get Your Home BuzzKilled</h2>
               <p className="bk-schedule-sub">Safe for families. Tough on pests. Get your Instant Quote today and protect your home with BuzzKill.</p>
-              <Link to="/quote" className="bk-btn bk-schedule-cta">
+              <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
                 Get My Instant Quote
               </Link>
             </div>

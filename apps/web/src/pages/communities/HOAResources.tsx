@@ -60,10 +60,10 @@ const WHY_CARDS = [
 ];
 
 const PROCESS_STEPS = [
-  { num: "01", title: "Tell us about your community.", body: "Share the details of your property and what you're looking for in a pest control partner." },
-  { num: "02", title: "We'll learn what you need.", body: "We take the time to understand your buildings, layouts, and the unique pressures your community faces." },
-  { num: "03", title: "Build the right protection plan.", body: "We put together a program built around your community's schedule, spaces, and residents." },
-  { num: "04", title: "Help keep your community protected.", body: "Ongoing service with clear communication so pest management stays one less thing to worry about." },
+  { num: "01", title: "Choose your property and service.", body: "Start an instant quote and tell us whether you need common-area or individual-unit service." },
+  { num: "02", title: "Enter your details.", body: "Add the property information, service address, and contact details requested in the form." },
+  { num: "03", title: "Review your price.", body: "For services available to book online, review your price and available appointment dates." },
+  { num: "04", title: "Choose a date and book.", body: "Pick an available date and complete your booking online." },
 ];
 
 const PREVENTION_TIPS = [
@@ -99,12 +99,12 @@ const FAQS = [
     a: "Recurring resident reports, seasonal pest activity, or concerns in shared spaces are all good reasons to start the conversation.",
   },
   {
-    q: "What information should the board have before requesting a proposal?",
-    a: "Knowing your property layout, common concerns, and community goals helps us recommend the right next step.",
+    q: "What information should the board have before getting an instant quote?",
+    a: "Have your service address, property details, and pest concerns ready. The instant quote form asks for the information needed to price your selected service.",
   },
   {
     q: "How do we get started?",
-    a: "Request a community proposal and we'll help you understand the options for your property.",
+    a: "Choose Condo / HOA Community in our instant quote form and enter your service and property details. Most services show pricing and available dates so you can book online.",
   },
 ];
 
@@ -140,7 +140,7 @@ export default function HOAResources() {
         eyebrow="HOA & BOARD RESOURCES"
         headline="Better Decisions. Stronger Communities."
         sub="Protecting a community takes more than responding to pest problems. BuzzKill helps HOA boards make informed decisions with proactive pest protection, clear communication, and local expertise you can count on. Protection With Purpose."
-        primaryCta={{ label: "Request Community Proposal", href: "/quote" }}
+        primaryCta={{ label: "Get Instant Quote", href: "/quote/instant" }}
         secondaryCta={{ label: "Talk To A Community Specialist", href: "/contact" }}
         className="bk-hero--community"
       />
@@ -193,7 +193,7 @@ export default function HOAResources() {
           </div>
 
           <div className="bk-center" style={{ marginTop: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Let's Build A Better Plan</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -233,7 +233,7 @@ export default function HOAResources() {
             ))}
           </div>
           <div className="bk-center" style={{ marginTop: 40 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
         </div>
       </section>
@@ -264,7 +264,7 @@ export default function HOAResources() {
           <p className="bk-eyebrow bk-center" style={{ color: "var(--bk-green)" }}>The Process</p>
           <h2 className="bk-h2 bk-on-dark bk-center">Getting Started Is Simple</h2>
           <div className="bk-center" style={{ marginBottom: 36 }}>
-            <Link to="/quote" className="bk-btn bk-btn-primary">Request Community Proposal</Link>
+            <Link to="/quote/instant" className="bk-btn bk-btn-primary">Get Instant Quote</Link>
           </div>
           <div className="bk-book-track">
             {PROCESS_STEPS.map((s, i) => (
@@ -343,8 +343,8 @@ export default function HOAResources() {
               <h2 className="bk-schedule-title">Strong Communities Start With Smart Protection.</h2>
               <p className="bk-schedule-sub">Whether you're planning ahead or responding to resident concerns, BuzzKill helps your board make confident decisions with protection built around your community.</p>
               <div className="bk-com-cta-row">
-                <Link to="/quote" className="bk-btn bk-schedule-cta">
-                  Request Community Proposal
+                <Link to="/quote/instant" className="bk-btn bk-schedule-cta">
+                  Get Instant Quote
                 </Link>
                 <Link to="/contact" className="bk-btn bk-btn-outline-light bk-com-talk-btn">
                   Talk To A Community Specialist

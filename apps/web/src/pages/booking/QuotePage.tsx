@@ -85,10 +85,8 @@ function clearPendingQuote(storage: Storage): void {
 }
 
 /**
- * Which of the two doors the visitor is standing in. CONTACT is the default:
- * most people arriving on a pest-control site want a human, and the instant
- * quote asks for property details they may not have to hand. QUOTE is the
- * opt-in for someone who would rather price and book it themselves.
+ * Instant pricing and booking is the default entry. A callback is available
+ * only when the visitor explicitly chooses Contact Me.
  */
 type Mode = "CONTACT" | "QUOTE";
 
@@ -99,12 +97,11 @@ const MODE_PATH: Record<Mode, string> = {
 };
 
 /**
- * Bare `/quote` opens the contact door, the same default the tabs render.
- * Anything under /quote/ that isn't the instant slug reads as contact too, so
- * a typo lands on a working page instead of an empty one.
+ * Existing /quote links (including ads and office booking links) must open
+ * instant pricing. Only the explicit contact route opens the callback form.
  */
 function modeFromPath(pathname: string): Mode {
-  return pathname === MODE_PATH.QUOTE ? "QUOTE" : "CONTACT";
+  return pathname.replace(/\/+$/, "") === MODE_PATH.CONTACT ? "CONTACT" : "QUOTE";
 }
 
 type Fields = {
@@ -369,7 +366,7 @@ export default function QuotePage() {
   // The tabs are links, so the door follows the URL: a click, the back button,
   // and a pasted /quote/instant all land the same way. Guarded against the
   // first run, because the mount effect above may have opened the pricing door
-  // for a resumed quote or an office-sent link that bare /quote can't express.
+  // for a resumed quote or an office-sent link.
   const lastPath = useRef(pathname);
   useEffect(() => {
     if (lastPath.current === pathname) return;

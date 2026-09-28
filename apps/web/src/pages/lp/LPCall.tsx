@@ -121,7 +121,7 @@ export default function LPCall() {
           and commercial properties price instantly too.
         </p>
         <Link
-          to="/quote"
+          to="/quote/instant"
           className="bk-btn bk-btn-outline-light bk-lp-cta"
           style={{ maxWidth: 340, margin: "0 auto", display: "block" }}
         >
