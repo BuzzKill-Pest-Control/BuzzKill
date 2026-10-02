@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
@@ -41,6 +42,7 @@ import { formatMoney, formatMonthly, formatYearly } from "../shared/money";
 export const handler = async (
   event: APIGatewayProxyEventV2
 ): Promise<APIGatewayProxyResultV2> => {
+  assertBusinessActionsEnabled();
   const signature = event.headers["stripe-signature"];
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!signature || !secret || !event.body) {

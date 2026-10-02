@@ -53,5 +53,6 @@ export function portalUrl(
 ): string {
   const override = import.meta.env.VITE_PORTAL_URL as string | undefined;
   if (override) return override;
+  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") return "#migration-preview";
   return isProductionSite(hostname) ? PRODUCTION_PORTAL : STAGING_PORTAL;
 }

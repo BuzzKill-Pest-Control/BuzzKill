@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "./migrationPreview";
 import Stripe from "stripe";
 
 /**
@@ -7,6 +8,7 @@ import Stripe from "stripe";
 let stripe: Stripe | null = null;
 
 export function stripeClient(): Stripe {
+  assertBusinessActionsEnabled();
   if (!stripe) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");

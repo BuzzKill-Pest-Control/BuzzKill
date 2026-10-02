@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -11,6 +12,7 @@ import { defineFunction } from "@aws-amplify/backend";
  * SES_FROM_EMAIL / SES_NOTIFY_EMAIL / CRM_APP_URL are injected in backend.ts.
  */
 export const leadIntake = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "lead-intake",
   entry: "./handler.ts",
   timeoutSeconds: 30,

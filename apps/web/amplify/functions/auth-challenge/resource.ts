@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -8,18 +9,21 @@ import { defineFunction } from "@aws-amplify/backend";
 // resourceGroupName "auth": trigger functions must live in the auth stack to
 // avoid circular dependencies between the auth/data/function nested stacks.
 export const defineChallenge = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "auth-define-challenge",
   entry: "./define.ts",
   resourceGroupName: "auth",
 });
 
 export const createChallenge = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "auth-create-challenge",
   entry: "./create.ts",
   resourceGroupName: "auth",
 });
 
 export const verifyChallenge = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "auth-verify-challenge",
   entry: "./verify.ts",
   resourceGroupName: "auth",

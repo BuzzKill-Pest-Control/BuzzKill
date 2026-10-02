@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import type { PostAuthenticationTriggerHandler } from "aws-lambda";
 import {
   AdminUpdateUserAttributesCommand,
@@ -34,6 +35,7 @@ async function stampLastLogin(userPoolId: string, username: string) {
 
 export const handler: PostAuthenticationTriggerHandler = async (event) => {
   await stampLastLogin(event.userPoolId, event.userName);
+  if (isMigrationPreview()) return event;
   try {
     const sub = event.request.userAttributes?.sub;
     if (sub) {

@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type { SNSEvent } from "aws-lambda";
 import {
   CloudWatchLogsClient,
@@ -253,6 +254,7 @@ ${
 }
 
 export const handler = async (event: SNSEvent): Promise<void> => {
+  assertBusinessActionsEnabled();
   const failures: unknown[] = [];
   for (const record of event.Records) {
     try {

@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { VerifyAuthChallengeResponseTriggerHandler } from "aws-lambda";
 import {
@@ -34,6 +35,7 @@ export const REQUEST_LINK_ANSWER = "REQUEST_LINK";
 export const handler: VerifyAuthChallengeResponseTriggerHandler = async (
   event
 ) => {
+  assertBusinessActionsEnabled();
   const answer = event.request.challengeAnswer ?? "";
 
   if (answer === REQUEST_LINK_ANSWER) {

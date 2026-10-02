@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { SITE_ORIGIN } from "../shared/company";
 import type { AppSyncIdentity, AppSyncResolverEvent } from "aws-lambda";
@@ -269,6 +270,7 @@ type Args = {
 };
 
 export const handler = async (event: AppSyncResolverEvent<Args>) => {
+  assertBusinessActionsEnabled();
   switch (opFieldName(event)) {
     case "saveServiceReportDraft": {
       // Must own the job being reported on; editing an existing report is

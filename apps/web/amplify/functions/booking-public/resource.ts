@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction, secret } from "@aws-amplify/backend";
 
 /**
@@ -18,6 +19,7 @@ export const bookingPublic = defineFunction({
   timeoutSeconds: 120,
   memoryMB: 512,
   environment: {
-    STRIPE_SECRET_KEY: secret("STRIPE_SECRET_KEY"),
+    BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()),
+    STRIPE_SECRET_KEY: isMigrationPreview() ? "migration-preview-disabled" : secret("STRIPE_SECRET_KEY"),
   },
 });
