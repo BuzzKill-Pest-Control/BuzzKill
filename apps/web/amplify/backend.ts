@@ -1,3 +1,5 @@
+import { publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
+import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { defineBackend } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
@@ -9,7 +11,6 @@ import {
 } from "aws-cdk-lib/aws-backup";
 import { Schedule } from "aws-cdk-lib/aws-events";
 import {
-  FunctionUrlAuthType,
   HttpMethod,
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
@@ -52,6 +53,8 @@ import { sesEvents } from "./functions/ses-events/resource";
 import { opsAlerts } from "./functions/ops-alerts/resource";
 import { leadSweep } from "./functions/lead-sweep/resource";
 import { preToken } from "./functions/pre-token/resource";
+
+const migrationPreview = isMigrationPreview();
 
 const backend = defineBackend({
   auth,
@@ -242,7 +245,7 @@ for (const fn of [
 // because the form is unauthenticated — protection comes from CORS +
 // the function's own validation.
 const leadIntakeUrl = backend.leadIntake.resources.lambda.addFunctionUrl({
-  authType: FunctionUrlAuthType.NONE,
+  authType: publicFunctionUrlAuthType(),
   invokeMode: InvokeMode.BUFFERED,
   cors: {
     allowedOrigins: [
@@ -261,7 +264,7 @@ const leadIntakeUrl = backend.leadIntake.resources.lambda.addFunctionUrl({
 // Stripe webhook receiver: public URL, protected by Stripe signature
 // verification inside the handler (register it in the Stripe dashboard).
 const stripeWebhookUrl = backend.stripeWebhook.resources.lambda.addFunctionUrl({
-  authType: FunctionUrlAuthType.NONE,
+  authType: publicFunctionUrlAuthType(),
   invokeMode: InvokeMode.BUFFERED,
 });
 
@@ -271,7 +274,7 @@ const stripeWebhookUrl = backend.stripeWebhook.resources.lambda.addFunctionUrl({
 // handler, exactly like the Stripe signature above.
 const thumbtackWebhookUrl =
   backend.thumbtackWebhook.resources.lambda.addFunctionUrl({
-    authType: FunctionUrlAuthType.NONE,
+    authType: publicFunctionUrlAuthType(),
     invokeMode: InvokeMode.BUFFERED,
   });
 
@@ -287,6 +290,7 @@ const sesPolicy = new PolicyStatement({
 // derive from the branch being built so main never emails staging links.
 const crmUrlEnv =
   process.env.CRM_APP_URL ??
+  (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
   (process.env.AWS_BRANCH === "main"
     ? "https://app.pestbuzzkill.com"
     : "https://staging.d5ln2hbbp9s2j.amplifyapp.com");
@@ -336,7 +340,7 @@ for (const fn of [
   // we have no lead for — those emails are the only copy of the message.
   backend.thumbtackWebhook,
 ]) {
-  fn.resources.lambda.addToRolePolicy(sesPolicy);
+  if (!migrationPreview) fn.resources.lambda.addToRolePolicy(sesPolicy);
   // The From stays info@ on every branch: it is the verified SES sender
   // identity, and the rule is about where mail LANDS, not who it is from.
   fn.addEnvironment("SES_FROM_EMAIL", "info@pestbuzzkill.com");
@@ -359,7 +363,7 @@ backend.bookingPublic.addEnvironment("DOCS_BUCKET", docsBucket.bucketName);
 // The webhook writes the booking agreement PDF during finalization.
 docsBucket.grantWrite(backend.stripeWebhook.resources.lambda);
 backend.stripeWebhook.addEnvironment("DOCS_BUCKET", docsBucket.bucketName);
-backend.stripeWebhook.resources.lambda.addToRolePolicy(sesPolicy);
+if (!migrationPreview) backend.stripeWebhook.resources.lambda.addToRolePolicy(sesPolicy);
 backend.stripeWebhook.addEnvironment("SES_FROM_EMAIL", "info@pestbuzzkill.com");
 backend.stripeWebhook.addEnvironment("SES_NOTIFY_EMAIL", OPS_INBOX);
 if (IS_PRODUCTION_EMAIL) {
@@ -552,9 +556,11 @@ backend.pricingRefresh.addEnvironment("AMPLIFY_BRANCH", branch);
 // crm-pricing build the funnel booking link (MARKETING_URL + "/quote") — the
 // only conversion path a lead is ever sent down.
 const marketingUrl =
-  branch === "main"
+  process.env.MARKETING_URL ??
+  (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
+  (branch === "main"
     ? "https://www.pestbuzzkill.com"
-    : "https://staging.d26qpsjewk0bee.amplifyapp.com";
+    : "https://staging.d26qpsjewk0bee.amplifyapp.com");
 backend.stripeWebhook.addEnvironment("MARKETING_URL", marketingUrl);
 backend.bookingPublic.addEnvironment("MARKETING_URL", marketingUrl);
 backend.crmDocs.addEnvironment("MARKETING_URL", marketingUrl);
@@ -573,7 +579,7 @@ backend.bookingPublic.addEnvironment(
 // doesn't depend on SSM entries the Console never writes.
 for (const key of ["ANTHROPIC_API_KEY", "GOOGLE_ROUTES_API_KEY"] as const) {
   const v = process.env[key];
-  if (v && v !== "placeholder-set-me") {
+  if (!migrationPreview && v && v !== "placeholder-set-me") {
     backend.crmPricing.addEnvironment(key, v);
     // The funnel is a pure rate READER now — it keeps Routes (drive times,
     // day matrix) but has no business holding the research key.
@@ -654,7 +660,7 @@ const sesConfigurationSetName = `buzzkill-email-${branch}`;
 const emailEventsStack = backend.sesEvents.resources.lambda.stack;
 const sesEventsTopic = new Topic(emailEventsStack, "SesEventsTopic");
 sesEventsTopic.grantPublish(new ServicePrincipal("ses.amazonaws.com"));
-sesEventsTopic.addSubscription(
+subscribeBusinessEvents(sesEventsTopic,
   new LambdaSubscription(backend.sesEvents.resources.lambda)
 );
 const sesConfigSet = new CfnConfigurationSet(
@@ -668,7 +674,7 @@ const sesEventDestination = new CfnConfigurationSetEventDestination(
   {
     configurationSetName: sesConfigurationSetName,
     eventDestination: {
-      enabled: true,
+      enabled: !migrationPreview,
       // Branch-suffixed: SES scopes destination names per config set, but
       // CloudFormation treats the name as an account-wide physical ID — a
       // hard-coded name here made the main stack collide with staging's
@@ -698,7 +704,7 @@ for (const fn of [
 
 // Public booking-funnel API for the marketing site.
 const bookingApiUrl = backend.bookingPublic.resources.lambda.addFunctionUrl({
-  authType: FunctionUrlAuthType.NONE,
+  authType: publicFunctionUrlAuthType(),
 });
 
 // Surface the Function URLs into amplify_outputs.json so the frontends
@@ -749,7 +755,7 @@ backend.opsAlerts.resources.lambda.addToRolePolicy(
 );
 const opsAlarmsStack = backend.opsAlerts.resources.lambda.stack;
 const opsAlarmsTopic = new Topic(opsAlarmsStack, "OpsAlarmsTopic");
-opsAlarmsTopic.addSubscription(
+subscribeBusinessEvents(opsAlarmsTopic,
   new LambdaSubscription(backend.opsAlerts.resources.lambda)
 );
 const alarmAction = new SnsAction(opsAlarmsTopic);
@@ -762,8 +768,7 @@ const wireAlarm = (
   alarm: import("aws-cdk-lib/aws-cloudwatch").Alarm,
   action: SnsAction
 ): void => {
-  alarm.addAlarmAction(action);
-  alarm.addOkAction(action);
+  wireBusinessAlarm(alarm, action);
 };
 
 // GL-22: WHO WATCHES THE BRIDGE. If ops-alerts itself breaks, every alarm
@@ -787,8 +792,8 @@ const bridgeFailureTopic = new Topic(opsAlarmsStack, "OpsBridgeFailureTopic");
 // the raw watchdog leg follows the branded one to jake@. NOTE: changing the
 // subscription address requires a ONE-TIME confirmation click from the new
 // inbox after deploy, or these emails silently never arrive.
-if (branch === "main") {
-  bridgeFailureTopic.addSubscription(
+if (branch === "main" && !migrationPreview) {
+  subscribeBusinessEvents(bridgeFailureTopic,
     new EmailSubscription("jake@pestbuzzkill.com")
   );
 }

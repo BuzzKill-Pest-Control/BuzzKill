@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "./migrationPreview";
 import { randomUUID } from "node:crypto";
 import { COMPANY, SITE_DOMAIN, SITE_ORIGIN, companyAddressOneLine } from "./company";
 import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
@@ -172,6 +173,7 @@ export async function sendEmail(input: {
   attachments?: EmailAttachment[];
   ownerTeam?: WorkOwnerTeam;
 }): Promise<boolean> {
+  assertBusinessActionsEnabled();
   // Redirect FIRST, so suppression checks, the EmailLog row and any failure
   // work item all name the address the message actually went to. A log that
   // says info@ while SES was handed something else is worse than no log.

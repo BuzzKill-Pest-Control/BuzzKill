@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Handler } from "aws-lambda";
 import { dataClient } from "../shared/dataClient";
@@ -428,6 +429,7 @@ function escapeHtml(value: string): string {
 }
 
 export const handler: Handler = async (event) => {
+  assertBusinessActionsEnabled();
   const method =
     event.httpMethod ?? event.requestContext?.http?.method ?? "POST";
   const path: string =

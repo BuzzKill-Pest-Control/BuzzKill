@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -10,6 +11,7 @@ import { defineFunction } from "@aws-amplify/backend";
  * resolver and therefore no callable CRM surface.
  */
 export const crmPricing = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "crm-pricing",
   entry: "./handler.ts",
   timeoutSeconds: 120,

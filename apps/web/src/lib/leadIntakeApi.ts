@@ -65,6 +65,9 @@ export type LeadResult =
   | { ok: false; error: string };
 
 export async function submitLead(input: LeadRequest): Promise<LeadResult> {
+  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+    return { ok: false, error: "Contact requests are disabled in this migration preview." };
+  }
   const base = await getLeadIntakeUrl();
   if (!base) {
     return {

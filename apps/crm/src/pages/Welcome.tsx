@@ -21,6 +21,12 @@ export default function Welcome() {
     if (ran.current) return; // React strict-mode double-mount guard
     ran.current = true;
 
+    if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+      setMessage("Email sign-in links are disabled in this migration preview.");
+      setState("error");
+      return;
+    }
+
     (async () => {
       const params = new URLSearchParams(window.location.hash.slice(1));
       const email = params.get("email");

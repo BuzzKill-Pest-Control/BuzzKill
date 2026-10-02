@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "./migrationPreview";
 /**
  * Google Routes API helpers — drive times between arbitrary addresses. The key
  * is API-restricted to the Routes API, so plain address strings are used
@@ -38,6 +39,7 @@ export async function driveLegBetween(
   destination: string
 ): Promise<DriveLegResult> {
   try {
+    assertBusinessActionsEnabled();
     const res = await fetch(ROUTES_URL, {
       method: "POST",
       headers: {
@@ -124,6 +126,7 @@ export async function drivingDistanceMetersFromPoint(
   destinationAddress: string
 ): Promise<number | null> {
   try {
+    assertBusinessActionsEnabled();
     const res = await fetch(ROUTES_URL, {
       method: "POST",
       headers: {
@@ -164,6 +167,7 @@ export async function driveMinutesFromPoint(
   destinationAddress: string
 ): Promise<number | null> {
   try {
+    assertBusinessActionsEnabled();
     const res = await fetch(ROUTES_URL, {
       method: "POST",
       headers: {
@@ -203,6 +207,7 @@ export async function driveMatrixTo(
   const origs = origins.slice(0, 50);
   if (origs.length === 0) return [];
   try {
+    assertBusinessActionsEnabled();
     const res = await fetch(MATRIX_URL, {
       method: "POST",
       headers: {
@@ -270,6 +275,7 @@ export async function driveMatrixFrom(
   const dests = destinations.slice(0, 50);
   if (dests.length === 0) return [];
   try {
+    assertBusinessActionsEnabled();
     const res = await fetch(MATRIX_URL, {
       method: "POST",
       headers: {

@@ -17,6 +17,11 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 connectBackend().then((backendReady) => {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
+    {import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true" && (
+      <div role="status" style={{ background: "#fff3cd", color: "#332701", padding: "12px", textAlign: "center" }}>
+        Migration preview — booking, payments, email links, and business actions are disabled.
+      </div>
+    )}
       <App backendReady={backendReady} />
     </React.StrictMode>
   );

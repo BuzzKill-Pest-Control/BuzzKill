@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { randomBytes } from "node:crypto";
 import { SITE_ORIGIN } from "../shared/company";
 import type { AppSyncResolverEvent } from "aws-lambda";
@@ -85,6 +86,7 @@ type Args = {
 };
 
 export const handler = async (event: AppSyncResolverEvent<Args>) => {
+  assertBusinessActionsEnabled();
   // TRUSTED INTERNAL INVOKE. booking-public asks us to read a customer's
   // freeform "tell us what you need" into structured quote inputs.
   //

@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -10,6 +11,7 @@ import { defineFunction } from "@aws-amplify/backend";
  * — never only a log group.
  */
 export const opsAlerts = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "ops-alerts",
   entry: "./handler.ts",
   timeoutSeconds: 60,

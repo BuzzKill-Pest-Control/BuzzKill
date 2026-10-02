@@ -109,9 +109,14 @@ function MagicLinkFooter() {
   });
 
   const request = async () => {
+    if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") return;
     if (!email.trim()) return;
     await send.run();
   };
+
+  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+    return <p className="small">Email sign-in links and password recovery are disabled in this migration preview.</p>;
+  }
 
   return (
     <div className="magic-link-footer">
