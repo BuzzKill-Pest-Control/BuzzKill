@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
-import { publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
+import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { defineBackend } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
@@ -572,7 +572,9 @@ backend.crmPricing.addEnvironment("MARKETING_URL", marketingUrl);
 backend.pricingRefresh.addEnvironment("MARKETING_URL", marketingUrl);
 backend.bookingPublic.addEnvironment(
   "BOOKING_CORS_ORIGINS",
-  branch === "main"
+  migrationPreview
+    ? migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)
+    : branch === "main"
     ? "https://www.pestbuzzkill.com,https://pestbuzzkill.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com,https://staging.pestbuzzkill.com,http://localhost:5173,http://localhost:5174"
 );
