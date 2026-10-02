@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { SITE_ORIGIN } from "../shared/company";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
@@ -1175,6 +1176,7 @@ async function runTargetedWakeup(
 }
 
 export const handler = async (event: PricingRefreshEvent = {}) => {
+  assertBusinessActionsEnabled();
   const startedAt = Date.now();
   const now = new Date();
   const targetedSource =
