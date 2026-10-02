@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { defineBackend } from "@aws-amplify/backend";
@@ -1002,7 +1003,14 @@ cfnDocsBucket.versioningConfiguration = { status: "Enabled" };
 // bucket reference adds only a one-way data→storage edge.
 const backupStack = Stack.of(backend.data.resources.graphqlApi);
 const backupVault = new BackupVault(backupStack, "BuzzKillBackupVault", {
-  backupVaultName: `buzzkill-${lockBranch}-retention`,
+  // AWS Backup vault names are limited to 50 characters. Keep existing live
+  // names unchanged; preview names are bounded and scoped to app + branch.
+  backupVaultName: migrationPreview
+    ? `buzzkill-preview-${createHash("sha256")
+        .update(`${lockAppId}:${lockBranch}`)
+        .digest("hex")
+        .slice(0, 16)}-retention`
+    : `buzzkill-${lockBranch}-retention`,
 });
 const backupPlan = new BackupPlan(backupStack, "BuzzKillRetentionPlan", {
   backupVault,
