@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isProductionSite, portalUrl } from "./portal";
 
 /**
@@ -15,6 +15,28 @@ const PROD = "https://app.pestbuzzkill.com";
 const STAGING = "https://staging.d5ln2hbbp9s2j.amplifyapp.com";
 
 describe("portalUrl", () => {
+  beforeEach(() => {
+    // Hosting sets these for the paired preview; defaults must be tested
+    // independently of the environment that launches the test runner.
+    vi.stubEnv("VITE_PORTAL_URL", "");
+    vi.stubEnv("VITE_BUZZKILL_MIGRATION_PREVIEW", "false");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses an explicit portal override for any hostname", () => {
+    const override = "https://paired-crm.example.invalid";
+    vi.stubEnv("VITE_PORTAL_URL", override);
+    expect(portalUrl("www.pestbuzzkill.com")).toBe(override);
+    expect(portalUrl("unknown.example.invalid")).toBe(override);
+  });
+
+  it("keeps the explicit paired portal override in migration previews", () => {
+    const override = "https://paired-crm.example.invalid";
+    vi.stubEnv("VITE_PORTAL_URL", override);
+    vi.stubEnv("VITE_BUZZKILL_MIGRATION_PREVIEW", "true");
+    expect(portalUrl("preview.example.invalid")).toBe(override);
+  });
+
   it("sends the production site to the production portal", () => {
     expect(portalUrl("www.pestbuzzkill.com")).toBe(PROD);
     expect(portalUrl("pestbuzzkill.com")).toBe(PROD);
