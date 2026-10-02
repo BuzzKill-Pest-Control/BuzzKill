@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction, secret } from "@aws-amplify/backend";
 
 /**
@@ -28,6 +29,7 @@ export const thumbtackWebhook = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 60,
   environment: {
-    THUMBTACK_WEBHOOK_SECRET: secret("THUMBTACK_WEBHOOK_SECRET"),
+    BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()),
+    THUMBTACK_WEBHOOK_SECRET: isMigrationPreview() ? "migration-preview-disabled" : secret("THUMBTACK_WEBHOOK_SECRET"),
   },
 });

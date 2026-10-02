@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
@@ -361,6 +362,7 @@ async function handleInternalOp(op: InternalOp): Promise<InternalResult> {
 export const handler = async (
   event: APIGatewayProxyEventV2
 ): Promise<APIGatewayProxyResultV2> => {
+  assertBusinessActionsEnabled();
   // ── Trusted internal invoke (portal add-service) ──────────────────────
   // crm-billing verifies the Cognito identity and owns-the-customer check,
   // then invokes THIS Lambda directly (IAM InvokeCommand) to run a quote or a

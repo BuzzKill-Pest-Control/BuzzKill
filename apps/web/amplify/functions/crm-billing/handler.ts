@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type { AppSyncResolverEvent } from "aws-lambda";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { dataClient } from "../shared/dataClient";
@@ -151,6 +152,7 @@ function assertChargeableAmount(_actor: Actor, amountCents: number) {
 }
 
 export const handler = async (event: AppSyncResolverEvent<Args>) => {
+  assertBusinessActionsEnabled();
   switch (opFieldName(event)) {
     case "createSetupIntent": {
       await assertCanActForCustomer(event.identity, event.arguments.customerId!);

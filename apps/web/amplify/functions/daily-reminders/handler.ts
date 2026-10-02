@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { oneBusinessDayDeadline } from "../shared/businessDays";
 import { easternPlusDays, todayEastern, todayUtc } from "../shared/dates";
@@ -116,6 +117,7 @@ const prettyDate = (isoDate: string) =>
   });
 
 export const handler = async () => {
+  assertBusinessActionsEnabled();
   const totals: Record<string, unknown>[] = [];
   // GL-22: a subtask that fails must not (a) stop the remaining subtasks, or
   // (b) let the run report a healthy scheduled invocation. Each failure is

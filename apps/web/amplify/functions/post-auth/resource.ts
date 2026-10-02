@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -6,6 +7,7 @@ import { defineFunction } from "@aws-amplify/backend";
  * "Invited" for portal users. Never blocks a login — errors are swallowed.
  */
 export const postAuth = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "post-auth",
   entry: "./handler.ts",
   // Auth triggers must live in the auth stack to avoid a circular

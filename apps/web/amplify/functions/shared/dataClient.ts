@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "./migrationPreview";
 import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import { getAmplifyDataClientConfig } from "@aws-amplify/backend/function/runtime";
@@ -13,6 +14,7 @@ let clientPromise: Promise<ReturnType<typeof generateClient<Schema>>> | null =
   null;
 
 export function dataClient() {
+  assertBusinessActionsEnabled();
   if (!clientPromise) {
     clientPromise = (async () => {
       const { resourceConfig, libraryOptions } =
