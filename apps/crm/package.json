@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node ../web/scripts/checkMigrationRelease.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "outputs": "AWS_REGION=us-east-1 NODE_OPTIONS=--no-experimental-webstorage ampx generate outputs --app-id ${BUZZKILL_BACKEND_APP_ID:-d26qpsjewk0bee} --branch ${AWS_BRANCH:-staging}",
