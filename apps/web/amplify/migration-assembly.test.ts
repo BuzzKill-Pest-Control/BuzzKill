@@ -153,7 +153,7 @@ it("refuses every real mutation in both phases, including retained PromoCode and
       expect(query.Properties?.RequestMappingTemplate).not.toBe(PREVIEW_MUTATION_REFUSAL);
     }
     const outputs = JSON.stringify(Object.values(assembly.templates).map((t) => t.Outputs));
-    expect(outputs).toContain(`migrationApiReady\\\":${assembly === full}`);
+    expect(outputs).toContain(`migrationApiReady\\":${assembly === full}`);
   }
 });
 
