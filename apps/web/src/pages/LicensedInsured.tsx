@@ -141,11 +141,16 @@ function detailsFor(c: Credential, asOf: string): CredentialCardProps["details"]
     label: "Status",
     value: status === "Active" ? <span className="bk-credential-status">{status}</span> : status,
   });
+  if (c.verifyInstructions) rows.push({ label: "How to verify", value: c.verifyInstructions });
   return rows;
 }
 
 export default function LicensedInsured() {
   const asOf = isoToday();
+  const credentials = publicCredentials(asOf);
+  // The permit documents its individual holder, not a relationship to BuzzKill.
+  const personalPermits = credentials.filter((c) => c.id === "MA_PROBLEM_ANIMAL_CONTROL");
+  const pestControlCredentials = credentials.filter((c) => c.id !== "MA_PROBLEM_ANIMAL_CONTROL");
   return (
     <>
       {/* Hero */}
@@ -155,14 +160,13 @@ export default function LicensedInsured() {
             <div className="bk-eyebrow">Credentials</div>
             <h1 className="bk-h1-lower">Licensed &amp; Insured</h1>
             <p className="bk-body-lead">
-              BuzzKill Pest Control works under the state credentials listed
-              below and carries insurance. Each credential names the agency
-              that issued it and who holds it, and can be checked through the
-              official state portal linked on its card. The Massachusetts
-              pesticide credentials are held personally by our founder, Jacob
-              Greasley; the Massachusetts Problem Animal Control Permit is held
-              by Nathaniel C Wiggin; the Rhode Island registration is held by
-              BuzzKill Pest Control LLC.
+              BuzzKill Pest Control carries insurance and works under the
+              pesticide credentials listed below. The Massachusetts pesticide
+              credentials are held personally by our founder, Jacob Greasley;
+              the Rhode Island registration is held by BuzzKill Pest Control
+              LLC. Each card identifies the holder and issuing agency and links
+              to an official lookup or contact page. A personal wildlife permit
+              is presented separately with instructions for contacting its issuer.
             </p>
           </div>
           <div className="bk-credentials-visual">
@@ -179,9 +183,9 @@ export default function LicensedInsured() {
       {/* Credentials grid */}
       <section className="bk-section bk-section-cream">
         <div className="bk-container" style={{ maxWidth: 880 }}>
-          <h2 className="bk-h2">State Credentials</h2>
+          <h2 className="bk-h2">Pest Control Credentials &amp; Insurance</h2>
           <div className="bk-credential-grid">
-            {publicCredentials(asOf).map((c) => (
+            {pestControlCredentials.map((c) => (
               <CredentialCard
                 key={c.id}
                 icon={c.jurisdiction === "RI" ? <ShieldIcon /> : <DocIcon />}
@@ -209,6 +213,29 @@ export default function LicensedInsured() {
                 },
               ]}
             />
+          </div>
+        </div>
+      </section>
+
+      <section className="bk-section bk-section-light">
+        <div className="bk-container" style={{ maxWidth: 880 }}>
+          <h2 className="bk-h2">Personal Wildlife Permit</h2>
+          <p className="bk-p">
+            This permit is held by the named individual and is presented
+            separately from BuzzKill&rsquo;s pesticide credentials and company
+            registration.
+          </p>
+          <div className="bk-credential-grid">
+            {personalPermits.map((c) => (
+              <CredentialCard
+                key={c.id}
+                icon={<DocIcon />}
+                title={c.title}
+                details={detailsFor(c, asOf)}
+                verifyUrl={c.verifyUrl}
+                verifyLabel={c.verifyLabel}
+              />
+            ))}
           </div>
         </div>
       </section>

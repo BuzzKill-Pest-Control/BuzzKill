@@ -7,8 +7,8 @@
  *
  * Provenance is recorded per credential and is part of the public truth:
  *  - "official-document": the issuer's own approval letter or certificate is
- *    on file and the issuer's public lookup returns the record. This is the
- *    case for both Massachusetts credentials, which MDAR issued to Jacob
+ *    on file. The issuer's public lookup also returns the records for both
+ *    Massachusetts pesticide credentials, which MDAR issued to Jacob
  *    Greasley personally (Commercial Certification CC-0060592, Category 41,
  *    and Applicator (Core) License AL-0060551; both issued February 2026,
  *    both valid through 2026-12-31, both on a 2029-12-31 recertification
@@ -73,14 +73,16 @@ export type Credential = {
   recertificationOn?: string;
   /** The primary credential printed on documents for this jurisdiction. */
   primaryForDocuments: boolean;
-  /** Public lookup the visitor can use. */
+  /** Official lookup or program contact page the visitor can use. */
   verifyUrl: string;
   verifyLabel: string;
+  /** How to verify a credential when the link is not a public lookup. */
+  verifyInstructions?: string;
 };
 
 export const MA_LOOKUP_URL =
   "https://www.mass.gov/how-to/look-up-and-confirm-a-massachusetts-pesticide-license";
-export const MASSWILDLIFE_URL = "https://www.mass.gov/orgs/division-of-fisheries-and-wildlife";
+export const MASSWILDLIFE_PAC_URL = "https://www.mass.gov/info-details/problem-animal-control-agents";
 export const RI_LOOKUP_URL = "https://demri.my.site.com/agr/s/";
 
 const MDAR = "Massachusetts Department of Agricultural Resources (MDAR), Pesticide Program";
@@ -129,8 +131,10 @@ export const CREDENTIALS: readonly Credential[] = [
     validThrough: "2026-12-31",
     // A wildlife permit, not a pesticide credential: never printed on documents.
     primaryForDocuments: false,
-    verifyUrl: MASSWILDLIFE_URL,
-    verifyLabel: "MassWildlife on Mass.gov",
+    verifyUrl: MASSWILDLIFE_PAC_URL,
+    verifyLabel: "MassWildlife Program & Contact",
+    verifyInstructions:
+      "Ask MassWildlife to confirm this permit by calling (508) 389-6300 or emailing Mass.Wildlife@mass.gov. Provide the holder's name, trap registration number, and permit year shown here. The linked page provides program and contact information, not a permit lookup.",
   },
   {
     id: "MA_APPLICATOR_CORE",
