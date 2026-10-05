@@ -1,6 +1,7 @@
 import { assertDeliverableAddress } from "./compliance";
 import { driveMinutesBetween } from "./driveTime";
 import { MA_RI_ZIP_RE } from "./postalCode";
+import { Refused, refusalFrom, type Refusal } from "./refusal";
 
 /**
  * GL-12 — the real dispatch gate. "Non-blank" was the whole readiness check;
@@ -71,7 +72,8 @@ const MA_RI_STATE_RE = /^(ma|massachusetts|ri|rhode\s*island)$/i;
  */
 export function assertDispatchFacts(
   customer: DispatchCustomer,
-  job: { propertyClass?: string | null; serviceType?: string | null }
+  job: { propertyClass?: string | null; serviceType?: string | null },
+  options: { creatingJob?: boolean } = {}
 ): void {
   // The existing non-blank minimum first — its message style is the baseline.
   assertDeliverableAddress(customer);
@@ -122,16 +124,36 @@ export function assertDispatchFacts(
       // Names the button, not just the concept — "the office fixes this" is
       // only actionable if the office knows where.
       parts.push(
-        `this visit's dispatch packet needs fixing (open the visit and press "Packet"): ${visitProblems.join(
-          "; "
-        )}`
+        options.creatingJob
+          ? 'choose a valid "Property type" in "Add job" before creating a scheduled job'
+          : `this visit's dispatch packet needs fixing (open the visit and press "Packet"): ${visitProblems.join(
+              "; "
+            )}`
       );
     }
-    throw new Error(
+    throw new Refused(
       `This job can't be dispatched yet — ${parts.join(
         ", and "
       )}. The office fixes this before assigning a technician.`
     );
+  }
+}
+
+/** Expected, pure validation travels as data at office mutation boundaries.
+ * Unexpected exceptions still escape so genuine failures keep alarming.
+ */
+export function dispatchFactsRefusal(
+  customer: DispatchCustomer,
+  job: { propertyClass?: string | null; serviceType?: string | null },
+  options: { creatingJob?: boolean } = {}
+): Refusal | null {
+  try {
+    assertDispatchFacts(customer, job, options);
+    return null;
+  } catch (error) {
+    const refused = refusalFrom(error);
+    if (refused) return refused;
+    throw error;
   }
 }
 

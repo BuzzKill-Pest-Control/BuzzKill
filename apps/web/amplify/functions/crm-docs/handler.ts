@@ -106,6 +106,7 @@ import { licenseFactsFor, licenseRecordsFor, licenseValidOnDate } from "../share
 import { isServiceMonth } from "../shared/season";
 import {
   assertDispatchFacts,
+  dispatchFactsRefusal,
   normalizePropertyClass,
   onsiteMinutesFor,
   proveRoutable,
@@ -2346,10 +2347,11 @@ async function createOfficeJob(identity: AppSyncIdentity | undefined | null, arg
   // first place. A date-less job (scheduled later) is allowed through;
   // updateJobSchedule enforces the full gate before it can reach a technician.
   if (scheduledDate) {
-    assertDispatchFacts(customer, {
+    const notReady = dispatchFactsRefusal(customer, {
       propertyClass: (args as { propertyClass?: string | null }).propertyClass,
       serviceType,
-    });
+    }, { creatingJob: true });
+    if (notReady) return notReady;
   }
   let seasonalClaim: {
     servicePlanId: string;
@@ -2704,10 +2706,11 @@ async function updateJobSchedule(
     // before the technician's own credential so the office sees every blocker,
     // and never bypassable — there is no override branch.
     if (!customer) throw new Error(`Customer ${job.customerId} no longer exists`);
-    assertDispatchFacts(customer, {
+    const notReady = dispatchFactsRefusal(customer, {
       propertyClass: job.propertyClass,
       serviceType: job.serviceType,
     });
+    if (notReady) return notReady;
     if (!technician) throw new Error(`Technician ${args.technicianId} not found`);
     if (!technician.active) {
       // A roster the board rendered before someone was deactivated. The office

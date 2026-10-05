@@ -437,6 +437,27 @@ beforeEach(() => {
 });
 
 describe("regulated assignment", () => {
+  it.each([null, "MANSION"])("returns a refusal for a visit's missing or invalid classification (%j), without assigning it", async (propertyClass) => {
+    Object.assign(jobs[0], { status: "UNSCHEDULED", technicianId: null, propertyClass });
+    customer.propertyClass = "RESIDENTIAL";
+    routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
+    const before = structuredClone(jobs[0]);
+    const args = { jobId: "j1", operation: "ASSIGN", technicianId: "t1", routeId: "r1", scheduledDate: "2026-07-20" };
+
+    await expect(call("updateJobSchedule", args, ["OWNER"]))
+      .resolves.toMatchObject({ refused: expect.stringMatching(/Packet.*property classification/i) });
+    expect(jobs[0]).toEqual(before);
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
+    expect(capacityFixture.maps.techDayStops.size).toBe(0);
+    expect(packetEvents).toHaveLength(0);
+
+    await call("updateJobPacket", { jobId: "j1", propertyClass: "RESIDENTIAL" }, ["OWNER"]);
+    const assigned = await call("updateJobSchedule", args, ["OWNER"]);
+    expect(assigned).not.toHaveProperty("refused");
+    expect(jobs[0]).toMatchObject({ status: "SCHEDULED", technicianId: "t1", routeId: "r1" });
+  });
+
   it("GL-12: refuses to assign when routability cannot be verified (no key, no escape hatch)", async () => {
     jobs[0].status = "UNSCHEDULED";
     routes.push({ id: "r1", technicianId: "t1", date: "2026-07-20" });
@@ -673,7 +694,7 @@ describe("regulated assignment", () => {
         },
         ["OWNER"]
       )
-    ).rejects.toThrow(/deliverable service address.*street.*ZIP/is);
+    ).resolves.toMatchObject({ refused: expect.stringMatching(/deliverable service address.*street.*ZIP/is) });
     // Never dispatched: the stop stays in the unscheduled pool, unrouted.
     expect(jobs[0].status).toBe("UNSCHEDULED");
     expect(jobs[0].routeId).toBeUndefined();
@@ -700,11 +721,50 @@ describe("regulated assignment", () => {
         },
         ["OWNER"]
       )
-    ).rejects.toThrow(/deliverable service address/i);
+    ).resolves.toMatchObject({ refused: expect.stringMatching(/deliverable service address/i) });
   });
 });
 
 describe("dispatch packet capture (GL-12)", () => {
+  it.each([undefined, null, "MANSION"])("returns a normal refusal when creating a dated job with classification %j", async (propertyClass) => {
+    customer.status = "LEAD";
+    customer.propertyClass = propertyClass;
+    const before = structuredClone(jobs);
+    const customerBefore = structuredClone(customer);
+    const args = { customerId: "c1", serviceType: "General pest", scheduledDate: "2026-07-25", priceCents: 27550 };
+    const result = await call("createOfficeJob", args, ["OWNER"]);
+    expect(result).toEqual({ refused: expect.stringMatching(/Property type.*Add job/) });
+    expect(result).not.toHaveProperty("jobId");
+    expect(jobs).toEqual(before);
+    expect(customer).toEqual(customerBefore);
+    expect(obligations.size).toBe(0);
+    expect(leadActivities.size).toBe(0);
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+    expect(capacityFixture.maps.capacityClaims.size).toBe(0);
+
+    const saved = await call("createOfficeJob", { ...args, propertyClass: "RESIDENTIAL" }, ["OWNER"]);
+    expect(saved).toHaveProperty("jobId");
+    expect(saved).not.toHaveProperty("refused");
+    expect(jobs).toHaveLength(before.length + 1);
+  });
+
+  it.each(["createOfficeJob", "updateJobSchedule"])("preserves database failures from %s as invocation errors", async (field) => {
+    jobs[0].status = "UNSCHEDULED";
+    const before = structuredClone(jobs);
+    const getCustomer = vi.spyOn(fakeDataClient.models.Customer, "get")
+      .mockRejectedValueOnce(new Error("DynamoDB is unavailable"));
+    try {
+      const args = field === "createOfficeJob"
+        ? { customerId: "c1", serviceType: "General pest", scheduledDate: "2026-07-25" }
+        : { jobId: "j1", operation: "ASSIGN", technicianId: "t1", routeId: "r1", scheduledDate: "2026-07-20" };
+      await expect(call(field, args, ["OWNER"])).rejects.toThrow("DynamoDB is unavailable");
+      expect(jobs).toEqual(before);
+      expect(capacityFixture.maps.capacityDays.size).toBe(0);
+    } finally {
+      getCustomer.mockRestore();
+    }
+  });
+
   it("refuses to create a scheduled job when the address is not deliverable", async () => {
     customer.serviceZip = null;
 
@@ -718,7 +778,7 @@ describe("dispatch packet capture (GL-12)", () => {
         },
         ["OWNER"]
       )
-    ).rejects.toThrow(/can't be dispatched yet.*ZIP/is);
+    ).resolves.toMatchObject({ refused: expect.stringMatching(/can't be dispatched yet.*ZIP/is) });
   });
 
   it("captures job-specific access, safety, prep and payment facts on create", async () => {
