@@ -2363,32 +2363,6 @@ export default function CustomerDetail() {
           plans={plans}
           customer={customer}
           onSubmit={async (v) => {
-            if (
-              v.serviceCode !== "NOT_IN_CATALOG" &&
-              v.propertyClass &&
-              v.propertyClass !== customer.propertyClass
-            ) {
-              // Save the future-job default first, so a failed save cannot
-              // leave a created job behind and invite a duplicate on retry.
-              const freshCustomer = unwrap(
-                await api().models.Customer.get({ id: customer.id })
-              );
-              if (!freshCustomer) {
-                throw new Error("Could not load the customer's current details. Try again before creating the job.");
-              }
-              if (v.propertyClass !== freshCustomer.propertyClass) {
-                const saved = opResultUnlessRefused<{ customerId?: string }>(
-                  await api().mutations.updateCustomerContact({
-                    customerId: customer.id,
-                    displayName: freshCustomer.displayName,
-                    propertyClass: v.propertyClass,
-                  })
-                );
-                if (saved?.customerId !== customer.id) {
-                  throw new Error("The property type wasn't confirmed. Try again before creating the job.");
-                }
-              }
-            }
             // A refused seasonal month has neither catalogDecisionOpened nor a
             // job behind it, so it would fall through both branches below and
             // the sheet would close on a visit that was never created.
@@ -2427,8 +2401,37 @@ export default function CustomerDetail() {
             } else if (!result?.jobId) {
               throw new Error("The job wasn't confirmed. Check the Jobs list before trying again.");
             }
+            const warnings = result?.warning ? [result.warning] : [];
+            if (
+              result?.jobId &&
+              v.propertyClass &&
+              v.propertyClass !== customer.propertyClass
+            ) {
+              // The job already owns its selected property type. Saving the
+              // future default must never turn success into a duplicate retry.
+              try {
+                const freshCustomer = unwrap(
+                  await api().models.Customer.get({ id: customer.id })
+                );
+                if (!freshCustomer) throw new Error("Customer details unavailable");
+                if (v.propertyClass !== freshCustomer.propertyClass) {
+                  const saved = opResultUnlessRefused<{ customerId?: string }>(
+                    await api().mutations.updateCustomerContact({
+                      customerId: customer.id,
+                      displayName: freshCustomer.displayName,
+                      propertyClass: v.propertyClass,
+                    })
+                  );
+                  if (saved?.customerId !== customer.id) {
+                    throw new Error("Property default not confirmed");
+                  }
+                }
+              } catch {
+                warnings.push("Job saved with the selected property type, but the customer's default could not be saved. Update it in customer details. Do not add the job again.");
+              }
+            }
             setSheet(null);
-            setJobWarning(result?.warning ?? null);
+            setJobWarning(warnings.length ? warnings.join(" ") : null);
             await load();
             if (result?.jobId) {
               setNotice("Job added. Assign a technician from the Schedule page when ready.");

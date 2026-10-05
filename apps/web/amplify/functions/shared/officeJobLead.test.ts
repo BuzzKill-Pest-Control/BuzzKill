@@ -82,13 +82,31 @@ describe("settling a saved office job's originating lead", () => {
     expect(followup?.status).toBe("RESOLVED");
   });
 
-  it.each([{ doNotContact: true }, { lostReason: "PRICE" }])("preserves deliberate terminal lead facts: %j", async (facts) => {
-    Object.assign(customers.get("c1")!, facts);
-    expect(await settleLeadForOfficeJob(input)).toEqual({});
-    expect(customers.get("c1")).toMatchObject({ status: "LEAD", ...facts });
-    expect(appendActivity).not.toHaveBeenCalled();
-    expect(resolveWork).not.toHaveBeenCalled();
-    expect(followup?.status).toBe("OPEN");
+  describe.each([{ doNotContact: true }, { lostReason: "PRICE" }])("deliberate terminal lead: %j", (facts) => {
+    beforeEach(() => { Object.assign(customers.get("c1")!, facts); });
+
+    it.each(["RESOLVED", "absent"])("allows recovery to finish only after follow-up is %s", async (status) => {
+      followup = status === "absent" ? null : { ...followup, status };
+      const before = { ...customers.get("c1") };
+      expect(await settleLeadForOfficeJob(input)).toEqual({});
+      expect(customers.get("c1")).toEqual(before);
+      expect(appendActivity).not.toHaveBeenCalled();
+      expect(resolveWork).not.toHaveBeenCalled();
+      expect(openWork).not.toHaveBeenCalled();
+    });
+
+    it.each(["open", "unreadable"])("keeps recovery open when follow-up is %s without overwriting the terminal decision", async (state) => {
+      followupReadFails = state === "unreadable";
+      if (followupReadFails) followup = null;
+      const before = { ...customers.get("c1") };
+      const followupBefore = followup ? { ...followup } : null;
+      expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved.*recovery item/);
+      expect(customers.get("c1")).toEqual(before);
+      expect(followup).toEqual(followupBefore);
+      expect(appendActivity).not.toHaveBeenCalled();
+      expect(resolveWork).not.toHaveBeenCalled();
+      expect(openWork).toHaveBeenCalledWith(expect.objectContaining({ kind: "LEAD_LIFECYCLE_RECOVERY", relatedId: "office-job:j1" }));
+    });
   });
 
   it.each([{ mergeCounterpartId: "c2" }, { status: "MERGED" }, { status: "INACTIVE" }])("refuses unsafe lifecycle changes and owns recovery: %j", async (facts) => {

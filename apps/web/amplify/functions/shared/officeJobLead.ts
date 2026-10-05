@@ -24,6 +24,14 @@ export async function settleLeadForOfficeJob(input: {
     if (!claim.won) throw new Error("Another lead action is still in progress.");
     holder = claim.holder;
     const client = await dataClient();
+    const assertFollowupClosed = async () => {
+      const followup = await client.models.WorkItem.get({
+        id: workItemId("LEAD_FOLLOWUP", input.customerId),
+      });
+      if (followup.errors?.length || (followup.data && followup.data.status !== "RESOLVED")) {
+        throw new Error("The lead follow-up is still open or could not be verified.");
+      }
+    };
     const current = await client.models.Customer.get({ id: input.customerId });
     if (current.errors?.length || !current.data) throw new Error("The lead could not be verified.");
     const customer = current.data;
@@ -35,8 +43,12 @@ export async function settleLeadForOfficeJob(input: {
       throw new Error("Resolve the pending paid-booking identity decision before completing lead cleanup.");
     }
     // Lost/DNC dispositions own their own follow-up cleanup. A manual job
-    // must not resolve a newer obligation on a deliberately closed lead.
-    if (customer.status === "LEAD" && !isLeadOpen(customer)) return {};
+    // must not resolve a newer obligation on a deliberately closed lead, or
+    // mark recovery complete while that disposition's cleanup is unfinished.
+    if (customer.status === "LEAD" && !isLeadOpen(customer)) {
+      await assertFollowupClosed();
+      return {};
+    }
 
     if (customer.status === "LEAD") {
       // Audit first with a job-specific key, so a retry can adopt the same
@@ -87,12 +99,7 @@ export async function settleLeadForOfficeJob(input: {
       dedupeKey: input.customerId,
       note: `Office job ${input.jobId} saved; no further sales follow-up is needed. Payment remains unchanged.`,
     });
-    const followup = await client.models.WorkItem.get({
-      id: workItemId("LEAD_FOLLOWUP", input.customerId),
-    });
-    if (followup.errors?.length || (followup.data && followup.data.status !== "RESOLVED")) {
-      throw new Error("The lead follow-up is still open or could not be verified.");
-    }
+    await assertFollowupClosed();
     return {};
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

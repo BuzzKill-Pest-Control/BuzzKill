@@ -2331,6 +2331,11 @@ async function createOfficeJob(identity: AppSyncIdentity | undefined | null, arg
       `"${serviceType}" doesn't match a catalog service. Pick one from the list, or use "Something else…" to request a catalog decision — jobs are never created outside the catalog.`
     );
   }
+  // A one-time lead commitment needs an agreed amount, including an explicit
+  // zero. Recurring visits retain their verified service plan's billing.
+  if (customer.status === "LEAD" && !args.servicePlanId && args.priceCents == null) {
+    throw new Error("Enter the agreed job amount before adding a one-time job to a lead.");
+  }
   // The stored label is the catalog's canonical root unless a more specific
   // catalog-derived label was passed (funnel labels carry size/nest facts).
   if (requestedCode) serviceType = catalogService.label;

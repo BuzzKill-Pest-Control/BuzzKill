@@ -123,6 +123,7 @@ describe("manual lead job form", () => {
     mocks.createOfficeJob.mockResolvedValue({ data: JSON.stringify({ refused: "The service address must be completed." }) });
     await openJob();
     await fillJob();
+    await setField("Property type", "COMMERCIAL");
     await act(async () => button("Create job").click());
     expect(mocks.createOfficeJob).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain("The service address must be completed.");
@@ -130,6 +131,58 @@ describe("manual lead job form", () => {
     expect(field("Start time").value).toBe("15:30");
     expect(container.textContent).not.toContain("Job added.");
     expect(mocks.customerGet).toHaveBeenCalledTimes(1);
+    expect(mocks.updateCustomerContact).not.toHaveBeenCalled();
+    expect(field("Property type").value).toBe("COMMERCIAL");
+  });
+
+  it("saves a changed property default only after the job is confirmed, using current customer details", async () => {
+    await openJob();
+    await fillJob();
+    await setField("Property type", "COMMERCIAL");
+    mocks.customerGet.mockResolvedValue({ data: { ...mocks.lead, displayName: "Updated name" } });
+    await act(async () => button("Create job").click());
+    expect(mocks.createOfficeJob).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ propertyClass: "COMMERCIAL" }));
+    expect(mocks.updateCustomerContact).toHaveBeenCalledExactlyOnceWith({
+      customerId: "lead-123", displayName: "Updated name", propertyClass: "COMMERCIAL",
+    });
+    expect(mocks.createOfficeJob.mock.invocationCallOrder[0]).toBeLessThan(mocks.updateCustomerContact.mock.invocationCallOrder[0]);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Job added.");
+  });
+
+  it.each(["refusal", "unconfirmed", "read failure"])("keeps the saved job successful when its property default has a %s", async (failure) => {
+    const cleanupWarning = "Job saved, but the lead follow-up could not be closed.";
+    mocks.createOfficeJob.mockResolvedValue({ data: JSON.stringify({ jobId: "job-123", warning: cleanupWarning }) });
+    await openJob();
+    await fillJob();
+    await setField("Property type", "COMMERCIAL");
+    if (failure === "read failure") {
+      mocks.customerGet.mockRejectedValueOnce(new Error("Unavailable"));
+    } else {
+      mocks.updateCustomerContact.mockResolvedValue({ data: JSON.stringify(failure === "refusal" ? { refused: "Contact is locked" } : {}) });
+    }
+    await act(async () => button("Create job").click());
+    expect(mocks.createOfficeJob).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Job added.");
+    const warning = container.querySelector('.attention-note[role="alert"]')?.textContent;
+    expect(warning).toContain(cleanupWarning);
+    expect(warning).toContain("the customer's default could not be saved");
+    expect(warning).toContain("Do not add the job again");
+  });
+
+  it("does not change the customer default when the request becomes a catalog decision", async () => {
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    mocks.createOfficeJob.mockResolvedValue({ data: JSON.stringify({ catalogDecisionOpened: true }) });
+    await openJob();
+    await setField("Property type", "COMMERCIAL");
+    await setField("Service", "NOT_IN_CATALOG");
+    await setField("What did the customer ask for?", "Special request");
+    await act(async () => button("Send to catalog decision").click());
+    expect(mocks.updateCustomerContact).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).not.toContain("Job added.");
+    alert.mockRestore();
   });
 
   it("requires the lead amount and rejects reversed appointment windows before submission", async () => {
