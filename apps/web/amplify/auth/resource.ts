@@ -1,3 +1,5 @@
+import { isMigrationPreview } from "../functions/shared/migrationPreview";
+import { previewAuthMessage } from "../functions/preview-auth-message/resource";
 import { defineAuth } from "@aws-amplify/backend";
 import { crmAdmin } from "../functions/crm-admin/resource";
 import { postAuth } from "../functions/post-auth/resource";
@@ -57,6 +59,7 @@ export const auth = defineAuth({
   },
   groups: ["OWNER", "TECH", "CUSTOMER"],
   triggers: {
+    ...(isMigrationPreview() ? { customMessage: previewAuthMessage } : {}),
     postAuthentication: postAuth,
     // NOTE: the pre-token-generation trigger is wired in backend.ts, not here.
     // It must add email/name to the ACCESS token (Amplify signs AppSync with

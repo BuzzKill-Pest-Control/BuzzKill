@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type { AppSyncResolverEvent } from "aws-lambda";
 import {
   AdminDisableUserCommand,
@@ -226,6 +227,7 @@ type AdminArgs =
   | Record<string, never>;
 
 export const handler = async (event: AppSyncResolverEvent<AdminArgs>) => {
+  assertBusinessActionsEnabled();
   switch (opFieldName(event)) {
     case "adminCreateUser": {
       const args = event.arguments as AdminCreateUserArgs;

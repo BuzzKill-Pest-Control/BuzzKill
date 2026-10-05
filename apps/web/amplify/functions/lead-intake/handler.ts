@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type { Handler } from "aws-lambda";
 import { COMPANY } from "../shared/company";
 import { notifyLeads } from "../shared/email";
@@ -188,6 +189,7 @@ function contactRows(c: {
 }
 
 export const handler: Handler = async (event) => {
+  assertBusinessActionsEnabled();
   const method =
     event.httpMethod ?? event.requestContext?.http?.method ?? "POST";
 
