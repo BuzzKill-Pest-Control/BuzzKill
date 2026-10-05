@@ -1,4 +1,4 @@
-import { casGuardedUpdate, type LockCondition } from "./atomicLock";
+import { casTransactionalUpdate, type LockCondition } from "./atomicLock";
 import { isMidMerge } from "./customerMerge";
 import { dataClient } from "./dataClient";
 import { acquireLeadLifecycleClaim, releaseLeadLifecycleClaim } from "./leadClaim";
@@ -31,7 +31,14 @@ export async function settleLeadForOfficeJob(input: {
       throw new Error("The customer changed or is being merged; verify the saved job before settling the lead.");
     }
 
-    if (customer.status === "LEAD" && isLeadOpen(customer)) {
+    if (customer.conversionReviewBookingId) {
+      throw new Error("Resolve the pending paid-booking identity decision before completing lead cleanup.");
+    }
+    // Lost/DNC dispositions own their own follow-up cleanup. A manual job
+    // must not resolve a newer obligation on a deliberately closed lead.
+    if (customer.status === "LEAD" && !isLeadOpen(customer)) return {};
+
+    if (customer.status === "LEAD") {
       // Audit first with a job-specific key, so a retry can adopt the same
       // immutable evidence without manufacturing another sale or job.
       await appendLeadActivity({
@@ -40,32 +47,39 @@ export async function settleLeadForOfficeJob(input: {
         outcome: "NOTE",
         note: `Office job ${input.jobId} is saved. Completing its lead follow-up; payment and billing remain unchanged.`,
         actor: input.actor,
-        mutationId: `${mutationId}:${input.actor.sub ?? input.actor.email ?? "system"}`,
+        mutationId,
+        preserveOriginalActor: true,
       });
       const guards: LockCondition[] = [
         { kind: "fieldEquals", field: "status", value: "LEAD" },
         { kind: "fieldMissingOrNull", field: "mergeCounterpartId" },
-        ...(["leadMutationId", "doNotContact", "lostReason"] as const).map((field): LockCondition => {
+        ...(["leadMutationId", "doNotContact", "lostReason", "conversionReviewBookingId", "nextAction", "nextActionAt"] as const).map((field): LockCondition => {
           const value = customer[field];
           return value == null
             ? { kind: "fieldMissingOrNull", field }
             : { kind: "fieldEquals", field, value };
         }),
       ];
-      const updated = await casGuardedUpdate("Customer", input.customerId, {
+      const updated = await casTransactionalUpdate("Customer", input.customerId, {
         status: "ACTIVE",
         convertedAt: customer.convertedAt ?? new Date().toISOString(),
         nextAction: null,
         nextActionAt: null,
         leadMutationId: mutationId,
-      }, guards);
-      if (!updated.ok) throw new Error("The lead changed before its conversion could be saved.");
+      }, guards, [{
+        model: "Job",
+        id: input.jobId,
+        conditions: [
+          { kind: "fieldEquals", field: "customerId", value: input.customerId },
+          { kind: "fieldNotIn", field: "status", values: ["CANCELED"] },
+        ],
+      }]);
+      if (!updated.ok) throw new Error("The job or lead changed before its conversion could be saved.");
     }
     // A concurrent conversion may have won before our claim. ACTIVE is
-    // already settled; Lost/DNC leads keep their deliberate terminal facts.
-    // In either case, only a stale sales follow-up remains to be discharged.
+    // already settled. Only a stale sales follow-up remains to be discharged.
     const verified = await client.models.Customer.get({ id: input.customerId });
-    if (verified.errors?.length || !verified.data || isLeadOpen(verified.data) || isMidMerge(verified.data)) {
+    if (verified.errors?.length || !verified.data || isLeadOpen(verified.data) || isMidMerge(verified.data) || verified.data.conversionReviewBookingId) {
       throw new Error("The lead's closed state could not be confirmed.");
     }
     await resolveOwnedWork({

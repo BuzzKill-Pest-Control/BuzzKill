@@ -4,6 +4,7 @@ import { isLeadOpen } from "./leadStage";
 
 type Row = Record<string, unknown>;
 const customers = new Map<string, Row>();
+const jobs = new Map<string, Row>();
 let followup: Row | null;
 let followupReadFails = false;
 const { acquireClaim, releaseClaim, appendActivity, openWork, resolveWork } = vi.hoisted(() => ({
@@ -29,6 +30,8 @@ const input = { customerId: "c1", jobId: "j1", actor: { sub: "office", email: "o
 beforeEach(() => {
   vi.resetAllMocks();
   customers.clear();
+  jobs.clear();
+  jobs.set("j1", { id: "j1", customerId: "c1", status: "SCHEDULED" });
   customers.set("c1", {
     id: "c1", status: "LEAD", nextAction: "Contact customer", nextActionAt: "2026-10-05T12:00:00Z",
     stripeCustomerId: "cus_existing", contactConsent: false, accessGroups: ["cus-c1", "grp-g1"],
@@ -40,7 +43,7 @@ beforeEach(() => {
   appendActivity.mockResolvedValue({ id: "activity" });
   openWork.mockResolvedValue("recovery");
   resolveWork.mockImplementation(async () => { if (followup) followup.status = "RESOLVED"; return true; });
-  _setLockStoreForTests(memoryLockStore({ Customer: customers }));
+  _setLockStoreForTests(memoryLockStore({ Customer: customers, Job: jobs }));
 });
 afterEach(() => _setLockStoreForTests(null));
 
@@ -54,7 +57,7 @@ describe("settling a saved office job's originating lead", () => {
     expect(customer.convertedAt).toBeTruthy();
     expect(isLeadOpen(customer)).toBe(false);
     expect(followup?.status).toBe("RESOLVED");
-    expect(appendActivity).toHaveBeenCalledWith(expect.objectContaining({ mutationId: "office-job:j1:office", actor: input.actor, outcome: "NOTE" }));
+    expect(appendActivity).toHaveBeenCalledWith(expect.objectContaining({ mutationId: "office-job:j1", preserveOriginalActor: true, actor: input.actor, outcome: "NOTE" }));
     expect(releaseClaim).toHaveBeenCalledWith("c1", "ours");
     expect(openWork).not.toHaveBeenCalled();
   });
@@ -84,7 +87,8 @@ describe("settling a saved office job's originating lead", () => {
     expect(await settleLeadForOfficeJob(input)).toEqual({});
     expect(customers.get("c1")).toMatchObject({ status: "LEAD", ...facts });
     expect(appendActivity).not.toHaveBeenCalled();
-    expect(followup?.status).toBe("RESOLVED");
+    expect(resolveWork).not.toHaveBeenCalled();
+    expect(followup?.status).toBe("OPEN");
   });
 
   it.each([{ mergeCounterpartId: "c2" }, { status: "MERGED" }, { status: "INACTIVE" }])("refuses unsafe lifecycle changes and owns recovery: %j", async (facts) => {
@@ -105,10 +109,44 @@ describe("settling a saved office job's originating lead", () => {
     expect(releaseClaim).not.toHaveBeenCalled();
   });
 
-  it.each([{ mergeCounterpartId: "c2" }, { doNotContact: true }, { lostReason: "PRICE" }, { leadMutationId: "another-action" }])("guards a lifecycle change arriving after the read: %j", async (race) => {
+  it.each([{ mergeCounterpartId: "c2" }, { doNotContact: true }, { lostReason: "PRICE" }, { leadMutationId: "another-action" }, { conversionReviewBookingId: "paid-review" }, { nextAction: "Resolve paid booking identity" }, { nextActionAt: "2026-10-06T12:00:00Z" }])("guards a lifecycle change arriving after the read: %j", async (race) => {
     appendActivity.mockImplementation(async () => { Object.assign(customers.get("c1")!, race); return {}; });
     expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved/);
     expect(customers.get("c1")).toMatchObject({ status: "LEAD", ...race });
+    expect(resolveWork).not.toHaveBeenCalled();
+  });
+
+  it.each(["LEAD", "ACTIVE"])("does not touch a pending paid identity decision on %s", async (status) => {
+    Object.assign(customers.get("c1")!, {
+      status, conversionReviewBookingId: "paid-review", nextAction: "Resolve paid booking identity",
+    });
+    const before = { ...customers.get("c1") };
+    expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved/);
+    expect(customers.get("c1")).toEqual(before);
+    expect(appendActivity).not.toHaveBeenCalled();
+    expect(resolveWork).not.toHaveBeenCalled();
+  });
+
+  it("checks job cancellation atomically with conversion, after the earlier job read", async () => {
+    appendActivity.mockImplementation(async () => { jobs.get("j1")!.status = "CANCELED"; return {}; });
+    expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved/);
+    expect(customers.get("c1")).toMatchObject({ status: "LEAD", nextAction: "Contact customer" });
+    expect(resolveWork).not.toHaveBeenCalled();
+  });
+
+  it("checks job ownership atomically with conversion", async () => {
+    appendActivity.mockImplementation(async () => { jobs.get("j1")!.customerId = "c2"; return {}; });
+    expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved/);
+    expect(customers.get("c1")!.status).toBe("LEAD");
+    expect(resolveWork).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to an unguarded conversion without transactional support", async () => {
+    const store = memoryLockStore({ Customer: customers, Job: jobs });
+    delete store.transactionalUpdate;
+    _setLockStoreForTests(store);
+    expect((await settleLeadForOfficeJob(input)).warning).toMatch(/Job saved/);
+    expect(customers.get("c1")!.status).toBe("LEAD");
     expect(resolveWork).not.toHaveBeenCalled();
   });
 

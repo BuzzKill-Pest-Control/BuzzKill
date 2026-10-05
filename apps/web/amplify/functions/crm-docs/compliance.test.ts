@@ -290,7 +290,7 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: async () => "https://s3.example/put",
 }));
 
-const { handler } = await import("./handler");
+const { handler, updateOwnedWork } = await import("./handler");
 const { sendEmail } = await import("../shared/email");
 const { drivingDistanceMetersFromPoint } = await import("../shared/driveTime");
 
@@ -2452,19 +2452,23 @@ describe("manual office job scheduling", () => {
     expect(workItems).toContainEqual(expect.objectContaining({ kind: "LEAD_LIFECYCLE_RECOVERY", relatedId: `office-job:${res.jobId}` }));
   });
 
-  it("retries lead settlement from its recovery item without creating another job", async () => {
+  it("a colleague retries lead settlement without creating another job or replacing the original activity actor", async () => {
     customer.status = "LEAD";
     leadConversionFails = true;
     const saved = await call("createOfficeJob", manualJob, ["OWNER"]) as { jobId: string };
     const recovery = workItems.find((w) => w.kind === "LEAD_LIFECYCLE_RECOVERY")!;
     const before = jobs.length;
     leadConversionFails = false;
-    const retried = await call("updateOwnedWork", { workItemId: recovery.id, action: "RETRY_OFFICE_JOB_LEAD" }, ["OWNER"]);
+    const retried = await updateOwnedWork({
+      workItemId: String(recovery.id), action: "RETRY_OFFICE_JOB_LEAD",
+      actorSub: "colleague", actorEmail: "colleague@example.com", actorIsOwner: true,
+    });
     expect(retried).toMatchObject({ workItemId: recovery.id, status: "RESOLVED" });
     expect(customer.status).toBe("ACTIVE");
     expect(jobs).toHaveLength(before);
     expect(jobs.find((j) => j.id === saved.jobId)?.paidAt).toBeUndefined();
     expect(leadActivities.size).toBe(1);
+    expect([...leadActivities.values()][0]).toMatchObject({ actorSub: "sub-tech", actorEmail: "marco@x.com", mutationId: `office-job:${saved.jobId}` });
   });
 
   it.each([
