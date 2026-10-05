@@ -1497,6 +1497,12 @@ export async function rescheduleVisit(args: {
 
   const priorScheduledDate = job.scheduledDate ?? null;
   const newDate = args.scheduledDate?.trim() || null;
+  // The previous day's arrival promise must not appear on a new day (or
+  // return after unscheduling). Clear it in the same guarded write as the
+  // date so a refused or concurrent move leaves the original promise intact.
+  const appointmentReset: Record<string, null> = newDate !== priorScheduledDate
+    ? { scheduledStartTime: null, scheduledEndTime: null }
+    : {};
   // R5: reschedule now requires a controlled reason, the same as cancel.
   const reason = args.reason?.trim();
   if (!reason) throw new Error("A reason is required to reschedule a visit.");
@@ -1741,6 +1747,7 @@ export async function rescheduleVisit(args: {
       job.id,
       {
         scheduledDate: newDate!,
+        ...appointmentReset,
         technicianId: technician.id,
         routeId: route.id,
         routeOrder: args.routeOrder ?? 999,
@@ -1844,6 +1851,7 @@ export async function rescheduleVisit(args: {
       job.id,
       {
         scheduledDate: newDate,
+        ...appointmentReset,
         routeId: null,
         technicianId: null,
         routeOrder: null,
