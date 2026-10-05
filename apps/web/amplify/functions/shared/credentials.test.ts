@@ -57,7 +57,7 @@ describe("the Massachusetts credentials (both active, both Jacob Greasley's)", (
 
   it("are both listed publicly, and both read Active through 2026-12-31", () => {
     const ma = publicCredentials("2026-12-31", "MA").map((c) => c.number);
-    expect(ma).toEqual(["CC-0060592", "AL-0060551"]);
+    expect(ma).toEqual(["CC-0060592", "V175", "AL-0060551"]);
     for (const c of publicCredentials("2026-12-31", "MA")) expect(publicStatus(c, "2026-12-31")).toBe("Active");
   });
 
@@ -65,7 +65,7 @@ describe("the Massachusetts credentials (both active, both Jacob Greasley's)", (
     for (const c of publicCredentials("2027-01-01", "MA")) {
       expect(publicStatus(c, "2027-01-01")).toBe("Renewal verification pending");
     }
-    expect(publicCredentials("2027-01-01", "MA")).toHaveLength(2);
+    expect(publicCredentials("2027-01-01", "MA")).toHaveLength(3);
   });
 
   it("are personal credentials, never described as company licences", () => {
@@ -73,6 +73,21 @@ describe("the Massachusetts credentials (both active, both Jacob Greasley's)", (
       expect(c.holder.kind).toBe("person");
       expect(c.evidenceDescription).not.toMatch(/company licen[cs]e/i);
     }
+  });
+});
+
+describe("the MassWildlife Problem Animal Control Permit", () => {
+  const pac = credential("MA_PROBLEM_ANIMAL_CONTROL");
+
+  it("records the permit facts, never printed on pesticide documents", () => {
+    expect(pac.number).toBe("V175");
+    expect(pac.numberLabel).toBe("Trap Registration #");
+    expect(pac.holder).toEqual({ kind: "person", name: "Nathaniel C Wiggin" });
+    expect(pac.issuedOn).toBe("2026-10-02");
+    expect(pac.validThrough).toBe("2026-12-31");
+    expect(pac.primaryForDocuments).toBe(false);
+    expect(publicStatus(pac, "2026-12-31")).toBe("Active");
+    expect(publicStatus(pac, "2027-01-01")).toBe("Renewal verification pending");
   });
 });
 
@@ -101,9 +116,9 @@ describe("the Rhode Island registration (active, owner-confirmed)", () => {
 
 describe("evidence provenance", () => {
   it("separates official documents from owner confirmation", () => {
-    expect(officiallyDocumentedCredentials().map((c) => c.number).sort()).toEqual(["AL-0060551", "CC-0060592"]);
+    expect(officiallyDocumentedCredentials().map((c) => c.number).sort()).toEqual(["AL-0060551", "CC-0060592", "V175"]);
     expect(ownerConfirmedCredentials().map((c) => c.number)).toEqual(["CP-PCR-000045"]);
-    expect(CREDENTIALS).toHaveLength(3);
+    expect(CREDENTIALS).toHaveLength(4);
     for (const c of CREDENTIALS) expect(holderLabel(c).length).toBeGreaterThan(3);
   });
 });

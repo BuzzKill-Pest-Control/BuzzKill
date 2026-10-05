@@ -6,13 +6,16 @@
  *
  * 2. Writes one static HTML file per route (dist/<path>.html) carrying that
  *    route's own head: title, description, robots, self-referential canonical,
- *    social tags, and page JSON-LD. Amplify serves `<path>.html` for a clean
+ *    social tags, and page JSON-LD. The About artifact also includes its
+ *    rendered page content, using the same component as the browser app.
+ *    Amplify serves `<path>.html` for a clean
  *    `/<path>` request without a redirect. Also writes dist/404.html (noindex
  *    not-found page) and dist/track.html (noindex tracking shell for the
  *    `/track/<token>` rewrite). The root stays dist/index.html.
  *
  * The hosting rules that make Amplify serve these files are listed in
- * docs/seo-canonical-entity-handoff-2026-09-07.md.
+ * docs/seo-canonical-entity-handoff-2026-09-07.md. The bounded About routing
+ * fix is documented in docs/about-initial-html-2026-09-14.md.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -20,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { artifactHtml, routeArtifacts } from "../src/seo/artifacts";
 import { indexablePages } from "../src/seo/pages";
 import { renderSitemap } from "../src/seo/sitemap";
+import { renderRouteBody } from "../src/seo/prerender";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
@@ -37,7 +41,7 @@ let written = 0;
 for (const artifact of routeArtifacts()) {
   const target = join(dist, artifact.file);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, artifactHtml(shell, artifact));
+  writeFileSync(target, artifactHtml(shell, artifact, renderRouteBody(artifact.path)));
   written += 1;
 }
 console.log(`postbuild: wrote ${written} route files (index.html, <route>.html, 404.html, track.html)`);

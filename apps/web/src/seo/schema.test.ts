@@ -171,7 +171,7 @@ describe("the founder", () => {
 
   it("links the complete list of Jake's own verified profiles, and no company page", () => {
     const expected = founderProfileUrls();
-    expect(expected).toHaveLength(12);
+    expect(expected).toHaveLength(14);
     expect(person.sameAs).toEqual(expected);
     for (const url of person.sameAs as string[]) {
       expect(url).toMatch(/^https:\/\//);
@@ -179,6 +179,8 @@ describe("the founder", () => {
       expect(url).not.toMatch(/buzzkill/i);
     }
     expect(person.sameAs).toContain("https://www.linkedin.com/in/jake-greasley");
+    expect(person.sameAs).toContain("https://jakegreasley.com/");
+    expect(person.sameAs).toContain("https://www.wikidata.org/wiki/Q141443360");
     expect(person.sameAs).toContain("https://github.com/JakeGreasleyGIM");
     expect(person.sameAs).toContain("https://www.marketscreener.com/insider/JAKE-GREASLEY-A3LLV6/");
   });
