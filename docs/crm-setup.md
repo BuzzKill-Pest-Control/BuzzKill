@@ -109,41 +109,63 @@ On September 28, 2026, web-only rules on the CRM app sent requests to a missing
 rewrite restored direct routes without changing application code.
 
 Run these commands from the repository root. First confirm the returned app
-ID and app root match the CRM row above, then save a fresh rules backup:
+ID and app root match the CRM row above:
 
 ```bash
 aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
   --query 'app.{appId:appId,name:name,appRoot:environmentVariables.AMPLIFY_MONOREPO_APP_ROOT,customRules:customRules}' \
   --output json
-crm_rules_backup="/tmp/buzzkill-crm-custom-rules-$(date +%Y%m%d-%H%M%S).json"
-aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
-  --query 'app.customRules' --output json > "$crm_rules_backup"
 ```
 
-Apply the CRM file to that exact app and read the persisted rules back:
+Back up the current rules, validate the backup, apply the CRM file, and read
+the persisted rules back in one guarded block (requires `jq`). If fetching or
+validating the backup fails, no rules are changed. Keep the printed backup
+path for rollback; the saved JSON must be a nonempty rules array.
 
 ```bash
-aws amplify update-app --app-id d5ln2hbbp9s2j --region us-east-1 \
-  --custom-rules file://apps/crm/hosting/amplify-custom-rules.json \
-  --query 'app.customRules' --output json
-aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
-  --query 'app.customRules' --output json
+if crm_rules_backup="$(mktemp /tmp/buzzkill-crm-custom-rules.XXXXXX)" &&
+  aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+    --query 'app.customRules' --output json > "$crm_rules_backup" &&
+  jq -e 'type == "array" and length > 0' "$crm_rules_backup" > /dev/null; then
+  printf 'Rules backup: %s\n' "$crm_rules_backup"
+  aws amplify update-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+    --custom-rules file://apps/crm/hosting/amplify-custom-rules.json \
+    --query 'app.customRules' --output json &&
+  aws amplify get-app --app-id d5ln2hbbp9s2j --region us-east-1 \
+    --query 'app.customRules' --output json
+else
+  printf 'Backup failed or contained no rules; no rules changed.\n' >&2
+  false
+fi
 ```
 
 After propagation, verify both production and staging without following
-redirects. Each result below must be HTTP 200 with an empty redirect URL:
+redirects. Every path, including both `/404/` and `/404.html`, must return the
+CRM HTML shell with HTTP 200 and an empty redirect URL. This check stops at
+the first failed response:
 
 ```bash
-for crm_host in https://app.pestbuzzkill.com https://staging.d5ln2hbbp9s2j.amplifyapp.com; do
-  for crm_path in / /dashboard /customers/test /portal/docs /welcome /404/; do
-    curl --max-redirs 0 -sS -o /dev/null \
-      -w '%{http_code} %{redirect_url} %{url_effective}\n' "$crm_host$crm_path"
+(
+  set -e
+  crm_html="$(mktemp /tmp/buzzkill-crm-response.XXXXXX)"
+  trap 'rm -f "$crm_html"' EXIT
+  for crm_host in https://app.pestbuzzkill.com https://staging.d5ln2hbbp9s2j.amplifyapp.com; do
+    for crm_path in / /dashboard /customers/test /portal/docs /welcome /404/ /404.html; do
+      crm_response="$(curl --max-redirs 0 -sS -o "$crm_html" \
+        -w '%{http_code}|%{redirect_url}' "$crm_host$crm_path")"
+      if [ "$crm_response" != '200|' ] ||
+        ! grep -Fq '<title>BuzzKill CRM</title>' "$crm_html" ||
+        ! grep -Fq '<div id="root"></div>' "$crm_html"; then
+        printf 'CRM route check failed: %s%s (%s)\n' "$crm_host" "$crm_path" "$crm_response" >&2
+        exit 1
+      fi
+      printf 'CRM shell OK: %s%s\n' "$crm_host" "$crm_path"
+    done
   done
-done
+)
 ```
 
-Also inspect the HTML response to confirm it is the CRM shell, then request
-the current JavaScript and CSS URLs referenced by that shell and
+Then request the current JavaScript and CSS URLs referenced by the shell and
 `/manifest.webmanifest`. They must remain their original file types, not HTML
 fallbacks. Open a nested CRM URL in a browser and reload it to confirm the
 login or authorized screen loads. These HTTP and browser checks verify the
