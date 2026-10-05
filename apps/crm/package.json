@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node ../web/scripts/checkMigrationRelease.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "outputs": "AWS_REGION=us-east-1 NODE_OPTIONS=--no-experimental-webstorage ampx generate outputs --app-id d26qpsjewk0bee --branch staging",
+    "outputs": "AWS_REGION=us-east-1 NODE_OPTIONS=--no-experimental-webstorage ampx generate outputs --app-id ${BUZZKILL_BACKEND_APP_ID:-d26qpsjewk0bee} --branch ${AWS_BRANCH:-staging}",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -18,7 +19,7 @@
     "aws-amplify": "~6.15.10",
     "react": "~18.3.1",
     "react-dom": "~18.3.1",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@aws-amplify/backend-cli": "~1.8.1",
@@ -32,5 +33,11 @@
   "engines": {
     "node": ">= 20.20.0",
     "npm": ">= 10.8.0"
+  },
+  "overrides": {
+    "fast-xml-parser@<5": "4.5.7",
+    "fast-xml-parser@>=5 <5.7.2": "5.7.2",
+    "js-cookie": "3.0.8",
+    "lodash": "4.18.1"
   }
 }

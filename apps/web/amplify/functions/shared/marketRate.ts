@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "./migrationPreview";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { dataClient } from "./dataClient";
@@ -1076,6 +1077,7 @@ async function research(
   // a live research (DEMAND at 120s leaves room for the worker's one in-run
   // retry), and the run's own 13-minute budget bounds how many long calls
   // one drain attempts.
+  assertBusinessActionsEnabled();
   const anthropic = new Anthropic({
     apiKey,
     timeout: cfg.timeoutMs,

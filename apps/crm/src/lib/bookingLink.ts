@@ -32,6 +32,9 @@ export function isProductionCrm(
 export function marketingSiteUrl(
   hostname: string = window.location.hostname
 ): string {
+  const override = import.meta.env.VITE_MARKETING_URL as string | undefined;
+  if (override) return override.replace(/\/+$/, "");
+  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") return "#migration-preview";
   return isProductionCrm(hostname)
     ? "https://www.pestbuzzkill.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com";
