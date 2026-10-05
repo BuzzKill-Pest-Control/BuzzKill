@@ -12,8 +12,9 @@ import { OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE, OFFICE_TEL } from "../lib/co
  * The credentials page renders the same structured records the agreements
  * and PDFs print (amplify/functions/shared/credentials.ts), so a number, a
  * holder, a status, or a date can only ever be published one way. Both
- * Massachusetts credentials name their holder, Jacob Greasley, because they
- * are his credentials, not company licences; the Rhode Island registration
+ * Massachusetts pesticide credentials name their holder, Jacob Greasley, because
+ * they are his credentials, not company licences; the MassWildlife Problem
+ * Animal Control Permit names Nathaniel C Wiggin; the Rhode Island registration
  * names BuzzKill Pest Control LLC. Status is date-aware: nothing reads Active
  * past its stated expiration without renewal data.
  */
@@ -126,7 +127,7 @@ const DATE = (iso: string) =>
 /** The rows a credential record renders, in display order. */
 function detailsFor(c: Credential, asOf: string): CredentialCardProps["details"] {
   const rows: CredentialCardProps["details"] = [
-    { label: c.jurisdiction === "RI" ? "Registration #" : "License #", value: c.number },
+    { label: c.numberLabel ?? (c.jurisdiction === "RI" ? "Registration #" : "License #"), value: c.number },
     { label: "Type", value: c.type },
     { label: c.holder.kind === "company" ? "Registrant" : "Holder", value: holderLabel(c) },
   ];
@@ -158,9 +159,10 @@ export default function LicensedInsured() {
               below and carries insurance. Each credential names the agency
               that issued it and who holds it, and can be checked through the
               official state portal linked on its card. The Massachusetts
-              credentials are held personally by our founder, Jacob Greasley;
-              the Rhode Island registration is held by BuzzKill Pest Control
-              LLC.
+              pesticide credentials are held personally by our founder, Jacob
+              Greasley; the Massachusetts Problem Animal Control Permit is held
+              by Nathaniel C Wiggin; the Rhode Island registration is held by
+              BuzzKill Pest Control LLC.
             </p>
           </div>
           <div className="bk-credentials-visual">

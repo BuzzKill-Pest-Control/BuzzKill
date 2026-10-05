@@ -14,7 +14,10 @@
  *    both valid through 2026-12-31, both on a 2029-12-31 recertification
  *    cycle, both Active, and both returned by MDAR's ePLACE public search).
  *    They are personal credentials, not company licences, and neither is
- *    evidence about how many technicians hold credentials.
+ *    evidence about how many technicians hold credentials. The MassWildlife
+ *    Problem Animal Control Permit (Trap Registration V175) is also an
+ *    official document: the Division of Fisheries & Wildlife's own permit,
+ *    issued to Nathaniel C Wiggin on 2026-10-02 and valid through 2026-12-31.
  *  - "owner-confirmed": the owner has confirmed the credential is active and
  *    who holds it, but no official certificate or portal record is stored
  *    here. This is the case for the Rhode Island Pesticide Company
@@ -26,9 +29,11 @@
  * "Renewal verification pending". Callers pass `asOf` so nothing depends on
  * the system clock in a test.
  *
- * The MDAR approval letters carry the holder's former personal address. That
- * address is not a company fact and must never enter this file, the site, or
- * any document; only the credential facts above are recorded.
+ * The MDAR approval letters carry the holder's former personal address, and the
+ * MassWildlife permit carries its holder's home address, date of birth,
+ * physical description and customer ID. None of that is a company fact and it
+ * must never enter this file, the site, or any document; only the credential
+ * facts above are recorded.
  *
  * Pure: shared by the Lambdas and the Vite app.
  */
@@ -40,7 +45,11 @@ export type CredentialHolder =
 export type CredentialEvidence = "official-document" | "owner-confirmed";
 
 export type Credential = {
-  id: "MA_COMMERCIAL_CERTIFICATION" | "MA_APPLICATOR_CORE" | "RI_COMPANY_REGISTRATION";
+  id:
+    | "MA_COMMERCIAL_CERTIFICATION"
+    | "MA_PROBLEM_ANIMAL_CONTROL"
+    | "MA_APPLICATOR_CORE"
+    | "RI_COMPANY_REGISTRATION";
   jurisdiction: "MA" | "RI";
   jurisdictionName: string;
   /** Title as shown on the Licensed & Insured card. */
@@ -48,6 +57,8 @@ export type Credential = {
   /** Credential type in the issuer's exact wording. */
   type: string;
   number: string;
+  /** Label for the number on the card, when it is not a licence or registration number. */
+  numberLabel?: string;
   issuer: string;
   category?: string;
   holder: CredentialHolder;
@@ -69,9 +80,12 @@ export type Credential = {
 
 export const MA_LOOKUP_URL =
   "https://www.mass.gov/how-to/look-up-and-confirm-a-massachusetts-pesticide-license";
+export const MASSWILDLIFE_URL = "https://www.mass.gov/orgs/division-of-fisheries-and-wildlife";
 export const RI_LOOKUP_URL = "https://demri.my.site.com/agr/s/";
 
 const MDAR = "Massachusetts Department of Agricultural Resources (MDAR), Pesticide Program";
+const MASSWILDLIFE =
+  "Massachusetts Department of Fish & Game, Division of Fisheries & Wildlife (MassWildlife)";
 const RIDEM =
   "Rhode Island Department of Environmental Management (RIDEM), Division of Agriculture and Forest Environment";
 
@@ -96,6 +110,27 @@ export const CREDENTIALS: readonly Credential[] = [
     primaryForDocuments: true,
     verifyUrl: MA_LOOKUP_URL,
     verifyLabel: "Look Up on Mass.gov",
+  },
+  {
+    id: "MA_PROBLEM_ANIMAL_CONTROL",
+    jurisdiction: "MA",
+    jurisdictionName: "Massachusetts",
+    title: "Massachusetts Problem Animal Control Permit",
+    type: "Problem Animal Control Permit",
+    number: "V175",
+    numberLabel: "Trap Registration #",
+    issuer: MASSWILDLIFE,
+    holder: { kind: "person", name: "Nathaniel C Wiggin" },
+    status: "Active",
+    evidence: "official-document",
+    evidenceDescription:
+      "MassWildlife 2026 Problem Animal Control Permit issued October 2, 2026, valid through December 31, 2026.",
+    issuedOn: "2026-10-02",
+    validThrough: "2026-12-31",
+    // A wildlife permit, not a pesticide credential: never printed on documents.
+    primaryForDocuments: false,
+    verifyUrl: MASSWILDLIFE_URL,
+    verifyLabel: "MassWildlife on Mass.gov",
   },
   {
     id: "MA_APPLICATOR_CORE",
