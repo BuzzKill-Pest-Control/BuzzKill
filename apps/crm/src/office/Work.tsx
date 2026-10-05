@@ -369,6 +369,24 @@ export default function WorkQueue() {
     [load, runOn]
   );
 
+  const retryOfficeJobLead = useCallback(
+    async (item: WorkItem) => {
+      await runOn(item, "Could not finish the lead cleanup", async () => {
+        const result = opResultUnlessRefused<{
+          workItemId: string;
+          status: string;
+          warning?: string;
+        }>(await updateOwnedWork({ workItemId: item.id, action: "RETRY_OFFICE_JOB_LEAD" }));
+        if (result?.warning) throw new Error(result.warning);
+        if (result?.workItemId !== item.id || result.status !== "RESOLVED") {
+          throw new Error("The lead cleanup was not confirmed. The existing job remains saved.");
+        }
+        load();
+      });
+    },
+    [load, runOn]
+  );
+
   if (!items) {
     return (
       <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
@@ -532,6 +550,20 @@ export default function WorkQueue() {
                 {/* Verified closes — a dedicated action that does the work AND
                     resolves the exception, or an in-place check the server
                     re-confirms. Available to routine office/finance. */}
+                {item.status === "OPEN" &&
+                item.kind === "LEAD_LIFECYCLE_RECOVERY" &&
+                item.relatedId?.startsWith("office-job:") &&
+                item.relatedId.length > "office-job:".length &&
+                roles.office ? (
+                  <Button
+                    small
+                    variant="subtle"
+                    loading={perform.busyKey === item.id}
+                    onClick={() => void retryOfficeJobLead(item)}
+                  >
+                    Finish lead cleanup
+                  </Button>
+                ) : null}
                 {item.status === "OPEN" &&
                 policy?.externalAction?.mutation === "rebookJob" ? (
                   <Button

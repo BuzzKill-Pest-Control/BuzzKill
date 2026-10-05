@@ -143,6 +143,7 @@ import {
   assertLeadOutreachAllowed,
   logLeadTouch,
 } from "../shared/leadLifecycle";
+import { settleLeadForOfficeJob } from "../shared/officeJobLead";
 import { assertScheduleReason } from "../shared/visitChangeReasons";
 import { formatMoney, formatMonthly } from "../shared/money";
 
@@ -572,7 +573,7 @@ export const handler = async (event: AppSyncResolverEvent<Args>) => {
     }
     case "createOfficeJob": {
       assertOffice(event.identity);
-      return createOfficeJob(event.arguments);
+      return createOfficeJob(event.identity, event.arguments);
     }
     case "updateJobSchedule": {
       // GL-13: the actor and controlled reason travel with the change into the
@@ -1490,6 +1491,43 @@ export async function updateOwnedWork(args: {
   const actorEmail = args.actorEmail ?? args.actorSub ?? "unknown staff";
   const now = new Date().toISOString();
 
+  if (args.action === "RETRY_OFFICE_JOB_LEAD") {
+    if (!args.actorSub) throw new Error("A staffed Office actor is required.");
+    const jobId = typeof item.relatedId === "string" && item.relatedId.startsWith("office-job:")
+      ? item.relatedId.slice("office-job:".length)
+      : "";
+    if (
+      item.kind !== "LEAD_LIFECYCLE_RECOVERY" || !item.customerId || !jobId ||
+      item.id !== workItemId("LEAD_LIFECYCLE_RECOVERY", item.relatedId)
+    ) return refusal("This work item is not a saved-job lead recovery.");
+    if (item.status === "RESOLVED") {
+      return { workItemId: item.id, status: "RESOLVED", alreadyResolved: true };
+    }
+    const saved = await client.models.Job.get({ id: jobId });
+    if (saved.errors?.length || !saved.data || saved.data.customerId !== item.customerId) {
+      return refusal("The saved job could not be verified for this customer. No lead was changed.");
+    }
+    if (saved.data.status === "CANCELED") {
+      return refusal("This job was canceled. Review the lead's next action instead of converting it from canceled work.");
+    }
+    const settlement = await settleLeadForOfficeJob({
+      customerId: item.customerId,
+      jobId: saved.data.id,
+      actor: { sub: args.actorSub, email: args.actorEmail },
+    });
+    if (settlement.warning) return { workItemId: item.id, status: "OPEN", ...settlement };
+    return closeResolvedWorkItem({
+      item,
+      actorSub: args.actorSub,
+      actorEmail,
+      now,
+      note: `Lead follow-up verified closed for saved office job ${saved.data.id}. Payment and billing unchanged.`,
+      eventType: "RESOLVED",
+      kind: item.kind,
+      relatedId: item.relatedId,
+    });
+  }
+
   if (args.action === "CLAIM") {
     // The queue is a snapshot; somebody closed this case while it was on
     // screen. Every refusal in this action is that same stale list.
@@ -2199,7 +2237,7 @@ function packetFields(args: Args) {
 }
 
 /** Jobs created by the office always start unassigned. */
-async function createOfficeJob(args: Args) {
+async function createOfficeJob(identity: AppSyncIdentity | undefined | null, args: Args) {
   const customerId = args.customerId?.trim() ?? "";
   let serviceType = args.serviceType?.trim() ?? "";
   if (!customerId) throw new Error("Customer is required");
@@ -2413,7 +2451,14 @@ async function createOfficeJob(args: Args) {
       )
     ).catch(() => undefined);
   }
-  return { jobId: created.id };
+  const settlement = customer.status === "LEAD"
+    ? await settleLeadForOfficeJob({
+        customerId,
+        jobId: created.id,
+        actor: { sub: callerSub(identity), email: callerEmail(identity) },
+      })
+    : {};
+  return { jobId: created.id, ...settlement };
 }
 
 /**
