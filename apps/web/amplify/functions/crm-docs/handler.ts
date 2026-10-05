@@ -2884,6 +2884,11 @@ async function updateJobSchedule(
         technicianId: technician.id,
         routeOrder: args.routeOrder ?? 1,
         scheduledDate: args.scheduledDate,
+        // An arrival promise belongs to its original day, not to whatever
+        // date the dispatch board is showing when the stop is assigned.
+        ...(args.scheduledDate !== (job.scheduledDate ?? null)
+          ? { scheduledStartTime: null, scheduledEndTime: null }
+          : {}),
         status: "SCHEDULED",
         capacityMinutes: slotMinutes,
         // A real assignment supersedes the checkout-time hold — the release
@@ -3180,7 +3185,13 @@ async function updateJobSchedule(
           ? null
           : (job.capacityTechnicianId ?? null),
         ...(dateChanged
-          ? { routeId: null, technicianId: null, routeOrder: null }
+          ? {
+              routeId: null,
+              technicianId: null,
+              routeOrder: null,
+              scheduledStartTime: null,
+              scheduledEndTime: null,
+            }
           : {}),
       },
       jobScheduleGuards(job)

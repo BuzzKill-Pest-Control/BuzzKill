@@ -1836,9 +1836,9 @@ async function reactivateCustomer(
  * payment-method label, portalUserSub, accessGroups, groupId or paid state:
  * those protected lifecycle fields are named-action-only (deactivate/reactivate,
  * setCustomerGroup, the billing and booking Lambdas), which is the whole point
- * of removing the broad update grant. A field the caller does not send is set to
- * null, exactly like the previous raw update the Edit sheet used, so clearing a
- * field still works.
+ * of removing the broad update grant. Omitted fields stay unchanged; explicit
+ * null or blank values clear a field. This also allows a property-type-only
+ * edit without replacing contact or billing details.
  */
 async function updateCustomerContact(args: UpdateCustomerContactArgs) {
   const displayName = args.displayName?.trim();
@@ -1877,9 +1877,7 @@ async function updateCustomerContact(args: UpdateCustomerContactArgs) {
     );
   }
 
-  const { data: updated, errors } = await client.models.Customer.update({
-    id: args.customerId,
-    displayName,
+  const optionalFields: Partial<Omit<UpdateCustomerContactArgs, "customerId" | "displayName">> = {
     contactName: trim(args.contactName),
     email,
     phone: trim(args.phone),
@@ -1895,6 +1893,14 @@ async function updateCustomerContact(args: UpdateCustomerContactArgs) {
     leadSource: trim(args.leadSource),
     notes: trim(args.notes),
     propertyClass: normalizePropertyClass(args.propertyClass),
+  };
+  for (const field of Object.keys(optionalFields) as (keyof typeof optionalFields)[]) {
+    if (args[field] === undefined) delete optionalFields[field];
+  }
+  const { data: updated, errors } = await client.models.Customer.update({
+    id: args.customerId,
+    displayName,
+    ...optionalFields,
   });
   if (!updated) {
     throw new Error(

@@ -2352,6 +2352,32 @@ export default function CustomerDetail() {
           plans={plans}
           customer={customer}
           onSubmit={async (v) => {
+            if (
+              v.serviceCode !== "NOT_IN_CATALOG" &&
+              v.propertyClass &&
+              v.propertyClass !== customer.propertyClass
+            ) {
+              // Save the future-job default first, so a failed save cannot
+              // leave a created job behind and invite a duplicate on retry.
+              const freshCustomer = unwrap(
+                await api().models.Customer.get({ id: customer.id })
+              );
+              if (!freshCustomer) {
+                throw new Error("Could not load the customer's current details. Try again before creating the job.");
+              }
+              if (v.propertyClass !== freshCustomer.propertyClass) {
+                const saved = opResultUnlessRefused<{ customerId?: string }>(
+                  await api().mutations.updateCustomerContact({
+                    customerId: customer.id,
+                    displayName: freshCustomer.displayName,
+                    propertyClass: v.propertyClass,
+                  })
+                );
+                if (saved?.customerId !== customer.id) {
+                  throw new Error("The property type wasn't confirmed. Try again before creating the job.");
+                }
+              }
+            }
             // A refused seasonal month has neither catalogDecisionOpened nor a
             // job behind it, so it would fall through both branches below and
             // the sheet would close on a visit that was never created.
@@ -3857,6 +3883,12 @@ function RescheduleForm({
       <Field label="Date">
         <DateField value={date} onChange={setDate} allowClear />
       </Field>
+      {dateChanged && formatJobAppointmentTime(job) ? (
+        <p className="muted small">
+          Changing the date clears the previous appointment time ({formatJobAppointmentTime(job)}).
+          Confirm the new arrival time with the customer.
+        </p>
+      ) : null}
       {dateChanged && job.routeId ? (
         <p className="muted small">
           Moving the date takes this job off its current route — it'll be
@@ -4295,7 +4327,7 @@ function JobForm({
               />
             </Field>
           </div>
-          <Field label="Property type">
+          <Field label="Property type" hint="Saved as the customer's default for future jobs.">
             <select value={propertyClass} onChange={(e) => setPropertyClass(e.target.value)}>
               <option value="">Choose property type</option>
               <option value="RESIDENTIAL">Residential</option>

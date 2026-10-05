@@ -2403,6 +2403,45 @@ describe("manual office job scheduling", () => {
   });
 });
 
+describe("appointment times follow only their agreed date", () => {
+  beforeEach(() => {
+    Object.assign(jobs[0], {
+      status: "UNSCHEDULED",
+      technicianId: null,
+      scheduledDate: "2026-07-20",
+      scheduledStartTime: "15:30",
+      scheduledEndTime: "16:30",
+    });
+  });
+
+  it.each(["2026-07-21", null])("clears both times when rescheduling to %s", async (date) => {
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "RESCHEDULE", scheduledDate: date,
+    }, ["OWNER"]);
+    expect(jobs[0].scheduledDate ?? null).toBe(date);
+    expect(jobs[0].scheduledStartTime ?? null).toBeNull();
+    expect(jobs[0].scheduledEndTime ?? null).toBeNull();
+  });
+
+  it.each(["2026-07-20", "2026-07-21"])("keeps a time only when assigning on its original day: %s", async (date) => {
+    routes.push({ id: "r1", technicianId: "t1", date });
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "ASSIGN", scheduledDate: date,
+      technicianId: "t1", routeId: "r1",
+    }, ["OWNER"]);
+    expect(jobs[0].scheduledDate).toBe(date);
+    expect(jobs[0].scheduledStartTime ?? null).toBe(date === "2026-07-20" ? "15:30" : null);
+    expect(jobs[0].scheduledEndTime ?? null).toBe(date === "2026-07-20" ? "16:30" : null);
+  });
+
+  it("preserves the appointment on a same-day schedule update", async () => {
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "RESCHEDULE", scheduledDate: "2026-07-20",
+    }, ["OWNER"]);
+    expect(jobs[0]).toMatchObject({ scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+  });
+});
+
 describe("GL-01 — office jobs are controlled catalog selections", () => {
   it("stamps the immutable catalog reference on a created job", async () => {
     const res = (await call(
