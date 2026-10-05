@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
+import { makeMigrationPreviewReadOnly } from "./migration-read-only";
 import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { defineBackend } from "@aws-amplify/backend";
@@ -1042,4 +1043,10 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
 });
 
 // Fresh, empty destination only; the normal final deployment omits this flag.
-applyMigrationBootstrap(backupStack);
+makeMigrationPreviewReadOnly(backupStack);
+const deferredApiResources = applyMigrationBootstrap(backupStack);
+if (migrationPreview) {
+  backend.addOutput({
+    custom: { migrationPreview: true, migrationApiReady: deferredApiResources === 0 },
+  });
+}
