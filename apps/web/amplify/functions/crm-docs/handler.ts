@@ -2363,6 +2363,9 @@ async function createOfficeJob(identity: AppSyncIdentity | undefined | null, arg
     if (!plan || plan.customerId !== customerId) {
       throw new Error("That service plan does not belong to this customer");
     }
+    if (plan.status !== "ACTIVE") {
+      throw new Error("Choose an active service plan before adding a recurring job.");
+    }
     // GL-17: a seasonal plan's visit may only land in an in-season month, and
     // never a second visit in a month whose treatment already happened — there
     // is no free-text bypass around the seasonal promise.
