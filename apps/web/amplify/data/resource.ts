@@ -1668,6 +1668,11 @@ export const schema = a.schema({
       priceCents: a.integer(),
       status: a.ref("JobStatus").required(),
       scheduledDate: a.date(),
+      // The office-agreed arrival time/window, in HH:mm on the
+      // America/New_York clock. Kept separate from the route's computed ETA.
+      // A start alone is an exact appointment time; the end is optional.
+      scheduledStartTime: a.string(),
+      scheduledEndTime: a.string(),
       routeId: a.id(),
       route: a.belongsTo("Route", "routeId"),
       routeOrder: a.integer(),
@@ -3077,6 +3082,9 @@ export const schema = a.schema({
       serviceCode: a.string(),
       priceCents: a.integer(),
       scheduledDate: a.date(),
+      // Optional office-agreed arrival time/window (HH:mm, America/New_York).
+      scheduledStartTime: a.string(),
+      scheduledEndTime: a.string(),
       // GL-12 dispatch packet, captured at scheduling time.
       accessInstructions: a.string(),
       hazardNotes: a.string(),

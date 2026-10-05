@@ -2321,6 +2321,127 @@ describe("GL-12 — the honest one-tap exits and the versioned packet", () => {
   });
 });
 
+describe("manual office job scheduling", () => {
+  const manualJob = {
+    customerId: "c1",
+    serviceType: "Wasp / hornet nest removal",
+    serviceCode: "WASP_NEST",
+    propertyClass: "RESIDENTIAL",
+    scheduledDate: "2026-10-06",
+    scheduledStartTime: "15:30",
+    scheduledEndTime: "16:30",
+    priceCents: 27550,
+  };
+
+  it("adds a dated, priced job to the existing lead with its agreed arrival window", async () => {
+    customer.status = "LEAD";
+    const res = (await call("createOfficeJob", manualJob, ["OWNER"])) as { jobId: string };
+    const created = jobs.find((j) => j.id === res.jobId)!;
+
+    expect(created).toMatchObject({
+      customerId: "c1",
+      type: "ONE_TIME",
+      serviceCode: "WASP_NEST",
+      status: "SCHEDULED",
+      scheduledDate: "2026-10-06",
+      scheduledStartTime: "15:30",
+      scheduledEndTime: "16:30",
+      priceCents: 27550,
+    });
+    expect(created.technicianId).toBeUndefined();
+    expect(created.etaMinutes).toBeUndefined();
+    expect(created.paidAt).toBeUndefined();
+    expect(customer.status).toBe("LEAD");
+  });
+
+  it("accepts a single appointment time and an explicitly zero-dollar job", async () => {
+    const res = (await call(
+      "createOfficeJob",
+      { ...manualJob, scheduledEndTime: undefined, priceCents: 0 },
+      ["OWNER"]
+    )) as { jobId: string };
+    const created = jobs.find((j) => j.id === res.jobId)!;
+    expect(created.scheduledStartTime).toBe("15:30");
+    expect(created.scheduledEndTime).toBeUndefined();
+    expect(created.priceCents).toBe(0);
+  });
+
+  it("continues to accept undated jobs without a price or time", async () => {
+    const res = (await call(
+      "createOfficeJob",
+      { customerId: "c1", serviceType: "General pest control" },
+      ["OWNER"]
+    )) as { jobId: string };
+    const created = jobs.find((j) => j.id === res.jobId)!;
+    expect(created.status).toBe("UNSCHEDULED");
+    expect(created.scheduledStartTime).toBeUndefined();
+    expect(created.scheduledEndTime).toBeUndefined();
+    expect(created.priceCents).toBeUndefined();
+  });
+
+  it.each([
+    [{ scheduledDate: undefined }, /service date/i],
+    [{ scheduledDate: "2026-02-30" }, /valid service date/i],
+    [{ scheduledDate: "2026-13-06" }, /valid service date/i],
+    [{ scheduledStartTime: undefined }, /start time/i],
+    [{ scheduledStartTime: "24:00" }, /valid arrival time/i],
+    [{ scheduledStartTime: "3:30" }, /valid arrival time/i],
+    [{ scheduledEndTime: "16:60" }, /valid arrival time/i],
+    [{ scheduledEndTime: "15:30" }, /end after/i],
+    [{ scheduledEndTime: "14:30" }, /end after/i],
+    [{ priceCents: -1 }, /job amount/i],
+    [{ priceCents: 12.5 }, /job amount/i],
+    [{ priceCents: Number.NaN }, /job amount/i],
+    [{ priceCents: Number.POSITIVE_INFINITY }, /job amount/i],
+    [{ priceCents: 2_147_483_648 }, /job amount/i],
+  ])("rejects invalid appointment or amount before creating a job: %j", async (patch, message) => {
+    const before = jobs.length;
+    await expect(call("createOfficeJob", { ...manualJob, ...patch }, ["OWNER"]))
+      .rejects.toThrow(message);
+    expect(jobs).toHaveLength(before);
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+  });
+});
+
+describe("appointment times follow only their agreed date", () => {
+  beforeEach(() => {
+    Object.assign(jobs[0], {
+      status: "UNSCHEDULED",
+      technicianId: null,
+      scheduledDate: "2026-07-20",
+      scheduledStartTime: "15:30",
+      scheduledEndTime: "16:30",
+    });
+  });
+
+  it.each(["2026-07-21", null])("clears both times when rescheduling to %s", async (date) => {
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "RESCHEDULE", scheduledDate: date,
+    }, ["OWNER"]);
+    expect(jobs[0].scheduledDate ?? null).toBe(date);
+    expect(jobs[0].scheduledStartTime ?? null).toBeNull();
+    expect(jobs[0].scheduledEndTime ?? null).toBeNull();
+  });
+
+  it.each(["2026-07-20", "2026-07-21"])("keeps a time only when assigning on its original day: %s", async (date) => {
+    routes.push({ id: "r1", technicianId: "t1", date });
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "ASSIGN", scheduledDate: date,
+      technicianId: "t1", routeId: "r1",
+    }, ["OWNER"]);
+    expect(jobs[0].scheduledDate).toBe(date);
+    expect(jobs[0].scheduledStartTime ?? null).toBe(date === "2026-07-20" ? "15:30" : null);
+    expect(jobs[0].scheduledEndTime ?? null).toBe(date === "2026-07-20" ? "16:30" : null);
+  });
+
+  it("preserves the appointment on a same-day schedule update", async () => {
+    await call("updateJobSchedule", {
+      jobId: "j1", operation: "RESCHEDULE", scheduledDate: "2026-07-20",
+    }, ["OWNER"]);
+    expect(jobs[0]).toMatchObject({ scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+  });
+});
+
 describe("GL-01 — office jobs are controlled catalog selections", () => {
   it("stamps the immutable catalog reference on a created job", async () => {
     const res = (await call(

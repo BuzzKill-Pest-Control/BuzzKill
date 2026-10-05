@@ -20,7 +20,9 @@ export default function StateServiceArea({ stateAbbr, stateName, intro }: Props)
   // The same records the Licensed & Insured page and the agreements print,
   // with the date-aware status they carry there.
   const asOf = isoToday();
-  const credentials = publicCredentials(asOf, stateAbbr);
+  // The personal wildlife permit is listed separately on Licensed & Insured;
+  // its record does not establish a relationship to BuzzKill's work.
+  const credentials = publicCredentials(asOf, stateAbbr).filter((c) => c.id !== "MA_PROBLEM_ANIMAL_CONTROL");
   return (
     <>
       <section className="bk-section bk-section-cream">
@@ -55,7 +57,7 @@ export default function StateServiceArea({ stateAbbr, stateName, intro }: Props)
           </ul>
           <p className="bk-p">
             Registration and license numbers, who holds each credential, and
-            links to the state lookup portals are on our{" "}
+            verification links and instructions are on our{" "}
             <Link to="/licensed-insured">Licensed &amp; Insured</Link> page.
           </p>
         </div>

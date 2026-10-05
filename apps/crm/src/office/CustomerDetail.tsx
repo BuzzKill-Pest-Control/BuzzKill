@@ -58,6 +58,11 @@ import {
 } from "../lib/billingDisclosure";
 import { isOfficeCompletableServiceType } from "../lib/jobTypes";
 import {
+  formatJobAppointmentTime,
+  jobPriceCents,
+  validateJobAppointment,
+} from "../lib/jobAppointment";
+import {
   Badge,
   Button,
   Card,
@@ -976,7 +981,11 @@ export default function CustomerDetail() {
       </Card>
 
       {isLead && roles.office ? (
-        <LeadPanel customer={customer} onChanged={() => void load()} />
+        <LeadPanel
+          customer={customer}
+          onChanged={() => void load()}
+          onAddJob={() => setSheet("job")}
+        />
       ) : null}
 
       {/* Every quote this customer was given, for the whole life of the record.
@@ -1277,15 +1286,13 @@ export default function CustomerDetail() {
         )}
       </Card>
 
-      {/* Job creation is for ACTIVE customers only. A lead with an
-          office-created job would be a payment-less conversion side door —
-          leads get a job when they book and pay online, not before. */}
+      {/* Jobs agreed offline stay linked to the same lead/customer record. */}
       <Card
         title="Jobs"
         actions={
-          roles.office && customer.status === "ACTIVE" ? (
+          roles.office && (customer.status === "ACTIVE" || isLead) ? (
             <Button small variant="subtle" onClick={() => setSheet("job")}>
-              {activePlan && !upcomingJob ? "Schedule visit" : "+ Job"}
+              {activePlan && !upcomingJob ? "Schedule visit" : "Add job"}
             </Button>
           ) : undefined
         }
@@ -1299,7 +1306,7 @@ export default function CustomerDetail() {
         {jobs.length === 0 ? (
           <p className="muted small">
             {isLead
-              ? "No jobs — the first visit is scheduled when the lead books and pays online."
+              ? "No jobs yet. Add a job to record an agreed appointment and price."
               : "No jobs yet."}
           </p>
         ) : (
@@ -1332,7 +1339,11 @@ export default function CustomerDetail() {
                   title={j.serviceType}
                   subtitle={
                     <>
-                      {`${j.scheduledDate ? fmtDate(j.scheduledDate, true) : "unscheduled"}${j.priceCents ? ` · ${money(j.priceCents)}` : ""}`}
+                      {[
+                        j.scheduledDate ? fmtDate(j.scheduledDate, true) : "unscheduled",
+                        j.scheduledDate ? formatJobAppointmentTime(j) : "",
+                        j.priceCents != null ? money(j.priceCents) : "",
+                      ].filter(Boolean).join(" · ")}
                       {j.status === "COMPLETED" ? (
                         <span className="nested-line">
                           {report?.pdfKey ? (
@@ -2336,14 +2347,42 @@ export default function CustomerDetail() {
       <CallbacksSection customerId={customer.id} onChanged={load} />
       <PortalRequestsSection customerId={customer.id} />
 
-      <Sheet open={sheet === "job"} onClose={() => setSheet(null)} title="New job">
+      <Sheet open={sheet === "job"} onClose={() => setSheet(null)} title="Add job">
         <JobForm
           plans={plans}
+          customer={customer}
           onSubmit={async (v) => {
+            if (
+              v.serviceCode !== "NOT_IN_CATALOG" &&
+              v.propertyClass &&
+              v.propertyClass !== customer.propertyClass
+            ) {
+              // Save the future-job default first, so a failed save cannot
+              // leave a created job behind and invite a duplicate on retry.
+              const freshCustomer = unwrap(
+                await api().models.Customer.get({ id: customer.id })
+              );
+              if (!freshCustomer) {
+                throw new Error("Could not load the customer's current details. Try again before creating the job.");
+              }
+              if (v.propertyClass !== freshCustomer.propertyClass) {
+                const saved = opResultUnlessRefused<{ customerId?: string }>(
+                  await api().mutations.updateCustomerContact({
+                    customerId: customer.id,
+                    displayName: freshCustomer.displayName,
+                    propertyClass: v.propertyClass,
+                  })
+                );
+                if (saved?.customerId !== customer.id) {
+                  throw new Error("The property type wasn't confirmed. Try again before creating the job.");
+                }
+              }
+            }
             // A refused seasonal month has neither catalogDecisionOpened nor a
             // job behind it, so it would fall through both branches below and
             // the sheet would close on a visit that was never created.
             const result = opResultUnlessRefused<{
+              jobId?: string;
               catalogDecisionOpened?: boolean;
               message?: string;
             }>(
@@ -2354,6 +2393,9 @@ export default function CustomerDetail() {
                 serviceCode: v.serviceCode,
                 priceCents: v.priceCents ?? undefined,
                 scheduledDate: v.scheduledDate || undefined,
+                scheduledStartTime: v.scheduledStartTime || undefined,
+                scheduledEndTime: v.scheduledEndTime || undefined,
+                propertyClass: v.propertyClass || undefined,
                 accessInstructions: v.packet.accessInstructions.trim() || undefined,
                 hazardNotes: v.packet.hazardNotes.trim() || undefined,
                 prepInstructions: v.packet.prepInstructions.trim() || undefined,
@@ -2370,9 +2412,14 @@ export default function CustomerDetail() {
                 result.message ??
                   "That service isn't in the catalog — the request is now an owned catalog decision. No job was created."
               );
+            } else if (!result?.jobId) {
+              throw new Error("The job wasn't confirmed. Check the Jobs list before trying again.");
             }
             setSheet(null);
             await load();
+            if (result?.jobId) {
+              setNotice("Job added. Assign a technician from the Schedule page when ready.");
+            }
           }}
         />
       </Sheet>
@@ -3836,6 +3883,12 @@ function RescheduleForm({
       <Field label="Date">
         <DateField value={date} onChange={setDate} allowClear />
       </Field>
+      {dateChanged && formatJobAppointmentTime(job) ? (
+        <p className="muted small">
+          Changing the date clears the previous appointment time ({formatJobAppointmentTime(job)}).
+          Confirm the new arrival time with the customer.
+        </p>
+      ) : null}
       {dateChanged && job.routeId ? (
         <p className="muted small">
           Moving the date takes this job off its current route — it'll be
@@ -4125,14 +4178,19 @@ const emptyPacket: PacketValues = {
 
 function JobForm({
   plans,
+  customer,
   onSubmit,
 }: {
   plans: ServicePlan[];
+  customer: Customer;
   onSubmit: (v: {
     serviceType: string;
     serviceCode: string;
     priceCents: number | null;
     scheduledDate: string;
+    scheduledStartTime: string;
+    scheduledEndTime: string;
+    propertyClass: string;
     servicePlanId: string;
     packet: PacketValues;
   }) => Promise<void>;
@@ -4144,6 +4202,9 @@ function JobForm({
   const [otherText, setOtherText] = useState("");
   const [price, setPrice] = useState("");
   const [scheduledDate, setScheduledDate] = useState("");
+  const [scheduledStartTime, setScheduledStartTime] = useState("");
+  const [scheduledEndTime, setScheduledEndTime] = useState("");
+  const [propertyClass, setPropertyClass] = useState(customer.propertyClass ?? "");
   const [planId, setPlanId] = useState("");
   const [packet, setPacket] = useState<PacketValues>(emptyPacket);
   const activePlans = plans.filter((p) => p.status === "ACTIVE");
@@ -4161,15 +4222,23 @@ function JobForm({
         notInCatalog ? "Describe what the customer asked for" : "Pick a service"
       );
     }
-    const cents = price ? Math.round(parseFloat(price) * 100) : null;
-    if (!planId && price && (!Number.isFinite(cents!) || cents! <= 0)) {
-      throw new Error("Price doesn't look valid");
+    const cents = planId || notInCatalog
+      ? null
+      : jobPriceCents(price, customer.status === "LEAD");
+    if (!notInCatalog) {
+      validateJobAppointment(scheduledDate, scheduledStartTime, scheduledEndTime);
+      if (scheduledDate && !propertyClass) {
+        throw new Error("Choose the property's type before scheduling this job.");
+      }
     }
     await onSubmit({
       serviceType: serviceType.trim(),
       serviceCode,
       priceCents: planId ? null : cents,
-      scheduledDate,
+      scheduledDate: notInCatalog ? "" : scheduledDate,
+      scheduledStartTime: notInCatalog ? "" : scheduledStartTime,
+      scheduledEndTime: notInCatalog ? "" : scheduledEndTime,
+      propertyClass,
       servicePlanId: planId,
       packet,
     });
@@ -4215,15 +4284,63 @@ function JobForm({
           </select>
         </Field>
       ) : null}
-      {!planId ? (
-        <Field label="One-time price ($)">
-          <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
+      {!planId && !notInCatalog ? (
+        <Field label="Job amount ($)" hint="Agreed total for this job. Enter 0 for a no-charge visit.">
+          <input
+            inputMode="decimal"
+            placeholder="250.00"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
         </Field>
       ) : null}
-      <Field label="Date" hint="Leave empty to schedule later">
-        <DateField value={scheduledDate} onChange={setScheduledDate} allowClear />
-      </Field>
-      <PacketFields value={packet} onChange={setPacket} />
+      {!notInCatalog ? (
+        <>
+          <Field label="Date" hint="Leave empty to schedule later" group>
+            <DateField
+              value={scheduledDate}
+              onChange={(date) => {
+                setScheduledDate(date);
+                if (!date) {
+                  setScheduledStartTime("");
+                  setScheduledEndTime("");
+                }
+              }}
+              allowClear
+            />
+          </Field>
+          <div className="form-row-2">
+            <Field label="Start time" hint="Eastern time; optional">
+              <input
+                type="time"
+                value={scheduledStartTime}
+                disabled={!scheduledDate}
+                onChange={(e) => setScheduledStartTime(e.target.value)}
+              />
+            </Field>
+            <Field label="End time" hint="Optional arrival window">
+              <input
+                type="time"
+                value={scheduledEndTime}
+                disabled={!scheduledDate}
+                onChange={(e) => setScheduledEndTime(e.target.value)}
+              />
+            </Field>
+          </div>
+          <Field label="Property type" hint="Saved as the customer's default for future jobs.">
+            <select value={propertyClass} onChange={(e) => setPropertyClass(e.target.value)}>
+              <option value="">Choose property type</option>
+              <option value="RESIDENTIAL">Residential</option>
+              <option value="COMMERCIAL">Commercial</option>
+              <option value="COMMUNITY">Community (HOA / multi-unit)</option>
+            </select>
+          </Field>
+          <p className="muted small" style={{ margin: 0 }}>
+            Creating a job records the amount due. Payment is handled separately.
+          </p>
+          <PacketFields value={packet} onChange={setPacket} />
+        </>
+      ) : null}
       <ErrorNote error={create.error} />
       <Button block loading={create.busy} onClick={() => void create.run()}>
         {notInCatalog ? "Send to catalog decision" : "Create job"}

@@ -328,6 +328,78 @@ describe("updateCustomerContact (GL-09)", () => {
     expect(customers.get("c1")!.displayName).toBe("Old Name");
   });
 
+  it("changes the property default without clearing omitted contact, address, billing or lifecycle fields", async () => {
+    const original = {
+      ...customers.get("c1")!,
+      contactName: "Pat Contact",
+      phone: "555-1000",
+      serviceStreet: "1 Main St",
+      serviceUnit: "Unit 2",
+      serviceCity: "Providence",
+      serviceState: "RI",
+      serviceZip: "02903",
+      billingStreet: "2 Billing St",
+      billingCity: "Boston",
+      billingState: "MA",
+      billingZip: "02108",
+      leadSource: "Website",
+      notes: "Use the side gate",
+      propertyClass: "RESIDENTIAL",
+      groupId: "group-1",
+      stripeCustomerId: "cus_1",
+      paymentMethodLabel: "Visa 4242",
+      paymentMethodKind: "card",
+      accessGroups: ["CUSTOMER"],
+      convertedAt: "2026-10-01T12:00:00Z",
+    };
+    customers.set("c1", original);
+
+    const result = await call("updateCustomerContact", {
+      customerId: "c1",
+      displayName: original.displayName,
+      propertyClass: " commercial ",
+      email: undefined,
+    });
+
+    expect(result).toEqual({ customerId: "c1" });
+    expect(lastCustomerPatch).toEqual({
+      id: "c1", displayName: original.displayName, propertyClass: "COMMERCIAL",
+    });
+    expect(customers.get("c1")).toEqual({ ...original, propertyClass: "COMMERCIAL" });
+  });
+
+  it("still clears fields explicitly sent as null or blank", async () => {
+    const original = {
+      ...customers.get("c1")!,
+      contactName: "Pat Contact",
+      phone: "555-1000",
+      serviceStreet: "1 Main St",
+      billingStreet: "2 Billing St",
+      notes: "Old note",
+      propertyClass: "COMMERCIAL",
+    };
+    customers.set("c1", original);
+
+    await call("updateCustomerContact", {
+      customerId: "c1",
+      displayName: original.displayName,
+      contactName: null,
+      email: null,
+      phone: "   ",
+      serviceStreet: null,
+      billingStreet: null,
+      notes: " ",
+      propertyClass: null,
+    });
+
+    const cleared = {
+      contactName: null, email: null, phone: null, serviceStreet: null,
+      billingStreet: null, notes: null, propertyClass: null,
+    };
+    expect(lastCustomerPatch).toEqual({ id: "c1", displayName: original.displayName, ...cleared });
+    expect(customers.get("c1")).toEqual({ ...original, ...cleared });
+  });
+
   it("still THROWS on a blank name — the sheet enforces the same rule, so this is a broken client", async () => {
     await expect(
       call("updateCustomerContact", { customerId: "c1", displayName: "   " })
