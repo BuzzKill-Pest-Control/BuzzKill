@@ -2382,6 +2382,7 @@ describe("manual office job scheduling", () => {
   });
 
   it("accepts a single appointment time and an explicitly zero-dollar job", async () => {
+    customer.status = "LEAD";
     const res = (await call(
       "createOfficeJob",
       { ...manualJob, scheduledEndTime: undefined, priceCents: 0 },
@@ -2391,12 +2392,25 @@ describe("manual office job scheduling", () => {
     expect(created.scheduledStartTime).toBe("15:30");
     expect(created.scheduledEndTime).toBeUndefined();
     expect(created.priceCents).toBe(0);
+    expect(customer.status).toBe("ACTIVE");
   });
 
-  it("continues to accept undated jobs without a price or time", async () => {
+  it.each([undefined, null])("requires an explicit amount for a one-time lead job: %j", async (priceCents) => {
+    customer.status = "LEAD";
+    const before = jobs.length;
+    await expect(call("createOfficeJob", { ...manualJob, priceCents }, ["OWNER"]))
+      .rejects.toThrow(/agreed job amount/i);
+    expect(jobs).toHaveLength(before);
+    expect(customer.status).toBe("LEAD");
+    expect(leadActivities.size).toBe(0);
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+  });
+
+  it.each([undefined, null])("continues to accept active customer jobs without a price or time: %j", async (priceCents) => {
+    customer.status = "ACTIVE";
     const res = (await call(
       "createOfficeJob",
-      { customerId: "c1", serviceType: "General pest control" },
+      { customerId: "c1", serviceType: "General pest control", priceCents },
       ["OWNER"]
     )) as { jobId: string };
     const created = jobs.find((j) => j.id === res.jobId)!;
@@ -2406,11 +2420,33 @@ describe("manual office job scheduling", () => {
     expect(created.priceCents).toBeUndefined();
   });
 
+  it("keeps plan-backed lead visits on the existing plan's billing without a per-visit amount", async () => {
+    customer.status = "LEAD";
+    const plan = { id: "p1", customerId: "c1", status: "ACTIVE", priceCents: 14900, seasonal: false };
+    plans.set(plan.id, { ...plan });
+    const res = await call("createOfficeJob", { ...manualJob, servicePlanId: plan.id, priceCents: null }, ["OWNER"]) as { jobId: string; warning?: string };
+    expect(res.warning).toBeUndefined();
+    expect(jobs.find((j) => j.id === res.jobId)).toMatchObject({ type: "RECURRING", servicePlanId: plan.id, priceCents: undefined });
+    expect(plans.get(plan.id)).toEqual(plan);
+    expect(customer.status).toBe("ACTIVE");
+  });
+
+  it.each(["missing", "other-customer"])("does not use an unverified %s plan to bypass the lead amount requirement", async (owner) => {
+    customer.status = "LEAD";
+    if (owner !== "missing") plans.set("p1", { id: "p1", customerId: owner, status: "ACTIVE", priceCents: 14900 });
+    const before = jobs.length;
+    await expect(call("createOfficeJob", { ...manualJob, servicePlanId: "p1", priceCents: null }, ["OWNER"]))
+      .rejects.toThrow(/does not belong to this customer/i);
+    expect(jobs).toHaveLength(before);
+    expect(customer.status).toBe("LEAD");
+    expect(leadActivities.size).toBe(0);
+  });
+
   it.each(["dated", "undated"])("settles lead follow-up for a saved %s office job without recording payment", async (kind) => {
     Object.assign(customer, { status: "LEAD", nextAction: "Call lead", nextActionAt: "2026-10-05T12:00:00Z", stripeCustomerId: "cus_original" });
     const { workItemId } = await import("../shared/ownedWork");
     workItems.push({ id: workItemId("LEAD_FOLLOWUP", "c1"), status: "OPEN" });
-    const args = kind === "dated" ? manualJob : { customerId: "c1", serviceType: "General pest control" };
+    const args = kind === "dated" ? manualJob : { customerId: "c1", serviceType: "General pest control", priceCents: 27550 };
     const res = await call("createOfficeJob", args, ["OWNER"]) as { jobId: string; warning?: string };
     expect(res.warning).toBeUndefined();
     expect(customer).toMatchObject({ status: "ACTIVE", stripeCustomerId: "cus_original" });
@@ -2497,6 +2533,30 @@ describe("manual office job scheduling", () => {
     expect(result.refused).toMatch(/canceled/);
     expect(customer.status).toBe("LEAD");
     expect(workItems.find((w) => w.id === recovery.id)?.status).toBe("OPEN");
+  });
+
+  it.each([{ doNotContact: true }, { lostReason: "PRICE" }])("does not close saved-job recovery before terminal follow-up cleanup finishes: %j", async (facts) => {
+    customer.status = "LEAD";
+    leadConversionFails = true;
+    const { workItemId } = await import("../shared/ownedWork");
+    const followup = { id: workItemId("LEAD_FOLLOWUP", "c1"), status: "OPEN" };
+    workItems.push(followup);
+    await call("createOfficeJob", manualJob, ["OWNER"]);
+    const recovery = workItems.find((w) => w.kind === "LEAD_LIFECYCLE_RECOVERY")!;
+    leadConversionFails = false;
+    Object.assign(customer, facts);
+    const before = { ...customer };
+
+    const result = await call("updateOwnedWork", { workItemId: recovery.id, action: "RETRY_OFFICE_JOB_LEAD" }, ["OWNER"]);
+    expect(result).toMatchObject({ workItemId: recovery.id, status: "OPEN", warning: expect.stringMatching(/Job saved/) });
+    expect(customer).toEqual(before);
+    expect(followup.status).toBe("OPEN");
+    expect(workItems.find((w) => w.id === recovery.id)?.status).toBe("OPEN");
+
+    followup.status = "RESOLVED";
+    const settled = await call("updateOwnedWork", { workItemId: recovery.id, action: "RETRY_OFFICE_JOB_LEAD" }, ["OWNER"]);
+    expect(settled).toMatchObject({ workItemId: recovery.id, status: "RESOLVED" });
+    expect(customer).toEqual(before);
   });
 
   it("refuses saved-job recovery from a technician token", async () => {
@@ -2717,6 +2777,7 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
   });
 
   it("\"Something else…\" opens an owned catalog decision and creates NO job", async () => {
+    customer.status = "LEAD";
     const before = jobs.length;
     const res = (await call(
       "createOfficeJob",
@@ -2730,6 +2791,8 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
 
     expect(res.catalogDecisionOpened).toBe(true);
     expect(jobs).toHaveLength(before); // no invented job
+    expect(customer.status).toBe("LEAD");
+    expect(leadActivities.size).toBe(0);
     const decision = workItems.find((w) => w.kind === "SERVICE_CATALOG_DECISION")!;
     expect(decision).toBeTruthy();
     expect(String(decision.detail)).toContain("attic insulation restoration");
