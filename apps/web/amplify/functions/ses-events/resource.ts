@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -10,6 +11,7 @@ import { defineFunction } from "@aws-amplify/backend";
  * DELIVERED — the first time "sent" means "actually reached the customer".
  */
 export const sesEvents = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "ses-events",
   entry: "./handler.ts",
   timeoutSeconds: 60,

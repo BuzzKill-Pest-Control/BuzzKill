@@ -1,3 +1,4 @@
+import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
 import type { SNSEvent } from "aws-lambda";
 import { resolveMergedCustomer } from "../shared/customerMerge";
 import { dataClient } from "../shared/dataClient";
@@ -389,6 +390,7 @@ export async function handleSesNotification(
 }
 
 export const handler = async (event: SNSEvent): Promise<void> => {
+  assertBusinessActionsEnabled();
   // GL-22: a provider event may NEVER be acknowledged on a failed write. A
   // processing failure throws, so the async invocation retries and — when it
   // keeps failing — lands on the visible dead-letter queue whose depth alarm

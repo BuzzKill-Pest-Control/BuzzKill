@@ -1,3 +1,4 @@
+import { isMigrationPreview } from "../shared/migrationPreview";
 import { defineFunction } from "@aws-amplify/backend";
 
 /**
@@ -31,9 +32,10 @@ import { defineFunction } from "@aws-amplify/backend";
  * own time budget so it stops starting new research before the deadline.
  */
 export const pricingRefresh = defineFunction({
+  environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
   name: "pricing-refresh",
   entry: "./handler.ts",
   timeoutSeconds: 900,
   memoryMB: 512,
-  schedule: "*/5 * * * ? *", // recovery drain; reports are time-gated
+  ...(isMigrationPreview() ? {} : { schedule: "*/5 * * * ? *" }), // recovery drain; reports are time-gated
 });

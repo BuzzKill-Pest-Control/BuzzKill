@@ -314,6 +314,9 @@ export type LeadPrefill = {
 // ── Transport ────────────────────────────────────────────────────────
 
 async function post<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+    return { ok: false, status: 503, body: { error: "Booking is disabled in this migration preview." } };
+  }
   const base = await getBookingApiUrl();
   if (!base) {
     return {
