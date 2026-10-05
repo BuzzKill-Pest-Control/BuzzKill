@@ -87,6 +87,9 @@ type ActivityInput = {
   note?: string | null;
   actor: LeadActor;
   mutationId?: string;
+  /** An immutable business fact may be adopted by a colleague's retry.
+   * Customer/channel/outcome/note must still match; the first actor is kept. */
+  preserveOriginalActor?: boolean;
 };
 
 /** Append-or-confirm one immutable activity. A retry with the same mutation id
@@ -103,8 +106,10 @@ export async function appendLeadActivity(input: ActivityInput) {
       existing.data.customerId !== input.customerId ||
       existing.data.channel !== input.channel ||
       existing.data.outcome !== input.outcome ||
-      (existing.data.actorSub ?? null) !== (input.actor.sub ?? null) ||
-      existing.data.actorEmail !== (input.actor.email ?? "system@pestbuzzkill.com")
+      (input.preserveOriginalActor
+        ? (existing.data.note ?? null) !== (input.note ?? null)
+        : (existing.data.actorSub ?? null) !== (input.actor.sub ?? null) ||
+          existing.data.actorEmail !== (input.actor.email ?? "system@pestbuzzkill.com"))
     ) {
       throw new Error("That action key was already used for a different lead action.");
     }

@@ -199,6 +199,12 @@ const lockTablePolicy = new PolicyStatement({
     (m) => `arn:aws:dynamodb:us-east-1:*:table/${m}-*`
   ),
 });
+// Manual-job lead conversion checks the saved job in the SAME transaction
+// as the customer update, so a concurrent cancellation cannot convert it.
+backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:ConditionCheckItem"],
+  resources: ["arn:aws:dynamodb:us-east-1:*:table/Job-*"],
+}));
 // The table names end `-<apiId>-NONE`, and the apiId is NOT derivable at
 // runtime (the GraphQL endpoint hostname is a separate DNS id — deriving
 // from it made every deployed CAS write miss its table). The data stack

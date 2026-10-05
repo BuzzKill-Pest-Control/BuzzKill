@@ -320,6 +320,7 @@ export default function CustomerDetail() {
   const [pm, setPm] = useState<{ hasPaymentMethod: boolean; label: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [jobWarning, setJobWarning] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [refunding, setRefunding] = useState<Invoice | null>(null);
   const [settling, setSettling] = useState<Invoice | null>(null);
@@ -431,6 +432,10 @@ export default function CustomerDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setJobWarning(null);
+  }, [id]);
 
   // Every button-level write on this page goes through `run` below, so the
   // gate lives here once — keyed by button, because these ~17 writes are
@@ -843,6 +848,12 @@ export default function CustomerDetail() {
     >
       <ErrorNote error={error ?? perform.error} />
       <SuccessNote message={notice} />
+      {jobWarning ? (
+        <div className="attention-note" role="alert">
+          <Badge tone="warn">follow-up needs attention</Badge>
+          <span>{jobWarning}</span>
+        </div>
+      ) : null}
       {infoNote ? (
         <p className="info-note" role="status">
           {infoNote}
@@ -2383,6 +2394,7 @@ export default function CustomerDetail() {
             // the sheet would close on a visit that was never created.
             const result = opResultUnlessRefused<{
               jobId?: string;
+              warning?: string;
               catalogDecisionOpened?: boolean;
               message?: string;
             }>(
@@ -2416,6 +2428,7 @@ export default function CustomerDetail() {
               throw new Error("The job wasn't confirmed. Check the Jobs list before trying again.");
             }
             setSheet(null);
+            setJobWarning(result?.warning ?? null);
             await load();
             if (result?.jobId) {
               setNotice("Job added. Assign a technician from the Schedule page when ready.");
@@ -4336,7 +4349,9 @@ function JobForm({
             </select>
           </Field>
           <p className="muted small" style={{ margin: 0 }}>
-            Creating a job records the amount due. Payment is handled separately.
+            {customer.status === "LEAD"
+              ? "Creating a job for an open lead turns it into an active client and closes sales follow-ups. Payment is handled separately."
+              : "Creating a job records the amount due. Payment is handled separately."}
           </p>
           <PacketFields value={packet} onChange={setPacket} />
         </>

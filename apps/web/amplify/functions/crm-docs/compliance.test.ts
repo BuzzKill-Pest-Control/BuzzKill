@@ -40,6 +40,9 @@ let emailLogRows: Record<string, unknown>[] = [];
 /** Force WorkItem.create to fail so a test can prove the FLAGGED presence-review
  *  marker survives a lost case write. */
 let workItemCreateFails = false;
+const leadLifecycleClaims = new Map<string, Record<string, unknown>>();
+const leadActivities = new Map<string, Record<string, unknown>>();
+let leadConversionFails = false;
 
 const capacityFixture = capacityFixtureModels();
 /** Force the approved-product catalog page to fail, so a test can prove an
@@ -51,6 +54,22 @@ const obligations = new Map<string, Record<string, unknown>>();
 
 const fakeDataClient = {
   models: {
+    LeadLifecycleClaim: {
+      create: async (input: Record<string, unknown> & { id: string }) => {
+        if (leadLifecycleClaims.has(input.id)) return { data: null };
+        leadLifecycleClaims.set(input.id, { ...input });
+        return { data: input };
+      },
+      get: async ({ id }: { id: string }) => ({ data: leadLifecycleClaims.get(id) ?? null }),
+      delete: async ({ id }: { id: string }) => { leadLifecycleClaims.delete(id); return { data: { id } }; },
+    },
+    LeadActivity: {
+      create: async (input: Record<string, unknown> & { id: string }) => {
+        leadActivities.set(input.id, { ...input });
+        return { data: input };
+      },
+      get: async ({ id }: { id: string }) => ({ data: leadActivities.get(id) ?? null }),
+    },
     JobPacketEvent: {
       create: async (input: Record<string, unknown>) => {
         packetEvents.push({ ...input });
@@ -271,7 +290,7 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: async () => "https://s3.example/put",
 }));
 
-const { handler } = await import("./handler");
+const { handler, updateOwnedWork } = await import("./handler");
 const { sendEmail } = await import("../shared/email");
 const { drivingDistanceMetersFromPoint } = await import("../shared/driveTime");
 
@@ -347,6 +366,10 @@ beforeEach(() => {
       CapacityClaim: capacityFixture.maps.capacityClaims,
       TechDayStops: capacityFixture.maps.techDayStops,
       TreatmentObligation: obligations,
+      LeadLifecycleClaim: leadLifecycleClaims,
+      Customer: {
+        get: (id: string) => id === "c1" && !leadConversionFails ? customer : undefined,
+      } as unknown as Map<string, Record<string, unknown>>,
       // A live get-only view over the test's job array: guarded publishes
       // mutate the same row objects the fake models serve.
       Job: {
@@ -360,6 +383,9 @@ beforeEach(() => {
   packetEvents = [];
   emailLogRows = [];
   workItemCreateFails = false;
+  leadLifecycleClaims.clear();
+  leadActivities.clear();
+  leadConversionFails = false;
   catalogPageFails = false;
   process.env.DOCS_BUCKET = "docs";
   technician = {
@@ -2351,7 +2377,8 @@ describe("manual office job scheduling", () => {
     expect(created.technicianId).toBeUndefined();
     expect(created.etaMinutes).toBeUndefined();
     expect(created.paidAt).toBeUndefined();
-    expect(customer.status).toBe("LEAD");
+    expect(customer.status).toBe("ACTIVE");
+    expect(customer.convertedAt).toBeTruthy();
   });
 
   it("accepts a single appointment time and an explicitly zero-dollar job", async () => {
@@ -2377,6 +2404,104 @@ describe("manual office job scheduling", () => {
     expect(created.scheduledStartTime).toBeUndefined();
     expect(created.scheduledEndTime).toBeUndefined();
     expect(created.priceCents).toBeUndefined();
+  });
+
+  it.each(["dated", "undated"])("settles lead follow-up for a saved %s office job without recording payment", async (kind) => {
+    Object.assign(customer, { status: "LEAD", nextAction: "Call lead", nextActionAt: "2026-10-05T12:00:00Z", stripeCustomerId: "cus_original" });
+    const { workItemId } = await import("../shared/ownedWork");
+    workItems.push({ id: workItemId("LEAD_FOLLOWUP", "c1"), status: "OPEN" });
+    const args = kind === "dated" ? manualJob : { customerId: "c1", serviceType: "General pest control" };
+    const res = await call("createOfficeJob", args, ["OWNER"]) as { jobId: string; warning?: string };
+    expect(res.warning).toBeUndefined();
+    expect(customer).toMatchObject({ status: "ACTIVE", stripeCustomerId: "cus_original" });
+    expect(customer.nextAction ?? null).toBeNull();
+    expect(customer.nextActionAt ?? null).toBeNull();
+    expect(workItems[0].status).toBe("RESOLVED");
+    expect(jobs.find((j) => j.id === res.jobId)?.paidAt).toBeUndefined();
+    expect(plans.size).toBe(0);
+    expect([...leadActivities.values()]).toEqual([expect.objectContaining({ customerId: "c1", outcome: "NOTE", actorSub: "sub-tech" })]);
+  });
+
+  it("leaves an existing active customer's facts unchanged", async () => {
+    Object.assign(customer, { status: "ACTIVE", convertedAt: "2026-01-01T00:00:00Z" });
+    const before = { ...customer };
+    await call("createOfficeJob", manualJob, ["OWNER"]);
+    expect(customer).toEqual(before);
+    expect(leadActivities.size).toBe(0);
+  });
+
+  it("does not convert the lead when job creation fails", async () => {
+    Object.assign(customer, { status: "LEAD", nextAction: "Call lead" });
+    const create = vi.spyOn(fakeDataClient.models.Job, "create").mockRejectedValueOnce(new Error("Job write failed"));
+    try {
+      await expect(call("createOfficeJob", manualJob, ["OWNER"])).rejects.toThrow("Job write failed");
+    } finally { create.mockRestore(); }
+    expect(customer).toMatchObject({ status: "LEAD", nextAction: "Call lead" });
+    expect(leadActivities.size).toBe(0);
+  });
+
+  it("returns the saved job with a recovery warning when lead conversion fails", async () => {
+    customer.status = "LEAD";
+    leadConversionFails = true;
+    const before = jobs.length;
+    const res = await call("createOfficeJob", manualJob, ["OWNER"]) as { jobId: string; warning?: string };
+    expect(jobs).toHaveLength(before + 1);
+    expect(jobs.find((j) => j.id === res.jobId)).toBeTruthy();
+    expect(res.warning).toMatch(/Job saved.*Do not add the job again/);
+    expect(customer.status).toBe("LEAD");
+    expect(workItems).toContainEqual(expect.objectContaining({ kind: "LEAD_LIFECYCLE_RECOVERY", relatedId: `office-job:${res.jobId}` }));
+  });
+
+  it("a colleague retries lead settlement without creating another job or replacing the original activity actor", async () => {
+    customer.status = "LEAD";
+    leadConversionFails = true;
+    const saved = await call("createOfficeJob", manualJob, ["OWNER"]) as { jobId: string };
+    const recovery = workItems.find((w) => w.kind === "LEAD_LIFECYCLE_RECOVERY")!;
+    const before = jobs.length;
+    leadConversionFails = false;
+    const retried = await updateOwnedWork({
+      workItemId: String(recovery.id), action: "RETRY_OFFICE_JOB_LEAD",
+      actorSub: "colleague", actorEmail: "colleague@example.com", actorIsOwner: true,
+    });
+    expect(retried).toMatchObject({ workItemId: recovery.id, status: "RESOLVED" });
+    expect(customer.status).toBe("ACTIVE");
+    expect(jobs).toHaveLength(before);
+    expect(jobs.find((j) => j.id === saved.jobId)?.paidAt).toBeUndefined();
+    expect(leadActivities.size).toBe(1);
+    expect([...leadActivities.values()][0]).toMatchObject({ actorSub: "sub-tech", actorEmail: "marco@x.com", mutationId: `office-job:${saved.jobId}` });
+  });
+
+  it.each([
+    { kind: "INFRA_ALERT" },
+    { relatedId: "office-job:another-job" },
+    { customerId: "other-customer" },
+  ])("refuses a recovery item that does not prove this saved job: %j", async (patch) => {
+    customer.status = "LEAD";
+    const { workItemId } = await import("../shared/ownedWork");
+    const id = workItemId("LEAD_LIFECYCLE_RECOVERY", "office-job:j1");
+    workItems.push({ id, kind: "LEAD_LIFECYCLE_RECOVERY", relatedId: "office-job:j1", customerId: "c1", status: "OPEN", ...patch });
+    const result = await call("updateOwnedWork", { workItemId: id, action: "RETRY_OFFICE_JOB_LEAD" }, ["OWNER"]) as { refused?: string };
+    expect(result.refused).toBeTruthy();
+    expect(customer.status).toBe("LEAD");
+    expect(leadActivities.size).toBe(0);
+  });
+
+  it("does not convert a lead from an office job canceled before recovery", async () => {
+    customer.status = "LEAD";
+    leadConversionFails = true;
+    const saved = await call("createOfficeJob", manualJob, ["OWNER"]) as { jobId: string };
+    const recovery = workItems.find((w) => w.kind === "LEAD_LIFECYCLE_RECOVERY")!;
+    jobs.find((j) => j.id === saved.jobId)!.status = "CANCELED";
+    leadConversionFails = false;
+    const result = await call("updateOwnedWork", { workItemId: recovery.id, action: "RETRY_OFFICE_JOB_LEAD" }, ["OWNER"]) as { refused?: string };
+    expect(result.refused).toMatch(/canceled/);
+    expect(customer.status).toBe("LEAD");
+    expect(workItems.find((w) => w.id === recovery.id)?.status).toBe("OPEN");
+  });
+
+  it("refuses saved-job recovery from a technician token", async () => {
+    await expect(call("updateOwnedWork", { workItemId: "recovery", action: "RETRY_OFFICE_JOB_LEAD" }, ["TECH"]))
+      .rejects.toThrow();
   });
 
   it.each([
