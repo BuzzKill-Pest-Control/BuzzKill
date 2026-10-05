@@ -1,4 +1,5 @@
 import { todayEastern } from "./dates";
+import { Refused } from "./refusal";
 
 /** A format-valid EPA registration number, e.g. 432-1234 or 432-1234-4321. */
 export const EPA_REGISTRATION_RE = /^\d{2,7}-\d{1,5}(-\d{1,7})?$/;
@@ -141,7 +142,7 @@ export function assertDeliverableAddress(customer: DispatchAddress): void {
     .filter(([, value]) => !value?.toString().trim())
     .map(([label]) => label);
   if (missing.length) {
-    throw new Error(
+    throw new Refused(
       `This job can't be dispatched yet — ${who} is missing a deliverable service address (${missing.join(
         ", "
       )}). The office fixes this on the customer's record before assigning a technician.`

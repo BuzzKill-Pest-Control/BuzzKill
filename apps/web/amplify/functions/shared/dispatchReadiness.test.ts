@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertDispatchFacts,
+  dispatchFactsRefusal,
   normalizePropertyClass,
   onsiteMinutesFor,
 } from "./dispatchReadiness";
@@ -21,6 +22,29 @@ const GOOD = {
 const JOB = { propertyClass: "RESIDENTIAL", serviceType: "General pest" };
 
 describe("the dispatch gate (GL-12)", () => {
+  it("returns expected missing facts as refusals, while valid facts pass", () => {
+    expect(dispatchFactsRefusal(GOOD, JOB)).toBeNull();
+    expect(dispatchFactsRefusal(GOOD, { propertyClass: null })).toEqual({
+      refused: expect.stringMatching(/property classification.*before assigning/i),
+    });
+    expect(dispatchFactsRefusal({ ...GOOD, serviceStreet: null }, JOB)).toEqual({
+      refused: expect.stringMatching(/deliverable service address.*street/i),
+    });
+  });
+
+  it("points unsaved jobs to Add job and existing visits to Packet", () => {
+    const creating = dispatchFactsRefusal(GOOD, {}, { creatingJob: true });
+    expect(creating?.refused).toMatch(/Property type.*Add job/);
+    expect(creating?.refused).not.toMatch(/Packet/);
+    expect(dispatchFactsRefusal(GOOD, {})?.refused).toMatch(/Packet/);
+  });
+
+  it("does not disguise unexpected runtime failures as expected refusals", () => {
+    expect(() => dispatchFactsRefusal(GOOD, {
+      propertyClass: 123 as unknown as string,
+    })).toThrow(TypeError);
+  });
+
   it("passes a real MA/RI address with an explicit classification", () => {
     expect(() => assertDispatchFacts(GOOD, JOB)).not.toThrow();
     expect(() =>
