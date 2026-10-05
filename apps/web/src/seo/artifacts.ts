@@ -76,7 +76,11 @@ export function routeArtifacts(pages: PageMeta[] = allPages()): RouteArtifact[] 
   return out;
 }
 
-/** The full HTML for an artifact, given the built shell. */
-export function artifactHtml(shellHtml: string, artifact: RouteArtifact): string {
-  return swapShellHead(shellHtml, artifact.head);
+/** The full HTML for an artifact, including any build-rendered page content. */
+export function artifactHtml(shellHtml: string, artifact: RouteArtifact, bodyHtml = ""): string {
+  const html = swapShellHead(shellHtml, artifact.head);
+  if (!bodyHtml) return html;
+  const root = '<div id="root"></div>';
+  if (!html.includes(root)) throw new Error("empty React root not found in index.html");
+  return html.replace(root, () => `<div id="root">${bodyHtml}</div>`);
 }
