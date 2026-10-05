@@ -247,6 +247,8 @@ type Args = {
   serviceType?: string;
   priceCents?: number;
   scheduledDate?: string;
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
   operation?: string;
   officeReason?: string;
   technicianId?: string;
@@ -2203,6 +2205,40 @@ async function createOfficeJob(args: Args) {
   if (!customerId) throw new Error("Customer is required");
   if (!serviceType) throw new Error("Service type is required");
 
+  const scheduledDate = args.scheduledDate?.trim() || undefined;
+  const scheduledStartTime = args.scheduledStartTime?.trim() || undefined;
+  const scheduledEndTime = args.scheduledEndTime?.trim() || undefined;
+  if (scheduledDate) {
+    const parsed = new Date(`${scheduledDate}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) ||
+      !Number.isFinite(parsed.valueOf()) ||
+      parsed.toISOString().slice(0, 10) !== scheduledDate
+    ) {
+      throw new Error("Choose a valid service date.");
+    }
+  }
+  if ((scheduledStartTime || scheduledEndTime) && !scheduledDate) {
+    throw new Error("Choose a service date before adding an arrival time.");
+  }
+  if (scheduledEndTime && !scheduledStartTime) {
+    throw new Error("Enter an arrival start time before an end time.");
+  }
+  for (const time of [scheduledStartTime, scheduledEndTime]) {
+    if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      throw new Error("Enter a valid arrival time in HH:mm format (Eastern time).");
+    }
+  }
+  if (scheduledStartTime && scheduledEndTime && scheduledEndTime <= scheduledStartTime) {
+    throw new Error("The arrival window must end after its start time.");
+  }
+  if (
+    args.priceCents != null &&
+    (!Number.isInteger(args.priceCents) || args.priceCents < 0 || args.priceCents > 2_147_483_647)
+  ) {
+    throw new Error("Enter a valid nonnegative job amount in whole cents.");
+  }
+
   const client = await dataClient();
   const { data: customer } = await client.models.Customer.get({ id: customerId });
   if (!customer) throw new Error(`Customer ${customerId} not found`);
@@ -2264,7 +2300,7 @@ async function createOfficeJob(args: Args) {
   // explicit property classification), so the gap can never be created in the
   // first place. A date-less job (scheduled later) is allowed through;
   // updateJobSchedule enforces the full gate before it can reach a technician.
-  if (args.scheduledDate) {
+  if (scheduledDate) {
     assertDispatchFacts(customer, {
       propertyClass: (args as { propertyClass?: string | null }).propertyClass,
       serviceType,
@@ -2285,8 +2321,8 @@ async function createOfficeJob(args: Args) {
     // GL-17: a seasonal plan's visit may only land in an in-season month, and
     // never a second visit in a month whose treatment already happened — there
     // is no free-text bypass around the seasonal promise.
-    if (plan.seasonal && args.scheduledDate) {
-      const monthKey = args.scheduledDate.slice(0, 7);
+    if (plan.seasonal && scheduledDate) {
+      const monthKey = scheduledDate.slice(0, 7);
       if (!isServiceMonth(plan, monthKey)) {
         // The office picked a date; the plan says that month has no routine
         // treatment. Both parties are working correctly.
@@ -2335,11 +2371,13 @@ async function createOfficeJob(args: Args) {
     serviceCode: catalogService.id,
     catalogVersion: SERVICE_CATALOG_VERSION,
     priceCents: args.priceCents ?? undefined,
-    status: args.scheduledDate ? "SCHEDULED" : "UNSCHEDULED",
-    scheduledDate: args.scheduledDate || undefined,
+    status: scheduledDate ? "SCHEDULED" : "UNSCHEDULED",
+    scheduledDate,
+    scheduledStartTime,
+    scheduledEndTime,
     // GL-04: pool facts are STAMPED at birth so the one canonical release
     // path can give exactly these minutes back exactly once.
-    ...(args.scheduledDate
+    ...(scheduledDate
       ? {
           capacityMinutes: slotOnsiteMinutes(
             normalizePropertyClass(
@@ -2365,9 +2403,9 @@ async function createOfficeJob(args: Args) {
   }
   // GL-04: a dated office-created visit shows on the POOL accounting slot
   // until its real technician-day claim happens at assignment.
-  if (args.scheduledDate) {
+  if (scheduledDate) {
     await notePoolMinutes(
-      args.scheduledDate,
+      scheduledDate,
       slotOnsiteMinutes(
         normalizePropertyClass(
           (args as { propertyClass?: string | null }).propertyClass

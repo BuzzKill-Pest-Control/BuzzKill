@@ -19,6 +19,7 @@ import {
   todayEastern,
 } from "../lib/format";
 import { assignBlockedNote, unassignBlockedNote } from "../lib/unassignStop";
+import { formatJobAppointmentTime } from "../lib/jobAppointment";
 import { useAction } from "../lib/useAsync";
 import { technicianComplianceIssue } from "./technicians";
 import {
@@ -452,7 +453,16 @@ export default function Schedule() {
                 <ListRow
                   key={j.id}
                   title={customerLink(j)}
-                  subtitle={`${j.serviceType}${j.scheduledDate && j.scheduledDate !== selDate ? ` · wants ${fmtDate(j.scheduledDate)}` : ""}${customerCity(j) ? ` · ${customerCity(j)}` : ""}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
+                  subtitle={
+                    <>
+                      {`${j.serviceType}${j.scheduledDate && j.scheduledDate !== selDate ? ` · wants ${fmtDate(j.scheduledDate)}` : ""}${customerCity(j) ? ` · ${customerCity(j)}` : ""}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
+                      {j.scheduledDate && formatJobAppointmentTime(j) ? (
+                        <span className="nested-line">
+                          Appointment: {formatJobAppointmentTime(j)}
+                        </span>
+                      ) : null}
+                    </>
+                  }
                   meta={
                     j.status === "NO_ACCESS" ? (
                       <>
@@ -586,12 +596,21 @@ export default function Schedule() {
                                 {i + 1}. {customerLink(j)}
                                 {etaLabel(j) ? (
                                   <span className="muted small" style={{ marginLeft: 8 }}>
-                                    ~{etaLabel(j)}
+                                    Est. arrival ~{etaLabel(j)}
                                   </span>
                                 ) : null}
                               </span>
                             }
-                            subtitle={`${j.serviceType}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
+                            subtitle={
+                              <>
+                                {`${j.serviceType}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
+                                {j.scheduledDate && formatJobAppointmentTime(j) ? (
+                                  <span className="nested-line">
+                                    Appointment: {formatJobAppointmentTime(j)}
+                                  </span>
+                                ) : null}
+                              </>
+                            }
                             meta={
                               <>
                                 <StatusBadge status={j.status} />
@@ -666,6 +685,13 @@ export default function Schedule() {
         <p className="muted small">
           Assign to a technician's route for {prettyWeekday(selDate)}.
         </p>
+        {assigning?.scheduledDate && formatJobAppointmentTime(assigning) ? (
+          <p className="small">
+            <strong>Appointment:</strong>{" "}
+            {fmtDate(assigning.scheduledDate, true)} ·{" "}
+            {formatJobAppointmentTime(assigning)}
+          </p>
+        ) : null}
         {(techs ?? []).map((t) => (
           <Button
             key={t.id}
