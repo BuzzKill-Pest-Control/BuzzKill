@@ -2442,6 +2442,28 @@ describe("manual office job scheduling", () => {
     expect(leadActivities.size).toBe(0);
   });
 
+  it.each([
+    { planStatus: "CANCELED", customerStatus: "LEAD", priceCents: null },
+    { planStatus: "PENDING", customerStatus: "LEAD", priceCents: null },
+    { planStatus: "PAUSED", customerStatus: "LEAD", priceCents: null },
+    { planStatus: undefined, customerStatus: "LEAD", priceCents: null },
+    { planStatus: null, customerStatus: "LEAD", priceCents: null },
+    { planStatus: "CANCELED", customerStatus: "LEAD", priceCents: 27550 },
+    { planStatus: "CANCELED", customerStatus: "ACTIVE", priceCents: 27550 },
+  ])("refuses jobs under an inactive or unverifiable plan before any job or seasonal claim: %j", async ({ planStatus, customerStatus, priceCents }) => {
+    customer.status = customerStatus;
+    plans.set("p1", { id: "p1", customerId: "c1", status: planStatus, priceCents: 14900, seasonal: true });
+    const before = jobs.length;
+    const customerBefore = { ...customer };
+    await expect(call("createOfficeJob", { ...manualJob, servicePlanId: "p1", priceCents }, ["OWNER"]))
+      .rejects.toThrow(/active service plan/i);
+    expect(jobs).toHaveLength(before);
+    expect(customer).toEqual(customerBefore);
+    expect(leadActivities.size).toBe(0);
+    expect(obligations.size).toBe(0);
+    expect(capacityFixture.maps.capacityDays.size).toBe(0);
+  });
+
   it.each(["dated", "undated"])("settles lead follow-up for a saved %s office job without recording payment", async (kind) => {
     Object.assign(customer, { status: "LEAD", nextAction: "Call lead", nextActionAt: "2026-10-05T12:00:00Z", stripeCustomerId: "cus_original" });
     const { workItemId } = await import("../shared/ownedWork");
@@ -2681,6 +2703,7 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
     plans.set("p_seasonal", {
       id: "p_seasonal",
       customerId: "c1",
+      status: "ACTIVE",
       seasonal: true,
       planName: "Mosquito & tick",
     });
@@ -2707,6 +2730,7 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
     plans.set("p_seasonal", {
       id: "p_seasonal",
       customerId: "c1",
+      status: "ACTIVE",
       seasonal: true,
       planName: "Mosquito & tick",
     });
@@ -2745,6 +2769,7 @@ describe("GL-01 — office jobs are controlled catalog selections", () => {
     plans.set("p_seasonal", {
       id: "p_seasonal",
       customerId: "c1",
+      status: "ACTIVE",
       seasonal: true,
       planName: "Mosquito & tick",
     });
