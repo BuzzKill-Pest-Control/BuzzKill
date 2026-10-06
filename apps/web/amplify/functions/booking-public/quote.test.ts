@@ -421,6 +421,29 @@ beforeEach(() => {
 });
 
 describe("zone UNKNOWN never prices (R59)", () => {
+  it("promises the same closure-aware deadline that the follow-up queue records", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-17T19:30:00Z")); // Friday 3:30pm ET.
+    capacityFixture.maps.closures.set("2026-07-20", { id: "2026-07-20" });
+    nearestBaseMinutes = null;
+    const createWork = vi.spyOn(fakeDataClient.models.WorkItem, "create");
+    try {
+      const res = await postQuote(rodentInput);
+
+      expect(res.status).toBe(200);
+      expect(res.body.decision).toBe("CONTACT");
+      expect(createWork).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "CALLBACK_PROMISE",
+        dueAt: "2026-07-21T19:30:00.000Z",
+      }));
+      expect(res.body.message).toContain("by Tuesday");
+      expect(leadEmails[0].bodyHtml).toContain("by Tuesday");
+    } finally {
+      createWork.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("falls to the callback path instead of silently pricing as Zone B", async () => {
     nearestBaseMinutes = null; // Routes outage / dead key
 

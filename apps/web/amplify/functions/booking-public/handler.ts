@@ -1424,7 +1424,8 @@ async function quote(
   ) => {
     const reason = staffReason || situation;
     const now = new Date();
-    const timing = nextContactPhrase(now);
+    const dueAt = await oneBusinessDayDeadline(now);
+    const timing = nextContactPhrase(now, dueAt);
     const goalClause = goal ? ` ${goal}` : "";
     const promise = canCall
       ? `a specialist will call you ${timing}${goalClause}`
@@ -1470,8 +1471,7 @@ async function quote(
       detail: `${name} was promised a ${channelWord} ${timing} about ${service.toLowerCase().replace("_", " ")} at ${address}. Why manual: ${reason} ${opsNote.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()}`.trim(),
       relatedId: booking.id,
       sourceUrl: "/work",
-      // Closure-aware: a holiday between now and the deadline pushes it out.
-      dueAt: (await oneBusinessDayDeadline(now)).toISOString(),
+      dueAt: dueAt.toISOString(),
       resolutionAction: canCall
         ? "Call the lead by the promised time, record the outcome, and send the correct booking or referral next step."
         : "Email the lead their options by the promised time, record the outcome, and send the correct booking or referral next step.",

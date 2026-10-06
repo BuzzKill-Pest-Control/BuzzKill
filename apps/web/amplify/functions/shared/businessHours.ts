@@ -102,11 +102,10 @@ export function nextBusinessOpen(now: Date = new Date()): Date {
 /**
  * GL-03 — the APPROVED customer commitment is ONE BUSINESS DAY for every
  * accepted request, from every source, with no faster or slower classes.
- * The phrase names the real day so the promise is concrete without
- * promising an hour the approved rule doesn't.
+ * Name the caller's closure-aware deadline so the promise agrees with the
+ * follow-up queue without promising an hour the approved rule doesn't.
  */
-export function nextContactPhrase(now: Date = new Date()): string {
-  const due = contactDueAt(now);
+export function nextContactPhrase(now: Date, due: Date): string {
   const nowP = etParts(now);
   const dueP = etParts(due);
   const nowMid = Date.UTC(nowP.year, nowP.month - 1, nowP.day);
@@ -115,21 +114,4 @@ export function nextContactPhrase(now: Date = new Date()): string {
   if (diffDays <= 0) return "within one business day";
   if (diffDays === 1) return "within one business day (by tomorrow)";
   return `within one business day (by ${DAY_NAME_FMT.format(due)})`;
-}
-
-/**
- * GL-03 — when the office must have responded: ONE BUSINESS DAY after the
- * request was accepted (an after-hours request's clock starts at the next
- * open). The deadline lands at the equivalent time on the next weekday, so
- * it never falls in the middle of the night.
- */
-export function contactDueAt(now: Date = new Date()): Date {
-  const base = isWithinBusinessHours(now) ? now : nextBusinessOpen(now);
-  // One business day later: the next weekday at the same wall-clock time.
-  const p = etParts(base);
-  for (let i = 1; i <= 4; i++) {
-    const cand = etWallToUtc(p.year, p.month, p.day + i, p.hour);
-    if (isWeekday(etParts(cand).weekday)) return cand;
-  }
-  return etWallToUtc(p.year, p.month, p.day + 1, p.hour);
 }

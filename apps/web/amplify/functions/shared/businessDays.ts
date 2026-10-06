@@ -97,14 +97,20 @@ export async function addBusinessDays(
 export async function oneBusinessDayDeadline(
   from: Date = new Date()
 ): Promise<Date> {
-  const { isWithinBusinessHours, nextBusinessOpen } = await import(
+  const { isWithinBusinessHours, nextBusinessOpen, OPEN_HOUR } = await import(
     "./businessHours"
   );
   const base = isWithinBusinessHours(from) ? from : nextBusinessOpen(from);
   const parts = easternParts(base);
-  const startDate = `${parts.year}-${parts.month}-${parts.day}`;
+  let startDate = `${parts.year}-${parts.month}-${parts.day}`;
+  let time = `${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}:${parts.second}`;
+  // The weekday opening may be a company closure. Start at the next real
+  // opening before counting the complete business day owed for a response.
+  if (await isClosure(startDate)) {
+    startDate = await addBusinessDays(startDate, 1);
+    time = `${String(OPEN_HOUR).padStart(2, "0")}:00:00`;
+  }
   const dueDate = await addBusinessDays(startDate, 1);
-  const time = `${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}:${parts.second}`;
   return easternWallToUtc(dueDate, time);
 }
 
