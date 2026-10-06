@@ -33,7 +33,9 @@ for manual runs. Start with the smoke option when changing credentials or models
 smoke mode verifies the setup and creates no cleanup PRs.
 
 The run summary and retained artifacts report coverage, findings, checks, and
-blockers. An open nightly audit PR for an area prevents another pending cleanup
+blockers. The final Codex report is saved as a separate artifact for seven days
+whenever it exists, including failed runs, so it remains available if proposal
+validation fails. An open nightly audit PR for an area prevents another pending cleanup
 for that area. Other open PRs are checked for overlapping files. Each new PR
 includes validation results and the audited base commit.
 
