@@ -131,6 +131,45 @@ describe("reconcileRequestOwnership", () => {
     expect(item.dueAt).toBe("2026-07-15T14:00:00.000Z");
   });
 
+  it("GL-03: retains an orphan CONTACT during a calendar outage and repairs it when the calendar recovers", async () => {
+    const booking = {
+      id: "bk-calendar-outage",
+      status: "CONTACT",
+      name: "Lead Lee",
+      email: "lead@example.com",
+      createdAt: "2026-07-17T19:30:00.000Z", // Friday 3:30pm ET.
+    };
+    bookingRows = [{ ...booking }];
+    const calendarRead = vi.spyOn(fakeDataClient.models.CompanyClosure, "get")
+      .mockRejectedValue(new Error("calendar unavailable"));
+    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T18:00:00.000Z"));
+    try {
+      await expect(reconcileRequestOwnership()).rejects.toThrow(
+        /could not produce a safe deadline/i
+      );
+      expect(bookingRows).toEqual([booking]);
+      expect(opened).toHaveLength(0);
+
+      calendarRead.mockRestore();
+      const res = await reconcileRequestOwnership();
+
+      expect(res.contactRepaired).toBe(1);
+      expect(opened).toEqual([expect.objectContaining({
+        kind: "CALLBACK_PROMISE",
+        dedupeKey: booking.id,
+        // The overdue deadline stays Monday, based on Friday's request.
+        dueAt: "2026-07-20T19:30:00.000Z",
+      })]);
+      expect(bookingRows).toEqual([booking]);
+    } finally {
+      calendarRead.mockRestore();
+      logError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("GL-03: skips CONTACT promises whose action is already open, and non-CONTACT bookings", async () => {
     bookingRows = [
       { id: "bk-owned", status: "CONTACT", createdAt: "2026-07-14T14:00:00.000Z" },

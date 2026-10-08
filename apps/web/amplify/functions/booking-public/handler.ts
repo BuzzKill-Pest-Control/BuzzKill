@@ -1424,15 +1424,13 @@ async function quote(
   ) => {
     const reason = staffReason || situation;
     const now = new Date();
-    const dueAt = await oneBusinessDayDeadline(now);
-    const timing = nextContactPhrase(now, dueAt);
-    const goalClause = goal ? ` ${goal}` : "";
-    const promise = canCall
-      ? `a specialist will call you ${timing}${goalClause}`
-      : `we'll email you at ${email} ${timing}${goalClause}`;
-    const message = `${situation}, so ${promise}.`;
+    const unconfirmedMessage =
+      "We saved your request, but couldn't confirm its follow-up status. Please try again in a moment or call the office.";
     const channelWord = canCall ? "call" : "email";
 
+    // Persist CONTACT before reading the calendar so the daily sweep can
+    // recover the follow-up even if the calendar is unavailable or times out.
+    // Polling this row must not promise a deadline that isn't confirmed yet.
     const contactFields = {
       status: "CONTACT",
       // Same faithful-carry rule as makeBooking's base: a boolean actually
@@ -1447,7 +1445,7 @@ async function quote(
           ? (input.callConsentTextVersion?.slice(0, 40) ??
             CALL_CONSENT_TEXT_VERSION)
           : undefined,
-      quoteJson: JSON.stringify({ contactMessage: message }),
+      quoteJson: JSON.stringify({ contactMessage: unconfirmedMessage }),
       ...extra,
     } as const;
     const booking = existingBookingId
@@ -1460,9 +1458,35 @@ async function quote(
       : await makeBooking(contactFields);
     if (!booking) {
       throw new HttpError(503, {
-        error:
-          "We saved your request, but couldn't confirm its follow-up status. Please try again in a moment or call the office.",
+        error: unconfirmedMessage,
       });
+    }
+    let dueAt: Date;
+    let timing: string;
+    let message: string;
+    try {
+      dueAt = await oneBusinessDayDeadline(now);
+      timing = nextContactPhrase(now, dueAt);
+      const goalClause = goal ? ` ${goal}` : "";
+      const promise = canCall
+        ? `a specialist will call you ${timing}${goalClause}`
+        : `we'll email you at ${email} ${timing}${goalClause}`;
+      message = `${situation}, so ${promise}.`;
+      const { data: saved, errors: saveErrors } =
+        await client.models.BookingRequest.update({
+          id: booking.id,
+          quoteJson: JSON.stringify({ contactMessage: message }),
+        });
+      if (!saved || saveErrors?.length) {
+        throw new Error(
+          saveErrors?.[0]?.message ?? "Could not store the follow-up message"
+        );
+      }
+    } catch (err) {
+      console.error(
+        "booking-public: contact follow-up confirmation failed", booking.id, err
+      );
+      throw new HttpError(503, { error: unconfirmedMessage });
     }
     const opened = await openOwnedWork({
       kind: "CALLBACK_PROMISE",
