@@ -176,6 +176,46 @@ class AuditTest(unittest.TestCase):
                 audit.current_prs("owner/repo")
         self.assertEqual(mocked.call_count, 1)
 
+    def test_publish_creates_ready_for_review_pr(self):
+        self.manifest([self.proposal()])
+        args = argparse.Namespace(repo=self.repo, output=self.output, repository="owner/repo", base=self.base, validate_only=False)
+        original_run = audit.run
+        created = []
+        pushed = []
+
+        def fake_run(command, *a, **kw):
+            if command[:2] == ["date", "-u"]:
+                return "2026-10-08\n"
+            if command[:3] == ["gh", "api", "repos/owner/repo/git/ref/heads/staging"]:
+                return self.base
+            if command[:3] == ["gh", "pr", "create"]:
+                created.append((command, kw["input"]))
+                return "https://github.com/owner/repo/pull/1\n"
+            if command[0] == "gh":
+                raise AssertionError(f"Unexpected GitHub operation: {command}")
+            if command[0] == "git" and "push" in command:
+                pushed.append(command)
+                return ""
+            return original_run(command, *a, **kw)
+
+        with patch.object(audit, "run", side_effect=fake_run), \
+                patch.object(audit, "current_prs", return_value=[]), \
+                patch.object(audit, "summary"), \
+                patch.dict(audit.os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}):
+            audit.publish(args)
+
+        self.assertEqual(len(pushed), 1)
+        self.assertEqual(len(created), 1)
+        command, body = created[0]
+        self.assertFalse(any(arg == "--draft" or arg.startswith("--draft=") for arg in command))
+        self.assertEqual(command[command.index("--base") + 1], "staging")
+        head = command[command.index("--head") + 1]
+        self.assertTrue(head.startswith("codex/nightly-audit/"))
+        self.assertEqual(pushed[0][-3:], ["push", "origin", f"HEAD:refs/heads/{head}"])
+        self.assertIn("Ready for automated and human review.", body)
+        self.assertIn("No merge or deployment is authorized.", body)
+        self.assertIn("[skip-cd]", audit.git(self.repo, "log", "-1", "--format=%s"))
+
     def test_validate_only_never_calls_github_or_push(self):
         self.manifest([self.proposal()])
         args = argparse.Namespace(repo=self.repo, output=self.output, repository="owner/repo", base=self.base, validate_only=True)
