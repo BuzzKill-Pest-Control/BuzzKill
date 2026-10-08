@@ -95,7 +95,7 @@ deploy, change live infrastructure or data, or send email/chat/SMS messages.
 The agent job has read-only GitHub access. Prepare patch artifacts only; do not
 push branches, open PRs, merge, enable auto-merge, force-push, or use GitHub write
 APIs. A separate trusted publisher validates and publishes approved patch shapes as
-draft PRs targeting `staging`. Do not modify workflow files, audit prompts or
+ready-for-review PRs targeting `staging`. Do not modify workflow files, audit prompts or
 helpers, credentials, generated cloud outputs, or other prohibited
 files. Each cleanup must affect its declared primary area. Cross-cutting supporting
 source or test changes may accompany that one cleanup; unrelated changes belong

@@ -7,7 +7,7 @@ execution guarantee. The workflow also supports a manual smoke run.
 
 The workflow is stored on the default branch, `main`. Each audit researches the
 current `staging` commit and considers at most one cleanup for each of the public
-site, shared backend, and CRM UI. It can create up to three independent draft PRs
+site, shared backend, and CRM UI. It can create up to three independent ready-for-review PRs
 targeting `staging`. No worthwhile finding means no PR. The audit never merges or
 deploys changes. Normal staging QA and human review still apply.
 
@@ -39,7 +39,8 @@ validation fails. An open nightly audit PR for an area prevents another pending 
 for that area. Other open PRs are checked for overlapping files. Each new PR
 includes validation results and the audited base commit.
 
-Review generated changes and test results before marking a draft ready. GitHub's
+PRs are ready for review when created, allowing configured automated reviewers such
+as Greptile to start. Review generated changes and test results before merging. GitHub's
 built-in workflow token can leave pull-request CI in an approval-required state
 with an **Approve workflows to run** banner. The audit runs relevant local checks
 before proposing a change; reviewers should approve the normal CI when required
@@ -58,6 +59,6 @@ failed or missed run, inspect its logs and use a manual run when appropriate;
 GitHub does not guarantee replay of a missed scheduled run.
 
 The [prompt](prompts/nightly-audit.md) defines research and maintenance standards.
-The workflow and publisher enforce the staging base, separate draft PRs, bounded
+The workflow and publisher enforce the staging base, separate ready-for-review PRs, bounded
 patches, and blocked paths. Larger changes or changes to the audit's own controls
 are findings for a separate human-led task.
