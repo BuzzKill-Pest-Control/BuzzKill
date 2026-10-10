@@ -61,6 +61,48 @@ async function chooseOutcome() {
 }
 
 describe("pricing outcome saves", () => {
+  it.each(["GraphQL", "request"])("prevents dismissal during a pending save and keeps a later %s failure visible", async (failure) => {
+    let resolveSave!: (result: unknown) => void;
+    let rejectSave!: (error: Error) => void;
+    mocks.update.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveSave = resolve;
+      rejectSave = reject;
+    }));
+    await chooseOutcome();
+    expect(container.querySelector('[aria-label="Close"]')).not.toBeNull();
+    await act(async () => button("Save outcome").click());
+    expect(button("Save outcome").disabled).toBe(true);
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+
+    const backdrop = container.querySelector<HTMLElement>(".sheet-backdrop");
+    expect(backdrop).not.toBeNull();
+    await act(async () => backdrop!.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Close"]')).toBeNull();
+
+    await act(async () => {
+      if (failure === "GraphQL") {
+        resolveSave({ data: null, errors: [{ message: "Outcome was not saved" }] });
+      } else {
+        rejectSave(new Error("Outcome was not saved"));
+      }
+    });
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.querySelector('[role="alert"]')?.textContent).toBe("Outcome was not saved");
+    expect(button("Won").classList.contains("seg-on")).toBe(true);
+    expect(button("Save outcome").disabled).toBe(false);
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="Close"]');
+    expect(close).not.toBeNull();
+    await act(async () => close!.click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it.each(["GraphQL", "request"])("keeps the chosen outcome and shows a %s failure in the editor, then allows retry", async (failure) => {
     if (failure === "GraphQL") {
       mocks.update.mockResolvedValueOnce({ data: null, errors: [{ message: "Outcome was not saved" }] });

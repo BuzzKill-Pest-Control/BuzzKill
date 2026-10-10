@@ -103,6 +103,7 @@ export default function PricingLog() {
         open={editing !== null}
         onClose={() => setEditing(null)}
         title="Pricing run"
+        locked={saveOutcome.busy}
       >
         {editing ? (
           <div className="form-grid">
