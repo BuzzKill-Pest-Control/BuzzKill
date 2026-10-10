@@ -537,7 +537,11 @@ async function onSubscriptionInvoice(
     });
     const description = `${sub?.planName ?? "Subscription"} — ${new Date(
       stripeInvoice.created * 1000
-    ).toLocaleDateString("en-US", { month: "long", year: "numeric" })}`;
+    ).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "America/New_York",
+    })}`;
     const { data: created } = await client.models.Invoice.create({
       customerId: crmCustomerId,
       servicePlanId: crmServicePlanId,
