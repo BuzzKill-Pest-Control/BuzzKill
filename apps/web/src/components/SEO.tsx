@@ -31,7 +31,7 @@ import { computeHead, type HeadOverrides, type HeadState } from "../seo/head";
 import { resolvePage } from "../seo/pages";
 
 type HeadContextValue = {
-  overrides: HeadOverrides;
+  overrides: HeadOverrides | null;
   setOverrides: (next: HeadOverrides | null) => void;
 };
 
@@ -52,11 +52,11 @@ const BUILD_NOINDEX: boolean = (() => {
 })();
 
 export function HeadProvider({ children }: { children: ReactNode }) {
-  const [overrides, setState] = useState<HeadOverrides>({});
+  const [overrides, setState] = useState<HeadOverrides | null>(null);
   const value = useMemo<HeadContextValue>(
     () => ({
       overrides,
-      setOverrides: (next) => setState(next ?? {}),
+      setOverrides: setState,
     }),
     [overrides],
   );
