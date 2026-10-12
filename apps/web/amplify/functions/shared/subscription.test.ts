@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "./atomicLock";
 import type Stripe from "stripe";
 
@@ -173,6 +173,9 @@ function makeStripe(opts: { hasPaymentMethod: boolean }): FakeStripe {
 }
 
 beforeEach(() => {
+  // Keep the fixed October visit outside the 72-hour refund window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-07-16T12:00:00Z"));
   _setLockStoreForTests(memoryLockStore({ Job: jobs }));
   plans.clear();
   customers.clear();
@@ -190,6 +193,8 @@ beforeEach(() => {
     stripeCustomerId: "cus_1",
   });
 });
+
+afterEach(() => vi.useRealTimers());
 
 const seedPlan = (over: Partial<Plan> = {}): Plan => {
   const plan: Plan = {
