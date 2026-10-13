@@ -150,6 +150,9 @@ function makeStripe(subStatus: Record<string, string>): Stripe {
 }
 
 beforeEach(() => {
+  // Keep the fixed October visit outside the 72-hour refund window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-07-16T12:00:00Z"));
   for (const t of [plans, jobs, invoices, claims, customers, emailLogs, workItems]) {
     t.clear();
   }
@@ -177,7 +180,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => _setLockStoreForTests(null));
+afterEach(() => {
+  _setLockStoreForTests(null);
+  vi.useRealTimers();
+});
 
 describe("GL-08 cross-module: real cancel → real settlement", () => {
   it("the REAL cancel path preserves the provider reference and settlement re-proves it at Stripe", async () => {
