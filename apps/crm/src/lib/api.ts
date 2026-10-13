@@ -55,39 +55,11 @@ export type CallbackRequest = Schema["CallbackRequest"]["type"];
 export type CustomerLifecycleCommand =
   Schema["CustomerLifecycleCommand"]["type"];
 
-/** GL-02 — controlled lead vocabularies. Lost reasons come from the ONE
- * server-validated list (shared/leadReasons.ts, a pure leaf), shaped for a
- * dropdown; the rest still mirror the server validators by hand. */
+/** Server-validated lost reasons, shaped for the lead disposition dropdown. */
 export const LEAD_LOST_REASONS = LEAD_LOST_REASON_CODES.map((code) => ({
   code,
   label: LEAD_LOST_REASON_LABEL[code],
 }));
-export const LEAD_TOUCH_CHANNELS = [
-  { code: "CALL", label: "Call" },
-  { code: "TEXT", label: "Text" },
-  { code: "EMAIL", label: "Email" },
-  { code: "NOTE", label: "Note (no contact)" },
-] as const;
-export const LEAD_TOUCH_OUTCOMES = [
-  { code: "REACHED", label: "Reached them" },
-  { code: "DELIVERED", label: "Delivered to customer" },
-  { code: "LEFT_MESSAGE", label: "Left a message" },
-  { code: "NO_ANSWER", label: "No answer" },
-  { code: "SENT", label: "Provider accepted (not delivered)" },
-  { code: "QUALIFIED", label: "Qualified" },
-  { code: "UNQUALIFIED", label: "Unqualified" },
-  { code: "FAILED", label: "Failed" },
-  { code: "BOUNCED", label: "Bounced" },
-  { code: "SUPPRESSED", label: "Suppressed" },
-  { code: "NOTE", label: "Just a note" },
-] as const;
-
-export const LEAD_OUTCOME_CODES_BY_CHANNEL: Record<string, readonly string[]> = {
-  CALL: ["REACHED", "LEFT_MESSAGE", "NO_ANSWER", "FAILED"],
-  TEXT: ["REACHED", "DELIVERED", "SENT", "FAILED", "BOUNCED", "SUPPRESSED"],
-  EMAIL: ["REACHED", "DELIVERED", "SENT", "FAILED", "BOUNCED", "SUPPRESSED"],
-  NOTE: ["QUALIFIED", "UNQUALIFIED", "NOTE"],
-};
 
 type LeadActivityPage = {
   data: LeadActivity[];
@@ -135,19 +107,6 @@ export function createLead(input: {
   contactConsentPolicyVersion?: string;
 }): OpResult {
   return api().mutations.createLead(input);
-}
-
-export function logLeadTouch(input: {
-  customerId: string;
-  channel: string;
-  direction?: string;
-  outcome: string;
-  note?: string;
-  nextAction?: string;
-  nextActionAt?: string;
-  idempotencyKey: string;
-}): OpResult {
-  return api().mutations.logLeadTouch(input);
 }
 
 export function setLeadDisposition(input: {
