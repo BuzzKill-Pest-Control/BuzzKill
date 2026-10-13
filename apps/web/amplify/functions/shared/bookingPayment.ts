@@ -1,15 +1,13 @@
 import { casGuardedUpdate, type LockCondition } from "./atomicLock";
-import { dataClient } from "./dataClient";
 
 /**
- * GL-06 — the ONE conditional state machine for a booking's payment states.
+ * GL-06 / GL-17 — guarded checkout, payment-failure, and processing-poll writes.
  *
- * Every processing/success/failure webhook, sweep, and retry endpoint moves a
- * BookingRequest through these helpers, never a bare status write. Each
- * transition is a guarded CAS conditioned on BOTH the allowed prior states
+ * Processing and successful commitments are created by bookingFinalize.
+ * The failure transition here is a guarded CAS conditioned on BOTH prior states
  * AND the payment attempt it belongs to (stripePaymentIntentId), so:
  *  - duplicate or replayed events collapse (the second write LOSES);
- *  - a stale processing/failure event for an OLD attempt cannot touch a
+ *  - a stale failure event for an OLD attempt cannot touch a
  *    booking that moved on to a new intent;
  *  - out-of-order delivery cannot regress BOOKED (success is terminal for
  *    payment events) or overwrite a later business decision (CANCELED and
@@ -143,64 +141,6 @@ const attemptGuard = (intentId: string | null): LockCondition[] =>
     ? [{ kind: "fieldEquals", field: "stripePaymentIntentId", value: intentId }]
     : [];
 
-/** QUOTED → PROCESSING for THIS attempt, stamping the durable processing
- *  facts. Late events (already PROCESSING/BOOKED/FAILED) lose harmlessly. */
-export async function bookingToProcessing(opts: {
-  bookingId: string;
-  intentId: string;
-  methodLabel?: string | null;
-  /** Business days a bank debit is expected to take — sets expectedBy. */
-  expectedBusinessDays?: number;
-}): Promise<BookingTransition> {
-  const now = new Date();
-  const expected = new Date(now);
-  // Calendar-days approximation of N business days (weekends skipped).
-  let remaining = opts.expectedBusinessDays ?? 5;
-  while (remaining > 0) {
-    expected.setUTCDate(expected.getUTCDate() + 1);
-    if (expected.getUTCDay() !== 0 && expected.getUTCDay() !== 6) remaining--;
-  }
-  const res = await casGuardedUpdate(
-    "BookingRequest",
-    opts.bookingId,
-    {
-      status: "PROCESSING",
-      processingStartedAt: now.toISOString(),
-      // The sweep re-reads Stripe well before the expected date.
-      processingNextCheckAt: new Date(
-        now.getTime() + 6 * 60 * 60_000
-      ).toISOString(),
-      processingExpectedBy: expected.toISOString().slice(0, 10),
-      processingMethodLabel: opts.methodLabel ?? null,
-    },
-    [
-      { kind: "fieldEquals", field: "status", value: "QUOTED" },
-      ...attemptGuard(opts.intentId),
-    ]
-  );
-  return res.ok ? { ok: true } : res;
-}
-
-/** QUOTED|PROCESSING → BOOKED. Success is terminal for payment events. */
-export async function bookingToBooked(opts: {
-  bookingId: string;
-  intentId?: string | null;
-}): Promise<BookingTransition> {
-  const res = await casGuardedUpdate(
-    "BookingRequest",
-    opts.bookingId,
-    {
-      status: "BOOKED",
-      processingNextCheckAt: null,
-    },
-    [
-      { kind: "fieldIn", field: "status", values: ["QUOTED", "PROCESSING"] },
-      ...attemptGuard(opts.intentId ?? null),
-    ]
-  );
-  return res.ok ? { ok: true } : res;
-}
-
 /** QUOTED|PROCESSING → PAYMENT_FAILED for THIS attempt. A failure event for
  *  a superseded attempt, or one arriving after success, loses. */
 export async function bookingToPaymentFailed(opts: {
@@ -252,11 +192,4 @@ export async function stampProcessingNextCheck(
     { processingNextCheckAt: nextCheckAt },
     [{ kind: "fieldEquals", field: "status", value: "PROCESSING" }]
   ).catch(() => undefined);
-}
-
-/** Read helper used by sweeps and endpoints. */
-export async function getBooking(bookingId: string) {
-  const client = await dataClient();
-  const { data } = await client.models.BookingRequest.get({ id: bookingId });
-  return data;
 }
