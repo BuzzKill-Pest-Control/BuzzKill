@@ -449,6 +449,42 @@ describe("the full journey after the email click", () => {
 });
 
 describe("capability redaction", () => {
+  it("redacts checkout capabilities from the captured landing URL and page path", async () => {
+    const search = "?booking=bk-1&t=STATUS_CAPABILITY&payment_intent_client_secret=STRIPE_CAPABILITY&redirect_status=succeeded&utm_source=email";
+    stubBrowser(fakeSessionStorage(), {
+      pathname: "/book",
+      href: `https://www.pestbuzzkill.com/book${search}`,
+      search,
+    });
+    const { captureLandingParams, trackPageview } = await freshModule();
+
+    captureLandingParams();
+    trackPageview(`/book${search}`);
+
+    const safePath = "/book?booking=bk-1&redirect_status=succeeded&utm_source=email";
+    expect(eventParams().page_path).toBe(safePath);
+    expect(eventParams().page_location).toBe(`https://www.pestbuzzkill.com${safePath}`);
+    expect(JSON.stringify(gtagMock.mock.calls)).not.toContain("STATUS_CAPABILITY");
+    expect(JSON.stringify(gtagMock.mock.calls)).not.toContain("STRIPE_CAPABILITY");
+  });
+
+  it.each(["", "https://www.pestbuzzkill.com"])(
+    "redacts checkout capabilities from a clicked link with origin %j",
+    async (origin) => {
+      const { trackButtonClick } = await freshModule();
+
+      trackButtonClick(
+        "resume_booking",
+        "Resume booking",
+        `${origin}/book?booking=bk-1&t=STATUS_CAPABILITY&payment_intent_client_secret=STRIPE_CAPABILITY`,
+      );
+
+      expect(eventParams().destination).toBe(`${origin}/book?booking=bk-1`);
+      expect(JSON.stringify(gtagMock.mock.calls)).not.toContain("STATUS_CAPABILITY");
+      expect(JSON.stringify(gtagMock.mock.calls)).not.toContain("STRIPE_CAPABILITY");
+    },
+  );
+
   /**
    * ?lead=<token> prefills a lead's contact details and decides whose booking a
    * payment converts, and /track/<token> is a private tracking link. Neither
