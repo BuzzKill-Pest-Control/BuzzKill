@@ -91,13 +91,6 @@ export function assertOffice(
   if (!callerIsOffice(identity)) throw new Error("Owner role required");
 }
 
-const STAFF_GROUPS = ["OWNER", "TECH"];
-
-/** Any internal staff member, as opposed to a portal customer. */
-export function isStaff(groups: string[]): boolean {
-  return groups.some((g) => STAFF_GROUPS.includes(g));
-}
-
 export function assertFinance(
   identity: AppSyncIdentity | undefined | null
 ): void {
