@@ -1,5 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addDays, startOfWeek } from "./format";
+
+describe.each(["UTC", "America/New_York", "Pacific/Auckland", "Pacific/Kiritimati"])(
+  "calendar navigation in %s",
+  (timeZone) => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("keeps Today on the selected calendar date and moves one day at a time", () => {
+      vi.stubEnv("TZ", timeZone);
+      expect(addDays("2026-10-14", 0)).toBe("2026-10-14");
+      expect(addDays("2026-10-14", 1)).toBe("2026-10-15");
+      expect(addDays("2026-10-14", -1)).toBe("2026-10-13");
+    });
+
+    it("keeps the schedule on Monday when moving to the next week", () => {
+      vi.stubEnv("TZ", timeZone);
+      const monday = startOfWeek("2026-10-14");
+      expect(monday).toBe("2026-10-12");
+      expect(addDays(monday, 7)).toBe("2026-10-19");
+    });
+
+    it("crosses month, leap-day, and daylight-saving boundaries by calendar day", () => {
+      vi.stubEnv("TZ", timeZone);
+      expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+      expect(addDays("2028-02-28", 1)).toBe("2028-02-29");
+      expect(addDays("2026-03-07", 2)).toBe("2026-03-09");
+      expect(addDays("2026-10-31", 2)).toBe("2026-11-02");
+    });
+  },
+);
 
 describe("startOfWeek — Monday of the containing week", () => {
   it("returns the same day when the date is already a Monday", () => {
