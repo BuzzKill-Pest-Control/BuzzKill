@@ -288,7 +288,8 @@ export type CancelPreview = {
 export type CancelConfirmed = { canceled: true; refunded: boolean };
 
 /**
- * Every non-2xx (and network / config failure, as status 0) lands here.
+ * Every non-2xx or unreadable JSON response (and network / config failure,
+ * as status 0) lands here.
  * The server writes `error` / `errors` for customers — render them verbatim.
  */
 export type ApiErrorBody = {
@@ -351,7 +352,11 @@ async function post<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
   try {
     body = await resp.json();
   } catch {
-    body = { error: `Server returned a non-JSON response (status ${resp.status})` };
+    return {
+      ok: false,
+      status: resp.status,
+      body: { error: `Server returned a non-JSON response (status ${resp.status})` },
+    };
   }
 
   if (resp.ok) {

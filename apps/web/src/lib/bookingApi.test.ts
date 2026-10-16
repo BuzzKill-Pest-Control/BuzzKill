@@ -67,6 +67,20 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("booking API response parsing", () => {
+  it.each([200, 503])("reports unreadable JSON as a failure even with HTTP %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("<html>Service unavailable</html>", { status }),
+    ));
+
+    await expect(requestQuote(quoteInput)).resolves.toEqual({
+      ok: false,
+      status,
+      body: { error: `Server returned a non-JSON response (status ${status})` },
+    });
+  });
+});
+
 describe("requestQuote attribution", () => {
   it("carries the captured first-touch attribution on the /quote payload", async () => {
     stubBrowser("?utm_source=google&utm_medium=cpc&utm_campaign=wasps&gclid=abc123");

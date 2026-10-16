@@ -72,6 +72,22 @@ it.each(["json", "text"])(
   },
 );
 
+it("does not claim cancellation succeeded when an HTTP 200 response contains no JSON", async () => {
+  await confirmWith(new Response("<html>Service unavailable</html>", { status: 200 }));
+
+  expect(container.querySelector("h1")?.textContent).toBe("Something went wrong.");
+  expect(container.textContent).not.toContain("Your appointment is canceled.");
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("non-JSON response");
+});
+
+it("shows the cancellation confirmation after a valid successful response", async () => {
+  await confirmWith(jsonResponse({ canceled: true, refunded: true }));
+
+  expect(container.querySelector("h1")?.textContent).toBe("Your appointment is canceled.");
+  expect(container.textContent).toContain("A full refund is on its way");
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
 it("preserves the backend's refund reassurance and recorded date after a cancellation failure", async () => {
   const reassurance = "We've recorded your request, so your full refund still applies.";
   await confirmWith(jsonResponse({
