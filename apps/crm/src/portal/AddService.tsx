@@ -79,7 +79,7 @@ function money(cents: number): string {
 
 const onlyDigits = (s: string) => s.replace(/\D+/g, "");
 
-type PricedDay = { date: string; priceCents: number };
+type PricedDay = { date: string; priceCents: number; planInitialFeeCents?: number };
 type RecurringOffer = {
   frequency: string;
   monthlyCents: number;
@@ -283,6 +283,7 @@ export default function PortalAddService() {
   }
 
   const offer = quote?.recurringOffer ?? null;
+  const selectedDay = quote?.days?.find((d) => d.date === selDate);
 
   return (
     <Page title="Add a service" back="/portal">
@@ -431,14 +432,14 @@ export default function PortalAddService() {
         <Card title="Your price">
           {offer && (quote.planOnly || plan === "PLAN") ? (
             <p className="small">
-              <strong>{money(offer.initialFeeCents)}</strong> today, then{" "}
+              <strong>{money(selectedDay?.planInitialFeeCents ?? offer.initialFeeCents)}</strong> today, then{" "}
               <strong>{money(offer.monthlyCents)}/mo</strong> — the plan starts
               after your first completed visit.
             </p>
           ) : selDate && quote.days ? (
             <p className="small">
               <strong>
-                {money(quote.days.find((d) => d.date === selDate)?.priceCents ?? 0)}
+                {money(selectedDay?.priceCents ?? 0)}
               </strong>{" "}
               one-time, charged to your card on file.
             </p>
