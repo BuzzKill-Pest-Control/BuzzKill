@@ -4,7 +4,6 @@ import {
   catalogEntry,
   entryForLabel,
   funnelCatalog,
-  onsiteMinutesForClass,
   planNameFor,
   PUBLIC_CONFLICTS,
   SERVICE_CATALOG,
@@ -15,8 +14,8 @@ import {
 /**
  * GL-01 — the ONE versioned service catalog. These tests pin the contract
  * every derived surface relies on: the funnel subset, byte-identical sold
- * labels, the resolver that adopts every historical string, the locked
- * duration rule, and the seasonal facts.
+ * labels, the resolver that adopts every historical string, and the seasonal
+ * facts.
  */
 
 describe("the catalog is the single source", () => {
@@ -70,13 +69,6 @@ describe("the catalog is the single source", () => {
         id === "MOSQUITO" || id === "MOSQUITO_TICK"
       );
     }
-  });
-
-  it("duration is the LOCKED property-class rule — the class decides, never the service", () => {
-    expect(onsiteMinutesForClass("RESIDENTIAL")).toBe(30);
-    expect(onsiteMinutesForClass("COMMERCIAL")).toBe(60);
-    expect(onsiteMinutesForClass("COMMUNITY")).toBe(60);
-    expect(onsiteMinutesForClass(null)).toBe(30);
   });
 });
 

@@ -295,16 +295,6 @@ export function funnelCatalog(): CatalogEntry[] {
   return CATALOG_IDS.map((id) => SERVICE_CATALOG[id]).filter((e) => e.funnel);
 }
 
-/** On-site minutes are the LOCKED property-class rule — the class decides,
- *  never the service. */
-export function onsiteMinutesForClass(
-  propertyClass: string | null | undefined
-): number {
-  return propertyClass === "COMMERCIAL" || propertyClass === "COMMUNITY"
-    ? 60
-    : 30;
-}
-
 /**
  * The canonical customer-facing label for a sold service — byte-identical
  * to what the funnel has always produced, so entryForLabel round-trips
