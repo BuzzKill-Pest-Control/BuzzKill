@@ -108,6 +108,7 @@ const RESIDENTIAL_SERVICES: NavGroup[] = [
 
 const ABOUT_LINKS: SubItem[] = [
   { label: "Our Story",          to: "/about" },
+  { label: "Blog",               to: "/blog" },
   { label: "Service Areas",      to: "/service-areas" },
   { label: "Licensed & Insured", to: "/licensed-insured" },
   { label: "Contact",            to: "/contact" },
