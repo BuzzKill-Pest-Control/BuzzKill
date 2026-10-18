@@ -13,6 +13,7 @@ import PageErrorBoundary from "./components/PageErrorBoundary";
 import { HeadProvider, SiteHead } from "./components/SEO";
 import { REDIRECT_ROUTES } from "./seo/pages";
 import lazyPage from "./lib/lazyPage";
+import "./components/articles/articles.css";
 
 // Pages are code-split (lazyPage) so each route loads only its own JS chunk
 // instead of one big bundle — faster first paint, better Core Web Vitals.
@@ -30,6 +31,8 @@ const ServiceAreas     = lazyPage(() => import("./pages/ServiceAreas"));
 const Reviews          = lazyPage(() => import("./pages/Reviews"));
 const Careers          = lazyPage(() => import("./pages/Careers"));
 const Contact          = lazyPage(() => import("./pages/Contact"));
+const BlogIndex        = lazyPage(() => import("./pages/blog/BlogIndex"));
+const BlogArticle      = lazyPage(() => import("./pages/blog/BlogArticle"));
 
 const CommonAreaProtection = lazyPage(() => import("./pages/communities/CommonAreaProtection"));
 const InUnitService        = lazyPage(() => import("./pages/communities/InUnitService"));
@@ -199,6 +202,8 @@ export default function App() {
           <Route path="/reviews"        element={<Reviews />} />
           <Route path="/careers"        element={<Careers />} />
           <Route path="/contact"        element={<Contact />} />
+          <Route path="/blog"           element={<BlogIndex />} />
+          <Route path="/blog/:slug"     element={<BlogArticle />} />
 
           {/* Legacy audience URLs — still indexed; superseded by /communities */}
           <Route path="/condo-services" element={<CondoServices />} />
