@@ -42,6 +42,8 @@ The build validates articles, release timestamps, local prose-link destinations,
 
 Use the established reviewed website release workflow. The web app still owns the shared backend; adding an article does not establish a separate content-only deployment procedure or authorize an autonomous release. Hosting clean-URL behavior and rendered mobile/desktop pages require staging verification before production.
 
+Blog clean URLs also require the separately applied app-wide hosting rules. Follow [the Blog routing release guide](docs/blog-initial-html-2026-10-18.md); builds and article updates do not change live hosting configuration.
+
 The Amplify Hosting app has `AMPLIFY_MONOREPO_APP_ROOT=apps/web` set in the console so builds resolve the correct app root.
 
 ---

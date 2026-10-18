@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
@@ -35,6 +37,56 @@ import { validateArticleAssets, validateArticleLinks, validateArticleRelease } f
 const SHELL = `<!doctype html><html><head>${renderShellHead()}</head><body><div id="root"></div></body></html>`;
 const article = ARTICLES[0];
 const clone = () => JSON.parse(JSON.stringify(fixture));
+
+it("serves full listing and fixture article HTML through the ordered hosting rules without swallowing existing SPA routes", async () => {
+  const rules = JSON.parse(readFileSync(new URL("../../hosting/amplify-custom-rules.json", import.meta.url), "utf8")) as Array<{ source: string; target: string; status: string }>;
+  const built = new Map(routeArtifacts().map((artifact) => [`/${artifact.file}`, artifactHtml(SHELL, artifact, renderRouteBody(artifact.path))]));
+  const shell = built.get("/index.html")!;
+  const targetFor = (path: string): { file: string; status: number } => {
+    for (const rule of rules) {
+      if (rule.source.startsWith("https://")) continue;
+      if (rule.status === "404-200") {
+        const native = [path, path.endsWith("/") ? `${path}index.html` : `${path}.html`].find((file) => built.has(file));
+        return { file: native ?? rule.target, status: 200 };
+      }
+      const articleSlug = rule.source === "/blog/<article>/" ? /^\/blog\/([^/]+)\/$/.exec(path)?.[1] : undefined;
+      if (rule.source === path || articleSlug || (rule.source.startsWith("</") && new RegExp(rule.source.slice(2, -2)).test(path))) {
+        return { file: articleSlug ? rule.target.replace("<article>", articleSlug) : rule.target, status: Number(rule.status) };
+      }
+    }
+    throw new Error(`No hosting rule handles ${path}`);
+  };
+  const server = createServer((request, response) => {
+    const url = new URL(request.url!, "http://localhost"), target = targetFor(url.pathname);
+    if (target.status === 301) { response.writeHead(301, { Location: target.file + url.search }); response.end(); return; }
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(built.get(target.file) ?? shell);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, articlePath = `/blog/${article.slug}`;
+    for (const [path, file] of [["/blog", "/blog.html"], [articlePath, `${articlePath}.html`]]) {
+      const expected = built.get(file)!;
+      expect(expected).toBeTruthy(); expect(expected).not.toBe(shell);
+      for (const variant of [path, `${path}/`, `${path}?utm_source=routing-test`, `${path}/?utm_source=routing-test`, `${path}.html`]) {
+        const response = await fetch(`${origin}${variant}`), html = await response.text();
+        expect(response.status, variant).toBe(200);
+        expect(response.redirected, variant).toBe(path === articlePath && new URL(variant, origin).pathname.endsWith("/"));
+        expect(new URL(response.url).search, variant).toBe(new URL(variant, origin).search);
+        expect(html, variant).toBe(expected);
+        expect(html, variant).toContain(`href="https://www.pestbuzzkill.com${path}"`);
+        expect(html, variant).toContain(path === "/blog" ? "The BuzzKill Blog" : "Sources &amp; further reading");
+        if (path === articlePath) { expect(html).toContain("BlogPosting"); expect(html).toContain("Synthetic fixture text for layout verification."); }
+      }
+    }
+    const redirect = await fetch(`${origin}${articlePath}/?utm_source=kept`, { redirect: "manual" });
+    expect(redirect.status).toBe(301); expect(redirect.headers.get("location")).toBe(`${articlePath}?utm_source=kept`);
+    for (const path of ["/", "/book", "/track/example", "/residential", "/blogger", "/blog/unknown-article", "/blog/nested/unapproved", "/unknown-route"]) {
+      expect(await (await fetch(`${origin}${path}`)).text(), path).toBe(shell);
+    }
+    expect(await (await fetch(`${origin}/about`)).text()).toBe(built.get("/about.html"));
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+});
 
 describe("article collection", () => {
   it("sorts released articles, preserves supported prose, and resolves only known slugs", () => {
