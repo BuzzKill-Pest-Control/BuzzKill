@@ -25,11 +25,12 @@ import { indexablePages } from "../src/seo/pages";
 import { renderSitemap } from "../src/seo/sitemap";
 import { renderRouteBody } from "../src/seo/prerender";
 import { ARTICLES } from "../src/lib/articles";
-import { validateArticleAssets, validateArticleLinks } from "./validate-editorial-content.mts";
+import { validateArticleAssets, validateArticleLinks, validateArticleRelease } from "./validate-editorial-content.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
-validateArticleAssets(join(here, "..", "public"), ARTICLES);
+validateArticleRelease(ARTICLES);
+await validateArticleAssets(join(here, "..", "public"), ARTICLES);
 validateArticleLinks(ARTICLES);
 
 if (!existsSync(join(dist, "index.html"))) {

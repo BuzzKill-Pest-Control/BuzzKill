@@ -56,9 +56,9 @@ function inline(value: unknown): ArticleInline[] {
     return { text: v.text, ...(v.href === undefined ? {} : { href: link(v.href) }) };
   });
 }
-function date(value: unknown, label: string, now: number): string {
+function date(value: unknown, label: string): string {
   const s = text(value, label);
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(s) || !Number.isFinite(Date.parse(s)) || Date.parse(s) > now) return fail(`${label} must be a released timestamp with timezone`);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(s) || !Number.isFinite(Date.parse(s))) return fail(`${label} must be a valid timestamp with timezone`);
   // Date.parse normalizes dates such as February 30; reject those explicitly.
   const day = s.slice(0, 10);
   if (new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day) return fail(`invalid ${label}`);
@@ -70,8 +70,8 @@ export function articleText(article: Pick<Article, "body">): string {
 export function articleWordCount(article: Pick<Article, "body">): number {
   return articleText(article).match(/\S+/g)?.length ?? 0;
 }
-/** Fail the build on malformed, duplicate, unsafe or unreleased public content. */
-export function validateArticles(input: unknown, now = Date.now()): Article[] {
+/** Structural validation is deterministic in the build and browser. Release timing is build-only. */
+export function validateArticles(input: unknown): Article[] {
   if (!Array.isArray(input)) return fail("collection must be an array");
   const slugs = new Set<string>();
   const articles = input.map((entry): Article => {
@@ -106,9 +106,9 @@ export function validateArticles(input: unknown, now = Date.now()): Article[] {
     if (!headingIds.size) return fail("at least one heading is required");
     if (!Array.isArray(v.sources) || !v.sources.length || v.sources.length > 50) return fail("supporting sources are required");
     const sources = v.sources.map((source) => { const s = object(source); keys(s, ["title", "url"]); const url = link(s.url); if (!url.startsWith("https://")) fail("sources must use HTTPS"); return { title: text(s.title, "source title"), url }; });
-    const publishedAt = date(v.publishedAt, "publishedAt", now);
+    const publishedAt = date(v.publishedAt, "publishedAt");
     if (v.author !== COMPANY.name) return fail(`author must use the company editorial byline (${COMPANY.name})`);
-    const updatedAt = v.updatedAt === undefined ? undefined : date(v.updatedAt, "updatedAt", now);
+    const updatedAt = v.updatedAt === undefined ? undefined : date(v.updatedAt, "updatedAt");
     if (updatedAt && Date.parse(updatedAt) < Date.parse(publishedAt)) return fail("updatedAt cannot precede publication");
     const article: Article = {
       slug, title: text(v.title, "title", 90), description: text(v.description, "description", 200),
