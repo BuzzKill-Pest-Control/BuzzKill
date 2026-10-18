@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import sharp from "sharp";
 
 const { fixture } = vi.hoisted(() => ({ fixture: {
   slug: "synthetic-layout-preview",
@@ -29,7 +30,7 @@ import { artifactHtml, routeArtifacts } from "../seo/artifacts";
 import { renderRouteBody } from "../seo/prerender";
 import { renderShellHead } from "../seo/shell";
 import { renderSitemap } from "../seo/sitemap";
-import { validateArticleAssets, validateArticleLinks } from "../../scripts/validate-editorial-content.mts";
+import { validateArticleAssets, validateArticleLinks, validateArticleRelease } from "../../scripts/validate-editorial-content.mts";
 
 const SHELL = `<!doctype html><html><head>${renderShellHead()}</head><body><div id="root"></div></body></html>`;
 const article = ARTICLES[0];
@@ -46,9 +47,9 @@ describe("article collection", () => {
     expect(validateArticles([])).toEqual([]);
   });
 
-  it("rejects duplicates, malformed dates, future releases, executable blocks and unsafe links", () => {
+  it("rejects duplicates, malformed dates, executable blocks and unsafe links", () => {
     expect(() => validateArticles([fixture, fixture])).toThrow("duplicate slug");
-    for (const publishedAt of ["2026-02-30T14:00:00Z", "2026-01-15", "2099-01-01T14:00:00Z"]) expect(() => validateArticles([{ ...clone(), publishedAt }])).toThrow();
+    for (const publishedAt of ["2026-02-30T14:00:00Z", "2026-01-15"]) expect(() => validateArticles([{ ...clone(), publishedAt }])).toThrow();
     expect(() => validateArticles([{ ...clone(), updatedAt: "2026-01-01T12:00:00Z" }])).toThrow("precede");
     expect(() => validateArticles([{ ...clone(), slug: "../outside" }])).toThrow("slug");
     expect(() => validateArticles([{ ...clone(), body: [{ type: "html", html: "<script>" }] }])).toThrow("only paragraph");
@@ -56,6 +57,26 @@ describe("article collection", () => {
       const value = clone(); value.body[1].content[0].href = href;
       expect(() => validateArticles([value]), href).toThrow("links");
     }
+  });
+
+  it("keeps future publication and modification timestamps out of the build", () => {
+    const buildTime = Date.parse("2026-10-18T12:00:00Z");
+    expect(() => validateArticleRelease([article], buildTime)).not.toThrow();
+    const future = validateArticles([{ ...clone(), publishedAt: "2026-10-19T12:00:00Z" }]);
+    expect(() => validateArticleRelease(future, buildTime)).toThrow("released before the build");
+    expect(() => validateArticleRelease([{ ...article, updatedAt: "2026-10-19T12:00:00Z" }], buildTime)).toThrow("released before the build");
+  });
+
+  it("loads the shipped collection and marketing registry even when a visitor's clock is years behind", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2001-01-01T00:00:00Z"));
+    vi.resetModules();
+    try {
+      const clientArticles = await import("./articles");
+      const clientPages = await import("../seo/pages");
+      expect(clientArticles.findArticle(fixture.slug)?.title).toBe(fixture.title);
+      expect(clientPages.resolvePage("/")?.kind).toBe("home");
+      expect(clientPages.resolvePage(`/blog/${fixture.slug}`)?.title).toBe(fixture.title);
+    } finally { clock.mockRestore(); }
   });
 
   it("requires source evidence, bounded length, unique headings and article-scoped images", () => {
@@ -125,17 +146,78 @@ describe("public article rendering and discovery", () => {
 });
 
 describe("article assets", () => {
-  it("rejects missing files and symlinks outside the site's public tree", () => {
+  async function withImageFile(check: (root: string, target: string, candidate: typeof article) => Promise<void>, extension = "png") {
     const directory = mkdtempSync(join(tmpdir(), "buzzkill-article-"));
     try {
       const root = join(directory, "public");
       mkdirSync(join(root, "images/blog/synthetic-layout-preview"), { recursive: true });
-      expect(() => validateArticleAssets(root, [article])).toThrow();
-      const outside = join(directory, "outside.png"); writeFileSync(outside, "fixture");
-      const target = join(root, article.image.src); symlinkSync(outside, target);
-      expect(() => validateArticleAssets(root, [article])).toThrow("escapes");
-      rmSync(target); writeFileSync(target, "fixture image bytes");
-      expect(() => validateArticleAssets(root, [article])).not.toThrow();
+      const candidate = { ...article, image: { ...article.image, src: `/images/blog/synthetic-layout-preview/preview.${extension}`, width: 120, height: 80 } };
+      await check(root, join(root, candidate.image.src), candidate);
     } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+
+  const raster = () => sharp({ create: { width: 120, height: 80, channels: 3, background: "#72e000" } });
+
+  it("rejects missing files and symlinks outside the site's public tree", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow();
+      const outside = join(root, "..", "outside.png"); writeFileSync(outside, await raster().png().toBuffer());
+      symlinkSync(outside, target);
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("escapes");
+    });
+  });
+
+  it.each(["png", "jpg", "jpeg", "webp", "avif"] as const)("decodes a valid %s raster and verifies its actual dimensions", async (extension) => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, await raster().toFormat(extension === "jpg" ? "jpeg" : extension).toBuffer());
+      await expect(validateArticleAssets(root, [candidate])).resolves.toBeUndefined();
+    }, extension);
+  });
+
+  it("rejects arbitrary text disguised as a raster image", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, "fixture image bytes");
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("invalid image");
+    });
+  });
+
+  it("rejects corrupt pixel data even when the image headers still parse", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      const valid = await raster().png().toBuffer();
+      const truncated = valid.subarray(0, Math.floor(valid.length * 0.65));
+      await expect(sharp(truncated).metadata()).resolves.toMatchObject({ width: 120, height: 80 });
+      writeFileSync(target, truncated);
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("invalid image");
+    });
+  });
+
+  it("rejects a filename extension that contradicts the decoded format", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, await raster().jpeg().toBuffer());
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("image type");
+    });
+  });
+
+  it("rejects declared dimensions that differ from the decoded pixels", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, await raster().png().toBuffer());
+      await expect(validateArticleAssets(root, [{ ...candidate, image: { ...candidate.image, width: 121 } }])).rejects.toThrow("dimensions 120×80 do not match declared 121×80");
+    });
+  });
+
+  it("checks display dimensions after applying JPEG EXIF orientation", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, await raster().withMetadata({ orientation: 6 }).jpeg().toBuffer());
+      const displayed = { ...candidate, image: { ...candidate.image, width: 80, height: 120 } };
+      await expect(validateArticleAssets(root, [displayed])).resolves.toBeUndefined();
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("dimensions 80×120 do not match declared 120×80");
+    }, "jpg");
+  });
+
+  it("rejects files above the encoded size bound before decoding", async () => {
+    await withImageFile(async (root, target, candidate) => {
+      writeFileSync(target, Buffer.alloc(10 * 1024 * 1024 + 1));
+      await expect(validateArticleAssets(root, [candidate])).rejects.toThrow("at most 10 MiB");
+    });
   });
 });
