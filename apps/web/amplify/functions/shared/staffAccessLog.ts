@@ -96,31 +96,3 @@ export async function recordStaffAccessEvent(
     return false;
   }
 }
-
-/**
- * Has an action with this idempotency key already been recorded? Returns the
- * prior row's stored fields so a replay can return the original outcome instead
- * of applying a second change. Best-effort: a lookup failure returns null and
- * the action proceeds (at-least-once), which the Cognito/Stripe-style idempotent
- * steps below tolerate.
- */
-export async function findStaffAccessEventByKey(
-  idempotencyKey: string
-): Promise<{ outcome: string; effects: string | null } | null> {
-  const key = idempotencyKey.trim();
-  if (!key) return null;
-  try {
-    const client = await dataClient();
-    // Zero-page read is deliberate: idempotencyKey is unique by construction, so one page holds every match — limit 1 is the point (audit 1.1.5).
-    const { data } = await client.models.StaffAccessEvent.listStaffAccessEventByIdempotencyKey(
-      { idempotencyKey: key },
-      { limit: 1 }
-    );
-    const row = data?.[0];
-    if (!row) return null;
-    return { outcome: String(row.outcome), effects: row.effects ?? null };
-  } catch (err) {
-    console.error(`Staff access idempotency lookup failed for ${key}`, err);
-    return null;
-  }
-}
