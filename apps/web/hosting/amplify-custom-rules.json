@@ -25,11 +25,6 @@
     "status": "200"
   },
   {
-    "source": "/blog/<article>/",
-    "target": "/blog/<article>",
-    "status": "301"
-  },
-  {
     "source": "</^(?!/blog(?:/|$))[^.]+$/>",
     "target": "/index.html",
     "status": "200"

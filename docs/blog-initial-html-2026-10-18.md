@@ -1,15 +1,26 @@
 # Blog initial HTML and Amplify routing
 
-The blog build emits `blog.html` and `blog/<slug>.html` with full page prose and
-metadata. The previous broad SPA rewrite serves `index.html` for clean blog
-paths before Amplify can resolve those artifacts.
+The blog build emits `blog.html` and, for each published article, byte-identical
+`blog/<slug>.html` and `blog/<slug>/index.html` files with full page prose and
+metadata. Both article files use the same slashless canonical URL. The previous
+broad SPA rewrite serves `index.html` for clean blog paths before Amplify can
+resolve those artifacts.
 
-The reviewed rule file `apps/web/hosting/amplify-custom-rules.json` adds two
-listing rewrites, normalizes an article's trailing slash, and excludes only
-`/blog` and its children from the broad SPA rewrite. Amplify's native clean URL
-lookup then serves `blog/<slug>.html` for `/blog/<slug>`. Direct `.html` artifacts
-remain accessible. The domain redirect, About exceptions, non-blog SPA behavior
-and missing-file fallback remain intact. No synthetic article ships.
+The reviewed seven-rule file `apps/web/hosting/amplify-custom-rules.json` adds
+two listing rewrites and excludes only `/blog` and its children from the broad
+SPA rewrite. Amplify's native clean URL lookup serves `blog/<slug>.html` for
+`/blog/<slug>` and `blog/<slug>/index.html` for `/blog/<slug>/`. Direct `.html`
+artifacts remain accessible. Links and canonical metadata stay slashless; there
+is no universal trailing-slash HTTP redirect. The domain redirect, About
+exceptions, non-blog SPA behavior and missing-file fallback remain intact.
+No synthetic article ships.
+
+A generic article slash-removal redirect is unsafe: native lookup can redirect
+a missing `/blog/<unknown>` to `/blog/<unknown>/`, and a custom redirect back to
+the bare path creates a loop. The seven rules remove that reverse redirect.
+Unknown blog paths must reach the existing fallback within a bounded chain;
+its live terminal status may be 200 or 404. Published article variants must
+instead return 200 with the complete article HTML and matching metadata.
 
 ## Local verification
 
@@ -23,9 +34,13 @@ npm run test:about-build
 
 The fixture test sends real local HTTP requests through the ordered rules to
 rendered listing and article HTML, including query strings, direct `.html`,
-trailing slashes, unknown slugs and existing SPA routes. The final command checks
-the real built About and Blog artifacts and any published article artifacts.
-This simulation does not prove that Amplify is serving the reviewed rules.
+trailing slashes, unknown slugs and existing SPA routes. It models native
+missing-flat-file slash redirects with both terminal 200 and 404 fallbacks,
+rejects the old eight-rule redirect loop, and requires both known article
+variants to serve byte-identical HTML. The final command checks the real built
+About and Blog artifacts and any published article artifacts using bounded
+manual redirect chains. These models do not prove Amplify's live fallback
+status or that Amplify is serving the reviewed rules.
 
 ## Live setup remains separate
 
@@ -51,11 +66,17 @@ Follow the backup, comparison and rollback procedure in
 3. A separately authorized hosting operator must inspect the actual current
    app/branches, save a fresh custom-rules backup, preserve unrelated live rules
    and confirm every affected branch has the referenced artifacts. Only then
-   apply the reviewed blog routing change to the correct web app. This document
-   and its tests perform no live configuration mutation.
+   apply the reviewed blog routing change to the correct web app. Both branches
+   must include the dual article artifact implementation before applying the
+   seven rules. This document and its tests perform no live configuration
+   mutation.
 4. After the hosting switch, verify raw canonical `/blog` and actual
    `/blog/<slug>` requests on the appropriate hosts, plus query-string and
-   trailing-slash behavior, About, existing SPA routes and static assets.
+   trailing-slash behavior, About, existing SPA routes and static assets. Follow
+   unknown blog redirects manually with a finite hop limit, check that queries
+   survive and that no URL repeats, and require a terminal 200 or 404 fallback.
+   Do not treat a 301 response alone as successful unknown-route verification.
+   Known published article variants must return 200 with the same body and head.
    Direct `.html` URLs remain raw-artifact checks; use canonical routes for
    rendered desktop/mobile QA. Record responses and captures separately. An
    empty article collection cannot prove a real published article's live detail
