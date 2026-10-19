@@ -52,6 +52,18 @@ describe("route artifacts", () => {
     expect(artifactFileFor("/quote/contact-me")).toBe("quote/contact-me.html");
   });
 
+  it("limits directory-index aliases to registered article metadata", () => {
+    const pages = allPages();
+    const aliases = artifacts.filter((artifact) => artifact.file.endsWith("/index.html"));
+    expect(new Set(artifacts.map((artifact) => artifact.file)).size).toBe(artifacts.length);
+    expect(aliases.map((artifact) => artifact.path)).toEqual(pages.filter((page) => page.kind === "article" && page.article).map((page) => page.path));
+    for (const path of ["/about", "/blog", "/residential"]) {
+      expect(byFile.has(`${path.slice(1)}/index.html`), path).toBe(false);
+    }
+    const ordinaryPage = { ...pages[0], path: "/blog/not-a-published-article" };
+    expect(routeArtifacts([ordinaryPage]).some((artifact) => artifact.file === "blog/not-a-published-article/index.html")).toBe(false);
+  });
+
   it("exist for every registered route plus 404 and the tracking shell, and never a literal :token", () => {
     for (const page of allPages()) {
       if (page.path === "/track") continue;
