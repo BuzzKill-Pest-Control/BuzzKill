@@ -36,25 +36,30 @@ Follow the backup, comparison and rollback procedure in
 [the existing About release guide](about-initial-html-2026-09-14.md).
 
 1. Deploy the reviewed source to staging through the established branch
-   workflow. With the old app-wide rules still present, verify the direct
-   `/blog.html` artifact and its rendered desktop/mobile page on staging. It
-   must contain the Blog title, canonical and visible empty listing, and retain
-   the staging noindex directive. This is artifact QA, not canonical `/blog`
-   delivery verification.
-2. After staging artifact QA and the required source review/checks, release the
-   same article implementation to main. Verify `blog.html` on production too.
-   The documented release order permits these direct-artifact checks before a
-   clean-URL switch. Do not promote unrelated staging commits.
+   workflow. With the old app-wide rules still present, check the raw HTML at
+   `/blog.html` for the Blog title, canonical, empty listing and staging noindex
+   directive. Use an HTTP read or disable JavaScript for this artifact check;
+   the client router does not recognize `/blog.html` and renders NotFound there.
+   Open `/blog` for rendered desktop/mobile QA; the existing SPA rules let React
+   show the listing at that route. Neither check verifies that canonical
+   `/blog` requests deliver the full initial HTML.
+2. After these staging raw-HTML and rendered checks and the required source
+   review/checks, release the same article implementation to main. Check raw
+   `/blog.html` HTML and rendered `/blog` on production too. The documented
+   release order permits these checks before a clean-URL switch. Do not promote
+   unrelated staging commits.
 3. A separately authorized hosting operator must inspect the actual current
    app/branches, save a fresh custom-rules backup, preserve unrelated live rules
    and confirm every affected branch has the referenced artifacts. Only then
    apply the reviewed blog routing change to the correct web app. This document
    and its tests perform no live configuration mutation.
-4. Verify raw canonical `/blog` and actual `/blog/<slug>` requests on the
-   appropriate hosts, plus direct `.html`, query-string and trailing-slash
-   behavior, About, existing SPA routes and static assets. Record responses and
-   desktop/mobile evidence. An empty article collection cannot prove a real
-   published article's live detail page. Restore the saved rules if needed.
+4. After the hosting switch, verify raw canonical `/blog` and actual
+   `/blog/<slug>` requests on the appropriate hosts, plus query-string and
+   trailing-slash behavior, About, existing SPA routes and static assets.
+   Direct `.html` URLs remain raw-artifact checks; use canonical routes for
+   rendered desktop/mobile QA. Record responses and captures separately. An
+   empty article collection cannot prove a real published article's live detail
+   page. Restore the saved rules if needed.
 
 Until the live rules and canonical readback are verified, hosting setup remains
 incomplete and an autonomous editor must not claim canonical publication works.

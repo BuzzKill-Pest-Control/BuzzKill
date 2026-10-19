@@ -40,7 +40,7 @@ npm run build
 
 The build validates articles, release timestamps, local prose-link destinations, and actual image pixels, then writes the listing and each complete article body into slashless clean-URL HTML artifacts, together with page metadata, article/breadcrumb structured data, and sitemap entries. The pinned `sharp` development dependency is used only by validation scripts/tests and is not imported by browser code. This uses the existing postbuild pipeline and preserves deployment noindex rules. Test fixtures stay in tests. Keep unreleased work outside the public collection.
 
-Use the established reviewed website release workflow. The web app still owns the shared backend; adding an article does not establish a separate content-only deployment procedure or authorize an autonomous release. Hosting clean-URL behavior and rendered mobile/desktop pages require staging verification before production.
+Use the established reviewed website release workflow. The web app still owns the shared backend; adding an article does not establish a separate content-only deployment procedure or authorize an autonomous release. Before production source release, check staging's raw `/blog.html` HTML and rendered desktop/mobile `/blog` page. The client router does not recognize `.html` URLs. Canonical initial-HTML delivery remains a separate check after the hosting-rule switch.
 
 Blog clean URLs also require the separately applied app-wide hosting rules. Follow [the Blog routing release guide](docs/blog-initial-html-2026-10-18.md); builds and article updates do not change live hosting configuration.
 
