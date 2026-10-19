@@ -38,16 +38,22 @@ const SHELL = `<!doctype html><html><head>${renderShellHead()}</head><body><div 
 const article = ARTICLES[0];
 const clone = () => JSON.parse(JSON.stringify(fixture));
 
-it("serves full listing and fixture article HTML through the ordered hosting rules without swallowing existing SPA routes", async () => {
+it.each([200, 404])("serves both article artifacts and terminates native missing-file chains with a modeled %i fallback", async (fallbackStatus) => {
   const rules = JSON.parse(readFileSync(new URL("../../hosting/amplify-custom-rules.json", import.meta.url), "utf8")) as Array<{ source: string; target: string; status: string }>;
   const built = new Map(routeArtifacts().map((artifact) => [`/${artifact.file}`, artifactHtml(SHELL, artifact, renderRouteBody(artifact.path))]));
   const shell = built.get("/index.html")!;
-  const targetFor = (path: string): { file: string; status: number } => {
-    for (const rule of rules) {
+  type Rule = typeof rules[number];
+  const targetFor = (path: string, activeRules: Rule[]): { file: string; status: number } => {
+    for (const rule of activeRules) {
       if (rule.source.startsWith("https://")) continue;
       if (rule.status === "404-200") {
         const native = [path, path.endsWith("/") ? `${path}index.html` : `${path}.html`].find((file) => built.has(file));
-        return { file: native ?? rule.target, status: 200 };
+        if (native) return { file: native, status: 200 };
+        // Native Amplify lookup first tries the flat file, then adds a slash
+        // for a missing clean path. A slash-ending miss reaches the existing
+        // error fallback, which can retain HTTP404 despite its 404-200 label.
+        if (!path.endsWith("/") && !path.split("/").pop()!.includes(".")) return { file: `${path}/`, status: 301 };
+        return { file: rule.target, status: fallbackStatus };
       }
       const articleSlug = rule.source === "/blog/<article>/" ? /^\/blog\/([^/]+)\/$/.exec(path)?.[1] : undefined;
       if (rule.source === path || articleSlug || (rule.source.startsWith("</") && new RegExp(rule.source.slice(2, -2)).test(path))) {
@@ -56,36 +62,60 @@ it("serves full listing and fixture article HTML through the ordered hosting rul
     }
     throw new Error(`No hosting rule handles ${path}`);
   };
-  const server = createServer((request, response) => {
-    const url = new URL(request.url!, "http://localhost"), target = targetFor(url.pathname);
+  const makeServer = (activeRules: Rule[]) => createServer((request, response) => {
+    const url = new URL(request.url!, "http://localhost"), target = targetFor(url.pathname, activeRules);
     if (target.status === 301) { response.writeHead(301, { Location: target.file + url.search }); response.end(); return; }
     response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.statusCode = target.status;
     response.end(built.get(target.file) ?? shell);
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const oldRules = [...rules.slice(0, 5), { source: "/blog/<article>/", target: "/blog/<article>", status: "301" }, ...rules.slice(5)];
+  const server = makeServer(rules), oldServer = makeServer(oldRules);
+  await Promise.all([server, oldServer].map((value) => new Promise<void>((resolve) => value.listen(0, "127.0.0.1", resolve))));
+  const readChain = async (origin: string, path: string) => {
+    let url = new URL(path, origin); const seen = new Set<string>(), redirects: string[] = [], search = url.search;
+    for (let hop = 0; hop <= 3; hop++) {
+      if (seen.has(url.href)) throw new Error("Redirect loop");
+      seen.add(url.href);
+      const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(2000) });
+      const html = await response.text();
+      if (![301, 302, 307, 308].includes(response.status)) return { response, html, redirects, url };
+      const location = response.headers.get("location"); expect(location).toBeTruthy();
+      url = new URL(location!, url); expect(url.origin).toBe(origin); expect(url.search).toBe(search); redirects.push(url.href);
+    }
+    throw new Error("Redirect limit");
+  };
   try {
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, articlePath = `/blog/${article.slug}`;
     for (const [path, file] of [["/blog", "/blog.html"], [articlePath, `${articlePath}.html`]]) {
       const expected = built.get(file)!;
       expect(expected).toBeTruthy(); expect(expected).not.toBe(shell);
       for (const variant of [path, `${path}/`, `${path}?utm_source=routing-test`, `${path}/?utm_source=routing-test`, `${path}.html`]) {
-        const response = await fetch(`${origin}${variant}`), html = await response.text();
+        const { response, html, redirects, url } = await readChain(origin, variant);
         expect(response.status, variant).toBe(200);
-        expect(response.redirected, variant).toBe(path === articlePath && new URL(variant, origin).pathname.endsWith("/"));
-        expect(new URL(response.url).search, variant).toBe(new URL(variant, origin).search);
+        expect(redirects, variant).toEqual([]);
+        expect(url.search, variant).toBe(new URL(variant, origin).search);
         expect(html, variant).toBe(expected);
         expect(html, variant).toContain(`href="https://www.pestbuzzkill.com${path}"`);
         expect(html, variant).toContain(path === "/blog" ? "The BuzzKill Blog" : "Sources &amp; further reading");
         if (path === articlePath) { expect(html).toContain("BlogPosting"); expect(html).toContain("Synthetic fixture text for layout verification."); }
       }
     }
-    const redirect = await fetch(`${origin}${articlePath}/?utm_source=kept`, { redirect: "manual" });
-    expect(redirect.status).toBe(301); expect(redirect.headers.get("location")).toBe(`${articlePath}?utm_source=kept`);
-    for (const path of ["/", "/book", "/track/example", "/residential", "/blogger", "/blog/unknown-article", "/blog/nested/unapproved", "/unknown-route"]) {
-      expect(await (await fetch(`${origin}${path}`)).text(), path).toBe(shell);
+    const oldOrigin = `http://127.0.0.1:${(oldServer.address() as AddressInfo).port}`;
+    for (const path of ["/blog/unknown-article", "/blog/nested/unapproved"]) {
+      for (const variant of [path, `${path}/`, `${path}?utm_source=kept`, `${path}/?utm_source=kept`]) {
+        const { response, html, redirects } = await readChain(origin, variant);
+        expect(response.status, variant).toBe(fallbackStatus); expect(html, variant).toBe(shell);
+        expect(redirects.length, variant).toBe(new URL(variant, origin).pathname.endsWith("/") ? 0 : 1);
+      }
     }
-    expect(await (await fetch(`${origin}/about`)).text()).toBe(built.get("/about.html"));
-  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+    await expect(readChain(oldOrigin, "/blog/unknown-article?utm_source=kept")).rejects.toThrow("Redirect loop");
+    for (const path of ["/", "/book", "/track/example", "/residential", "/blogger", "/unknown-route"]) {
+      const { response, html, redirects } = await readChain(origin, path);
+      expect(response.status, path).toBe(200); expect(html, path).toBe(shell); expect(redirects).toEqual([]);
+    }
+    const about = await readChain(origin, "/about"); expect(about.response.status).toBe(200); expect(about.html).toBe(built.get("/about.html"));
+  } finally { await Promise.all([server, oldServer].map((value) => new Promise<void>((resolve, reject) => value.close((error) => error ? reject(error) : resolve())))); }
 });
 
 describe("article collection", () => {
@@ -146,9 +176,11 @@ describe("article collection", () => {
 
 describe("public article rendering and discovery", () => {
   it("ships full article prose, source links and safe escaped text before JavaScript", () => {
-    const artifact = routeArtifacts().find((a) => a.path === `/blog/${fixture.slug}`)!;
+    const aliases = routeArtifacts().filter((a) => a.path === `/blog/${fixture.slug}`), artifact = aliases[0];
+    expect(aliases.map((value) => value.file)).toEqual([`blog/${fixture.slug}.html`, `blog/${fixture.slug}/index.html`]);
     expect(artifact.file).toBe(`blog/${fixture.slug}.html`);
     const html = artifactHtml(SHELL, artifact, renderRouteBody(artifact.path));
+    expect(artifactHtml(SHELL, aliases[1], renderRouteBody(aliases[1].path))).toBe(html);
     expect(html).toContain('id="article-title"');
     expect(html).toContain('id="observations"');
     expect(html).toContain('href="/services/general-pest"');

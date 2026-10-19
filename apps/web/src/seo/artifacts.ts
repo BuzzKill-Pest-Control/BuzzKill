@@ -6,9 +6,9 @@
  *
  * Amplify Hosting's clean-URL handling serves `/about.html` for a request to
  * `/about` without changing the address bar (and without a redirect), which
- * is why the files are `<path>.html` rather than `<path>/index.html`: the
- * directory form would 301 `/about` to `/about/` and break the slashless
- * canonical policy.
+ * is why flat `<path>.html` files remain the canonical artifacts. Published
+ * articles also ship identical `<path>/index.html` files so native trailing
+ * slash requests serve full HTML without an unconditional slash redirect.
  *
  * Special files:
  *  - `index.html`   the root page (also the SPA shell for unknown paths until
@@ -21,6 +21,7 @@
  */
 import { computeHead, renderHeadTags } from "./head";
 import { DYNAMIC_ROUTES, allPages, type PageMeta } from "./pages";
+import { articlePath } from "../lib/articles";
 import { renderRouteHead, siteJsonLdTag, SHELL_HEAD_START, SHELL_HEAD_END, swapShellHead } from "./shell";
 
 export type RouteArtifact = {
@@ -64,12 +65,16 @@ export function routeArtifacts(pages: PageMeta[] = allPages()): RouteArtifact[] 
   ];
   for (const page of concrete) {
     if (page.path === "/track") continue;
-    out.push({
+    const artifact: RouteArtifact = {
       path: page.path,
       file: artifactFileFor(page.path),
       kind: "page",
       head: renderRouteHead(page.path),
-    });
+    };
+    out.push(artifact);
+    if (page.kind === "article" && page.article && page.path === articlePath(page.article)) {
+      out.push({ ...artifact, file: `${page.path.slice(1)}/index.html` });
+    }
   }
   out.push({ path: "/404", file: "404.html", kind: "not-found", head: renderShellOnlyHead("/404") });
   out.push({ path: "/track", file: "track.html", kind: "tracking-shell", head: renderShellOnlyHead("/track") });
