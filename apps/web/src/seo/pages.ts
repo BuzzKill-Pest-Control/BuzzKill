@@ -16,6 +16,7 @@ import { CONDO_FAQS, HOME_FAQS, INUNIT_FAQS, cityFaqs } from "../data/faqs";
 import { COMPANY } from "../../amplify/functions/shared/company";
 import { canonicalPathFor, normalizePath } from "./canonical";
 import type { Crumb, FAQItem, WebPageType } from "./schema";
+import { ARTICLES, articlePath, findArticle, type Article } from "../lib/articles";
 
 export type PageKind =
   | "home"
@@ -29,6 +30,7 @@ export type PageKind =
   | "legal"
   | "funnel"
   | "landing"
+  | "article"
   | "notfound";
 
 export type PageMeta = {
@@ -41,6 +43,7 @@ export type PageMeta = {
   description: string;
   /** Social image path; defaults to the site image. */
   image?: string;
+  article?: Article;
   /** `true`: noindex,nofollow. `"follow"`: noindex,follow (reachable, crawled
    *  for links, not indexed). Either way excluded from the sitemap. */
   noindex?: boolean | "follow";
@@ -70,6 +73,14 @@ function page(meta: PageMeta): PageMeta {
 
 /** Static routes, keyed by canonical path. Order is the sitemap order. */
 export const STATIC_PAGES: PageMeta[] = [
+  page({
+    path: "/blog",
+    kind: "info",
+    title: "Pest Control Articles & Property Advice",
+    description: "Practical reading for homeowners, community boards, and property managers. Understand pest problems and make informed decisions about your property.",
+    webPageType: "CollectionPage",
+    breadcrumb: [{ name: "Blog", url: "/blog" }],
+  }),
   page({
     path: "/",
     kind: "home",
@@ -574,6 +585,14 @@ const STATIC_BY_PATH: Map<string, PageMeta> = new Map(
   STATIC_PAGES.map((p) => [p.path, p]),
 );
 
+export function articlePageMeta(article: Article): PageMeta {
+  return page({
+    path: articlePath(article), kind: "article", title: article.title,
+    description: article.description, image: article.image.src, article,
+    breadcrumb: [{ name: "Blog", url: "/blog" }, { name: article.title, url: articlePath(article) }],
+  });
+}
+
 /**
  * The page a canonical path names, or undefined for a URL the site does not
  * publish (the caller renders the not-found page).
@@ -585,6 +604,11 @@ export function resolvePage(pathname: string): PageMeta | undefined {
   const raw = normalizePath(pathname);
   if (DYNAMIC_ROUTES[raw]) return DYNAMIC_ROUTES[raw];
   if (raw === "/track" || raw.startsWith("/track/")) return DYNAMIC_ROUTES["/track/:token"];
+  const articleSlug = raw.match(/^\/blog\/([a-z0-9-]+)$/);
+  if (articleSlug) {
+    const article = findArticle(articleSlug[1]);
+    return article ? articlePageMeta(article) : undefined;
+  }
   const city = raw.match(/^\/pest-control\/([a-z0-9-]+)$/);
   if (city) {
     const entry = CITY_BY_SLUG[city[1]];
@@ -595,7 +619,7 @@ export function resolvePage(pathname: string): PageMeta | undefined {
 
 /** Every page the site publishes: static routes plus one page per city. */
 export function allPages(): PageMeta[] {
-  return [...STATIC_PAGES, ...CITIES.map(cityPageMeta)];
+  return [...STATIC_PAGES, ...ARTICLES.map(articlePageMeta), ...CITIES.map(cityPageMeta)];
 }
 
 /** The sitemap: canonical, indexable pages only. */
