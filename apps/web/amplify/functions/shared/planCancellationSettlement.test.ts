@@ -222,47 +222,53 @@ describe("GL-08 cross-module: real cancel → real settlement", () => {
   });
 
   it("a >72h PAID visit's refund case does NOT settle until the refund actually posted", async () => {
-    const stripe = makeStripe({ sub_live_1: "active" });
-    jobs.set("j1", {
-      id: "j1",
-      servicePlanId: "p1",
-      customerId: "c1",
-      status: "SCHEDULED",
-      scheduledDate: "2026-10-14", // far out — full refund owed
-      paidAt: "2026-07-01T00:00:00Z",
-    });
-    invoices.set("i1", {
-      id: "i1",
-      jobId: "j1",
-      servicePlanId: "p1",
-      status: "PAID",
-      amountCents: 12000,
-      refundedAmountCents: 0,
-      paidAt: "2026-07-01T00:00:00Z",
-      issuedAt: "2026-07-01T00:00:00Z",
-    });
+    // Keep the October 14 visit >72h away regardless of the build date.
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    try {
+      const stripe = makeStripe({ sub_live_1: "active" });
+      jobs.set("j1", {
+        id: "j1",
+        servicePlanId: "p1",
+        customerId: "c1",
+        status: "SCHEDULED",
+        scheduledDate: "2026-10-14", // far out — full refund owed
+        paidAt: "2026-07-01T00:00:00Z",
+      });
+      invoices.set("i1", {
+        id: "i1",
+        jobId: "j1",
+        servicePlanId: "p1",
+        status: "PAID",
+        amountCents: 12000,
+        refundedAmountCents: 0,
+        paidAt: "2026-07-01T00:00:00Z",
+        issuedAt: "2026-07-01T00:00:00Z",
+      });
 
-    const result = await cancelPlanBilling(stripe, "p1");
-    // The visit is canceled with the REFUND_OWED disposition stamped —
-    // invisible to the schedule check, but not to settlement.
-    expect(jobs.get("j1")).toMatchObject({
-      status: "CANCELED",
-      cancelDisposition: "REFUND_OWED",
-    });
-    expect(result.queuedVisits.refundsOwed).toHaveLength(1);
+      const result = await cancelPlanBilling(stripe, "p1");
+      // The visit is canceled with the REFUND_OWED disposition stamped —
+      // invisible to the schedule check, but not to settlement.
+      expect(jobs.get("j1")).toMatchObject({
+        status: "CANCELED",
+        cancelDisposition: "REFUND_OWED",
+      });
+      expect(result.queuedVisits.refundsOwed).toHaveLength(1);
 
-    let settled = await planCancellationSettled("p1", { stripe });
-    expect(settled.settled).toBe(false);
-    expect(settled.reason).toMatch(/no full refund/i);
+      let settled = await planCancellationSettled("p1", { stripe });
+      expect(settled.settled).toBe(false);
+      expect(settled.reason).toMatch(/no full refund/i);
 
-    // Finance issues the exact full refund → now it settles.
-    invoices.set("i1", {
-      ...invoices.get("i1")!,
-      status: "REFUNDED",
-      refundedAmountCents: 12000,
-    });
-    settled = await planCancellationSettled("p1", { stripe });
-    expect(settled.settled).toBe(true);
+      // Finance issues the exact full refund → now it settles.
+      invoices.set("i1", {
+        ...invoices.get("i1")!,
+        status: "REFUNDED",
+        refundedAmountCents: 12000,
+      });
+      settled = await planCancellationSettled("p1", { stripe });
+      expect(settled.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an OFFICE/deactivation cancel is anchored too: a charge that posts AFTER it cannot settle unrefunded", async () => {
