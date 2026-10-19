@@ -6,6 +6,7 @@ import { COMPANY, SITE_ORIGIN } from "../../amplify/functions/shared/company";
 import { CITIES } from "../data/cities";
 import { absoluteUrl } from "./canonical";
 import { computeHead } from "./head";
+import { ARTICLES } from "../lib/articles";
 import {
   DYNAMIC_ROUTES,
   REDIRECT_ROUTES,
@@ -160,7 +161,8 @@ describe("the sitemap", () => {
   const xml = renderSitemap();
 
   it("lists only canonical, indexable pages on the canonical host", () => {
-    expect(urls.length).toBe(35);
+    expect(urls.length).toBe(36 + ARTICLES.length);
+    expect(urls).toContain(`${SITE_ORIGIN}/blog`);
     for (const u of urls) {
       expect(u.startsWith(`${SITE_ORIGIN}/`)).toBe(true);
       expect(u === `${SITE_ORIGIN}/` || !u.endsWith("/")).toBe(true);

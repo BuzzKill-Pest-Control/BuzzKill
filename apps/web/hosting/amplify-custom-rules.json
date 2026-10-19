@@ -15,7 +15,22 @@
     "status": "200"
   },
   {
-    "source": "</^[^.]+$/>",
+    "source": "/blog",
+    "target": "/blog.html",
+    "status": "200"
+  },
+  {
+    "source": "/blog/",
+    "target": "/blog.html",
+    "status": "200"
+  },
+  {
+    "source": "/blog/<article>/",
+    "target": "/blog/<article>",
+    "status": "301"
+  },
+  {
+    "source": "</^(?!/blog(?:/|$))[^.]+$/>",
     "target": "/index.html",
     "status": "200"
   },
