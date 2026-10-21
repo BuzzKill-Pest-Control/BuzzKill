@@ -46,7 +46,7 @@ export type ReportDraft<F> = {
 export function saveDraft<F>(
   jobId: string,
   fields: F,
-  store: DraftStore = localStorage,
+  store?: DraftStore,
   ownerSub?: string | null
 ): boolean {
   const draft: ReportDraft<F> = {
@@ -56,6 +56,7 @@ export function saveDraft<F>(
     fields,
   };
   try {
+    store ??= localStorage;
     store.setItem(draftKey(jobId, ownerSub), JSON.stringify(draft));
     return true;
   } catch {
@@ -66,10 +67,11 @@ export function saveDraft<F>(
 /** Read a draft back; anything missing, corrupt, or mislabeled is null, never a throw. */
 export function loadDraft<F>(
   jobId: string,
-  store: DraftStore = localStorage,
+  store?: DraftStore,
   ownerSub?: string | null
 ): ReportDraft<F> | null {
   try {
+    store ??= localStorage;
     // Owner-keyed first; the legacy unkeyed slot is honored only when it
     // carries no other owner's sub (pre-GL-13 drafts had none).
     const raw =
@@ -116,10 +118,11 @@ export function isDraftStale(
 
 export function clearDraft(
   jobId: string,
-  store: DraftStore = localStorage,
+  store?: DraftStore,
   ownerSub?: string | null
 ): void {
   try {
+    store ??= localStorage;
     store.removeItem(draftKey(jobId, ownerSub));
     store.removeItem(draftKey(jobId));
   } catch {
@@ -133,8 +136,9 @@ export function clearDraft(
  * Works on any Storage-shaped store that also exposes key/length (localStorage
  * does); silently does nothing where enumeration is unavailable.
  */
-export function clearAllDrafts(store: Storage = localStorage): void {
+export function clearAllDrafts(store?: Storage): void {
   try {
+    store ??= localStorage;
     const doomed: string[] = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
