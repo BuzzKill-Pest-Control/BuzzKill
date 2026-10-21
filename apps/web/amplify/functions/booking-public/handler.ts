@@ -625,9 +625,14 @@ async function trackStatus(body: Record<string, unknown>) {
   if (!token) return { status: "UNKNOWN" as const };
   const client = await dataClient();
   // Zero-page read is deliberate: trackToken is an unguessable unique token, so one page holds every match (audit 1.1.5).
-  const { data } = await client.models.Job.listJobByTrackToken({
+  const { data, errors } = await client.models.Job.listJobByTrackToken({
     trackToken: token,
   });
+  if (errors?.length) {
+    throw new HttpError(503, {
+      error: "We couldn't reach the tracking service. Please try again.",
+    });
+  }
   const job = data?.[0] ?? null;
   const nowIso = new Date().toISOString();
   const status = decideTrackStatus(job, nowIso);
