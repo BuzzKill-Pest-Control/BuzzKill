@@ -1,5 +1,40 @@
-import { describe, expect, it } from "vitest";
-import { decideTrackStatus } from "./handler";
+import { describe, expect, it, vi } from "vitest";
+import { decideTrackStatus, handler } from "./handler";
+
+const listJobByTrackToken = vi.fn();
+vi.mock("../shared/dataClient", () => ({
+  dataClient: async () => ({ models: { Job: { listJobByTrackToken } } }),
+}));
+
+async function track() {
+  const result = await handler({
+    headers: {},
+    requestContext: { http: { method: "POST", path: "/track" } },
+    body: JSON.stringify({ token: "test-tracking-token" }),
+    isBase64Encoded: false,
+  } as never) as { statusCode: number; body: string };
+  return { status: result.statusCode, body: JSON.parse(result.body) };
+}
+
+describe("tracking lookup", () => {
+  it("returns a retryable failure when the job query reports GraphQL errors", async () => {
+    listJobByTrackToken.mockResolvedValueOnce({
+      data: null,
+      errors: [{ message: "Test query failure" }],
+    });
+
+    const result = await track();
+    expect(result.status).toBe(503);
+    expect(result.body).toEqual({ error: expect.any(String) });
+    expect(result.body.error).not.toContain("Test query failure");
+  });
+
+  it("ends tracking when a successful lookup finds no matching job", async () => {
+    listJobByTrackToken.mockResolvedValueOnce({ data: [], errors: [] });
+
+    expect(await track()).toEqual({ status: 200, body: { status: "UNKNOWN" } });
+  });
+});
 
 /**
  * "On My Way" live tracking only broadcasts while a visit is genuinely en
