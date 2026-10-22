@@ -353,6 +353,7 @@ export type PlanCancellationPreview = {
   status: string;
   alreadyResolved: boolean;
   cancellationPending: boolean;
+  pendingMessage: string;
   effectiveDate: string;
   finalCharge: { amountCents: number; description: string };
   refundOutcome: { amountCents: number; description: string };
