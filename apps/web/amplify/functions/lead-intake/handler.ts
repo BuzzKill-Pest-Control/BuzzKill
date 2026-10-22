@@ -3,6 +3,7 @@ import type { Handler } from "aws-lambda";
 import { COMPANY } from "../shared/company";
 import { notifyLeads } from "../shared/email";
 import { createLead } from "../shared/leadLifecycle";
+import { normalizePhone } from "../shared/leadIdentity";
 import {
   CALL_CONSENT_TEXT,
   CALL_CONSENT_TEXT_VERSION,
@@ -76,10 +77,6 @@ function jsonResponse(statusCode: number, body: unknown) {
   };
 }
 
-function digitsOnly(s: string | undefined): string {
-  return (s ?? "").replace(/\D/g, "");
-}
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
@@ -90,13 +87,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function normalizeEmail(raw: string | undefined): string | undefined {
   const v = (raw ?? "").trim();
   return v && EMAIL_RE.test(v) ? v : undefined;
-}
-
-function normalizePhone(raw: string | undefined): string | undefined {
-  const d = digitsOnly(raw);
-  if (d.length === 10) return `+1${d}`;
-  if (d.length === 11 && d.startsWith("1")) return `+${d}`;
-  return undefined;
 }
 
 function buildDisplayName(input: LeadInput): string | undefined {

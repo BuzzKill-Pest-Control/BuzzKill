@@ -128,6 +128,17 @@ describe("lead-intake", () => {
     });
   });
 
+  it.each([undefined, "sam@example.com"])(
+    "retains an international E.164 phone with email %s",
+    async (email) => {
+      const res = await post({ first: "Sam", phone: "+442079460123", email });
+
+      expect(res.status).toBe(200);
+      expect(created[0]).toMatchObject({ phone: "+442079460123" });
+      expect(String(created[0].leadNotes)).not.toContain("phone as typed");
+    },
+  );
+
   it("refuses a submission with no way to reach anyone", async () => {
     const res = await post({ propertyType: "Residential", first: "", email: "", phone: "" });
 
