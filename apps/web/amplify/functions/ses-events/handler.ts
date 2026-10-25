@@ -57,8 +57,7 @@ async function markLogDelivery(
       client.models.EmailLog.listEmailLogByMessageId(
         { messageId: id },
         { limit: 200, nextToken }
-      ),
-    { pageErrors: "ignore" }
+      )
   );
   let meta: {
     customerId?: string | null;
