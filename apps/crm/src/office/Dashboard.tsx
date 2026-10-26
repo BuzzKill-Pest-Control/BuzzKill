@@ -159,7 +159,7 @@ export default function Dashboard() {
   const assignAct = useAction(
     async (kind: "INVOICE" | "DISPUTE", id: string) => {
       setError(null);
-      await assignRecoveryOwner({ kind, id });
+      unwrap(await assignRecoveryOwner({ kind, id }));
       await load();
     },
     "Could not assign owner"
