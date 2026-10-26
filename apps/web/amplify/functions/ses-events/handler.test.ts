@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PageResult } from "../shared/pagination";
 
 /**
  * GL-22 — mailbox delivery events are never lost quietly:
@@ -10,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
+const logPages: PageResult<LogRow>[] = [];
 let updateThrows = false;
 const customers = new Map<string, Record<string, unknown>>();
 let customerGets = 0;
@@ -18,7 +20,7 @@ vi.mock("../shared/dataClient", () => ({
   dataClient: async () => ({
     models: {
       EmailLog: {
-        listEmailLogByMessageId: async ({ messageId }: { messageId: string }) => ({
+        listEmailLogByMessageId: async ({ messageId }: { messageId: string }) => logPages.shift() ?? ({
           data: logs.filter((l) => l.messageId === messageId),
         }),
         update: async (patch: LogRow) => {
@@ -68,6 +70,7 @@ const snsEvent = (message: unknown, raw?: string) =>
 
 beforeEach(() => {
   logs.length = 0;
+  logPages.length = 0;
   updateThrows = false;
   workOpened.length = 0;
   customers.clear();
@@ -76,6 +79,19 @@ beforeEach(() => {
 });
 
 describe("ses-events durability (GL-22)", () => {
+  it.each([false, true])("retries an errored log lookup before updating any logs (later page: %s)", async (laterPage) => {
+    logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
+    if (laterPage) logPages.push({ data: [...logs], nextToken: "page-2" });
+    logPages.push({ data: null, errors: [{ message: "log lookup unavailable" }] });
+    const event = snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } });
+
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
+    expect(logs[0].deliveryStatus).toBe("SENT");
+
+    await handler(event);
+    expect(logs[0].deliveryStatus).toBe("DELIVERED");
+  });
+
   it("a failed write THROWS so the event redelivers — never acknowledged unrecorded", async () => {
     logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
     updateThrows = true;
