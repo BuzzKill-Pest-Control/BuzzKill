@@ -814,28 +814,28 @@ function AvailabilityPanel({
   // `act()` helper; each is its own action so a PTO save that fails cannot be
   // erased by a closure that succeeds.
   const closeDay = useAction(async () => {
-    await models.CompanyClosure.create({
+    unwrap(await models.CompanyClosure.create({
       id: date,
       date,
       reason: newClosure.trim(),
-    });
+    }));
     await refresh();
     setNewClosure("");
     setShowClosureForm(false);
   }, "The change did not save");
 
   const reopenDay = useAction(async () => {
-    await models.CompanyClosure.delete({ id: date });
+    unwrap(await models.CompanyClosure.delete({ id: date }));
     await refresh();
   }, "The change did not save");
 
   const addPto = useAction(async () => {
-    await models.TechnicianDayException.create({
+    unwrap(await models.TechnicianDayException.create({
       technicianId: ptoTech,
       date,
       kind: "PTO",
       reason: ptoReason.trim(),
-    });
+    }));
     await refresh();
     setPtoTech("");
     setPtoReason("");
@@ -844,7 +844,7 @@ function AvailabilityPanel({
 
   // Two clicks on Remove used to send two deletes for the same PTO row.
   const removePto = useAction(async (id: string) => {
-    await models.TechnicianDayException.delete({ id });
+    unwrap(await models.TechnicianDayException.delete({ id }));
     await refresh();
   }, "The change did not save");
 
