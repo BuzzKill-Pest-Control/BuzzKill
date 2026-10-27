@@ -12,7 +12,7 @@ import type { PageResult } from "../shared/pagination";
 type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
 const logPages: PageResult<LogRow>[] = [];
-let updateThrows = false;
+let updateFailure: "THROW" | "GRAPHQL" | null = null;
 const customers = new Map<string, Record<string, unknown>>();
 let customerGets = 0;
 const suppressions: Record<string, unknown>[] = [];
@@ -24,7 +24,8 @@ vi.mock("../shared/dataClient", () => ({
           data: logs.filter((l) => l.messageId === messageId),
         }),
         update: async (patch: LogRow) => {
-          if (updateThrows) throw new Error("dynamo down");
+          if (updateFailure === "THROW") throw new Error("dynamo down");
+          if (updateFailure === "GRAPHQL") return { data: null, errors: [{ message: "log update unavailable" }] };
           const row = logs.find((l) => l.id === patch.id);
           if (row) Object.assign(row, patch);
           return { data: row ?? null };
@@ -71,7 +72,7 @@ const snsEvent = (message: unknown, raw?: string) =>
 beforeEach(() => {
   logs.length = 0;
   logPages.length = 0;
-  updateThrows = false;
+  updateFailure = null;
   workOpened.length = 0;
   customers.clear();
   customerGets = 0;
@@ -92,16 +93,17 @@ describe("ses-events durability (GL-22)", () => {
     expect(logs[0].deliveryStatus).toBe("DELIVERED");
   });
 
-  it("a failed write THROWS so the event redelivers — never acknowledged unrecorded", async () => {
+  it.each(["THROW", "GRAPHQL"] as const)("retries a failed log write (%s) instead of acknowledging it unrecorded", async (failure) => {
     logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
-    updateThrows = true;
+    updateFailure = failure;
+    const event = snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } });
 
-    await expect(
-      handler(
-        snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } })
-      )
-    ).rejects.toThrow(/notification\(s\) failed/);
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
     expect(logs[0].deliveryStatus).toBe("SENT"); // unchanged, will retry
+
+    updateFailure = null;
+    await handler(event);
+    expect(logs[0].deliveryStatus).toBe("DELIVERED");
   });
 
   it("a malformed message becomes owned work instead of an infinite retry or a silent drop", async () => {
