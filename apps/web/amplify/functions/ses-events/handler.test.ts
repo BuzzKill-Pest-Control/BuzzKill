@@ -13,6 +13,7 @@ type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
 const logPages: PageResult<LogRow>[] = [];
 let updateFailure: "THROW" | "GRAPHQL" | null = null;
+let suppressionFailure: "GET" | "CREATE" | null = null;
 const customers = new Map<string, Record<string, unknown>>();
 let customerGets = 0;
 const suppressions: Record<string, unknown>[] = [];
@@ -38,8 +39,11 @@ vi.mock("../shared/dataClient", () => ({
         },
       },
       SuppressedEmail: {
-        get: async () => ({ data: null }),
+        get: async () => suppressionFailure === "GET"
+          ? { data: null, errors: [{ message: "suppression lookup unavailable" }] }
+          : { data: null },
         create: async (row: Record<string, unknown>) => {
+          if (suppressionFailure === "CREATE") return { data: null, errors: [{ message: "suppression write unavailable" }] };
           suppressions.push(row);
           return { data: row };
         },
@@ -73,6 +77,7 @@ beforeEach(() => {
   logs.length = 0;
   logPages.length = 0;
   updateFailure = null;
+  suppressionFailure = null;
   workOpened.length = 0;
   customers.clear();
   customerGets = 0;
@@ -80,6 +85,32 @@ beforeEach(() => {
 });
 
 describe("ses-events durability (GL-22)", () => {
+  it.each([
+    ["bounce", "GET"], ["bounce", "CREATE"],
+    ["complaint", "GET"], ["complaint", "CREATE"],
+  ] as const)("retries a %s after a failed suppression %s", async (type, failure) => {
+    const event = snsEvent({
+      notificationType: type,
+      mail: { messageId: "m1" },
+      bounce: { bounceType: "Permanent", bouncedRecipients: [{ emailAddress: "dana@example.com" }] },
+      complaint: { complainedRecipients: [{ emailAddress: "dana@example.com" }] },
+    });
+    suppressionFailure = failure;
+
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
+    expect(suppressions).toHaveLength(0);
+    expect(workOpened).toHaveLength(0);
+
+    suppressionFailure = null;
+    await handler(event);
+    expect(suppressions).toHaveLength(1);
+    expect(suppressions[0]).toMatchObject({
+      email: "dana@example.com", source: type === "bounce" ? "BOUNCED" : "COMPLAINED",
+    });
+    expect(workOpened).toHaveLength(1);
+    expect(workOpened[0].kind).toBe("EMAIL_FAILURE");
+  });
+
   it.each([false, true])("retries an errored log lookup before updating any logs (later page: %s)", async (laterPage) => {
     logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
     if (laterPage) logPages.push({ data: [...logs], nextToken: "page-2" });
