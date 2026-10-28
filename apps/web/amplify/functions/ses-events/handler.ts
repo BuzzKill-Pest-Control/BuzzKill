@@ -78,11 +78,12 @@ async function markLogDelivery(
     ) {
       continue;
     }
-    await client.models.EmailLog.update({
+    const { errors } = await client.models.EmailLog.update({
       id: log.id,
       deliveryStatus,
       ...(error ? { error } : {}),
     });
+    if (errors?.length) throw new Error("Email delivery status could not be recorded");
   }
   return meta;
 }
