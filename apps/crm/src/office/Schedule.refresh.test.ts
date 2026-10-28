@@ -42,6 +42,27 @@ afterEach(async () => { await act(async () => root.unmount());
   queryCache.activate(null); container.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("schedule refresh", () => {
+  it.each(["SCOPE_MISMATCH", "PREP_MISSING"])("does not offer assignment or unassignment for %s visits", async (status) => {
+    mocks.technicians.mockResolvedValue({ data: [tech("Current technician")] });
+    const visit = { customerId: "customer", scheduledDate: "2026-11-03", status };
+    mocks.scheduled.mockImplementation(async ({ scheduledDate }: { scheduledDate: string }) => ({
+      data: scheduledDate === visit.scheduledDate ? [
+        { ...visit, id: "assigned", serviceType: "Terminal routed visit", technicianId: "Current technician", routeId: "route-1" },
+        { ...visit, id: "unassigned", serviceType: "Terminal unrouted visit" },
+        { ...visit, id: "ready", serviceType: "Ready visit", status: "SCHEDULED" },
+      ] : [],
+    }));
+
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
+
+    expect(container.textContent).toContain("Terminal routed visit");
+    expect(container.textContent).not.toContain("Terminal unrouted visit");
+    expect(container.textContent).toContain("Ready visit");
+    const labels = [...container.querySelectorAll("button")].map((el) => el.textContent);
+    expect(labels.filter((label) => label === "Assign")).toHaveLength(1);
+    expect(labels).not.toContain("✕");
+  });
+
   it("paginates the status-only pool and includes an undated job from a later page", async () => {
     mocks.technicians.mockResolvedValue({ data: [tech("Current technician")] });
     mocks.unscheduled.mockImplementation(async (_key: unknown, options: { nextToken?: string | null }) => options.nextToken ? {
