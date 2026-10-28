@@ -7,6 +7,7 @@ import Schedule from "./Schedule";
 const mocks = vi.hoisted(() => ({
   facts: vi.fn(), closure: vi.fn(), exceptions: vi.fn(),
   close: vi.fn(), reopen: vi.fn(), addPto: vi.fn(), removePto: vi.fn(),
+  jobs: vi.fn(),
 }));
 
 vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
@@ -20,7 +21,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       models: {
         Technician: { list: async () => ({ data: [{ id: "tech-1", name: "Test technician", active: true }] }) },
         Route: { listRouteByDate: emptyList },
-        Job: { list: emptyList, listJobByScheduledDate: emptyList },
+        Job: { list: emptyList, listJobByScheduledDate: mocks.jobs },
         Customer: { list: emptyList },
         CompanyClosure: { get: mocks.closure, create: mocks.close, delete: mocks.reopen },
         TechnicianDayException: {
@@ -50,6 +51,7 @@ beforeEach(() => {
   }) });
   mocks.closure.mockResolvedValue({ data: null });
   mocks.exceptions.mockResolvedValue({ data: [] });
+  mocks.jobs.mockResolvedValue({ data: [] });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -79,6 +81,26 @@ async function enterReason(placeholder: string, value: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+
+it.each(["SCOPE_MISMATCH", "PREP_MISSING"])("does not offer assignment or unassignment for %s visits", async (status) => {
+  const visit = { customerId: "customer-1", scheduledDate: "2026-10-27", status };
+  mocks.jobs.mockImplementation(async ({ scheduledDate }: { scheduledDate: string }) => ({
+    data: scheduledDate === visit.scheduledDate ? [
+      { ...visit, id: "assigned", serviceType: "Terminal routed visit", technicianId: "tech-1", routeId: "route-1" },
+      { ...visit, id: "unassigned", serviceType: "Terminal unrouted visit" },
+      { ...visit, id: "ready", serviceType: "Ready visit", status: "SCHEDULED" },
+    ] : [],
+  }));
+
+  await act(async () => root.render(createElement(Schedule)));
+
+  expect(container.textContent).toContain("Terminal routed visit");
+  expect(container.textContent).not.toContain("Terminal unrouted visit");
+  expect(container.textContent).toContain("Ready visit");
+  const labels = [...container.querySelectorAll("button")].map((el) => el.textContent);
+  expect(labels.filter((label) => label === "Assign")).toHaveLength(1);
+  expect(labels).not.toContain("✕");
+});
 
 it.each([
   ["close", "Confirm company closure"],
