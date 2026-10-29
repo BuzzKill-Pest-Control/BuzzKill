@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-import { assertDestinationDeploymentIdentity, businessEnvironment } from "./deployment-environment";
+import { assertDestinationDeploymentIdentity, businessEnvironment, retentionVaultName } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
 import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { previewAdminLoginConfig, PREVIEW_ADMIN_FROM, PREVIEW_ADMIN_ACCOUNT } from "./functions/shared/previewAdminLogin";
-import { defineBackend } from "@aws-amplify/backend";
+import { defineBackend, secret } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import {
@@ -626,11 +625,11 @@ backend.bookingPublic.addEnvironment(
     ? "https://www.pestbuzzkill.com,https://pestbuzzkill.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com,https://staging.pestbuzzkill.com,http://localhost:5173,http://localhost:5174"
 );
-// The API keys live as Amplify Console app-level env vars — present in the
-// build container at synth time. Bake them into the Lambda env so runtime
-// doesn't depend on SSM entries the Console never writes.
+// Preserve the source app's existing build-variable contract. The dedicated
+// destination binds the already provisioned Amplify secrets at runtime, so
+// every intended consumer receives its key without exposing it to a build.
 for (const key of ["ANTHROPIC_API_KEY", "GOOGLE_ROUTES_API_KEY"] as const) {
-  const v = process.env[key];
+  const v = !migrationPreview && appId === "d3owdoeg1om341" ? secret(key) : process.env[key];
   if (!migrationPreview && v && v !== "placeholder-set-me") {
     backend.crmPricing.addEnvironment(key, v);
     // The funnel is a pure rate READER now — it keeps Routes (drive times,
@@ -1054,14 +1053,9 @@ cfnDocsBucket.versioningConfiguration = { status: "Enabled" };
 // bucket reference adds only a one-way data→storage edge.
 const backupStack = Stack.of(backend.data.resources.graphqlApi);
 const backupVault = new BackupVault(backupStack, "BuzzKillBackupVault", {
-  // AWS Backup vault names are limited to 50 characters. Keep existing live
-  // names unchanged; preview names are bounded and scoped to app + branch.
-  backupVaultName: migrationPreview
-    ? `buzzkill-preview-${createHash("sha256")
-        .update(`${lockAppId}:${lockBranch}`)
-        .digest("hex")
-        .slice(0, 16)}-retention`
-    : `buzzkill-${lockBranch}-retention`,
+  // The dedicated destination keeps its existing bounded vault name when
+  // preview is disabled. Source names retain their original behavior.
+  backupVaultName: retentionVaultName(lockAppId, lockBranch, migrationPreview),
 });
 const backupPlan = new BackupPlan(backupStack, "BuzzKillRetentionPlan", {
   backupVault,
@@ -1092,8 +1086,8 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
 // Fresh, empty destination only; the normal final deployment omits this flag.
 makeMigrationPreviewReadOnly(backupStack);
 const deferredApiResources = applyMigrationBootstrap(backupStack);
-if (migrationPreview) {
+if (migrationPreview || appId === "d3owdoeg1om341") {
   backend.addOutput({
-    custom: { migrationPreview: true, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
+    custom: { migrationPreview, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
   });
 }

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /** Keep the physical backend namespace separate from production business mode. */
 export function businessEnvironment(env = process.env): string {
   const branch = env.AWS_BRANCH ?? "staging";
@@ -26,4 +28,11 @@ export function assertDestinationDeploymentIdentity(account: string, region: str
   if (account !== "743917687359" || region !== "us-east-1") {
     throw new Error("Migration configuration requires the dedicated BuzzKill destination account and region.");
   }
+}
+
+/** Destination retention must survive preview activation without a vault replacement. */
+export function retentionVaultName(appId: string, branch: string, preview: boolean): string {
+  return preview || appId === "d3owdoeg1om341"
+    ? `buzzkill-preview-${createHash("sha256").update(`${appId}:${branch}`).digest("hex").slice(0, 16)}-retention`
+    : `buzzkill-${branch}-retention`;
 }
