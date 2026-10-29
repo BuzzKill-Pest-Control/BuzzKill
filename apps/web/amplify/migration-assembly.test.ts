@@ -72,12 +72,19 @@ function assertReferenceClosure(assembly: Assembly): void {
         }
       }
     }
+    const dependencies = new Map(Object.keys(resources).map((id) => [id, new Set<string>()]));
+    let currentResource: string | undefined;
+    const edge = (id: string) => {
+      if (currentResource && Object.hasOwn(resources, id)) dependencies.get(currentResource)!.add(id);
+    };
     const checkRef = (id: string) => {
+      edge(id);
       if (!id.startsWith("AWS::") && !Object.hasOwn(resources, id) && !Object.hasOwn(template.Parameters ?? {}, id)) {
         fail(`Dangling Ref ${id}`);
       }
     };
     const checkAttribute = (id: string, attribute: string) => {
+      edge(id);
       if (!Object.hasOwn(resources, id)) fail(`Dangling GetAtt ${id}`);
       if (children[id] && attribute.startsWith("Outputs.") && !Object.hasOwn(children[id].Outputs ?? {}, attribute.slice(8))) {
         fail(`Missing nested output ${id}.${attribute}`);
@@ -96,6 +103,7 @@ function assertReferenceClosure(assembly: Assembly): void {
       if (object.DependsOn) {
         for (const id of Array.isArray(object.DependsOn) ? object.DependsOn : [object.DependsOn]) {
           if (typeof id !== "string" || !Object.hasOwn(resources, id)) fail(`Dangling DependsOn ${String(id)}`);
+          edge(String(id));
         }
       }
       if (object["Fn::Sub"]) {
@@ -111,6 +119,17 @@ function assertReferenceClosure(assembly: Assembly): void {
       Object.values(object).forEach(walk);
     };
     walk(template);
+    for (const [id, resource] of Object.entries(resources)) { currentResource = id; walk(resource); }
+    currentResource = undefined;
+    const visited = new Set<string>(), active = new Set<string>();
+    const visit = (id: string): void => {
+      if (active.has(id)) fail(`Circular resource dependency at ${id}`);
+      if (visited.has(id)) return;
+      active.add(id);
+      for (const dependency of dependencies.get(id)!) visit(dependency);
+      active.delete(id); visited.add(id);
+    };
+    for (const id of dependencies.keys()) visit(id);
   }
 }
 
@@ -214,8 +233,11 @@ it("grants only the expiring administrator test-mail capability while retaining 
   expect((sends[0].Condition as Record<string, unknown>).DateLessThan).toBeDefined();
   const enabled = resources.filter((r) => r.Type === "AWS::Lambda::Function").filter((r) => (JSON.stringify(r.Properties?.Environment) ?? "").includes('"BUZZKILL_PREVIEW_ADMIN_LOGIN":"true"'));
   expect(enabled).toHaveLength(1);
-  expect(JSON.stringify(enabled[0].Properties?.Environment)).toContain("BUZZKILL_PREVIEW_AUTH_POOL_ID");
-  expect(JSON.stringify(enabled[0].Properties?.Environment)).toContain("BUZZKILL_PREVIEW_AUTH_CLIENT_ID");
+  // Literal identity bindings avoid trigger -> pool/client -> trigger cycles.
+  expect((enabled[0].Properties?.Environment as { Variables: Record<string, unknown> }).Variables).toMatchObject({
+    BUZZKILL_PREVIEW_AUTH_POOL_ID: "us-east-1_NT4TiB2DQ",
+    BUZZKILL_PREVIEW_AUTH_CLIENT_ID: "5l5rqjoeenmp16h7i0pk1m8h20",
+  });
   for (const resolver of resources.filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation")) expect(resolver.Properties?.RequestMappingTemplate).toBe(PREVIEW_MUTATION_REFUSAL);
   expect(resources.filter((r) => r.Type === "AWS::Events::Rule")).toHaveLength(0);
 });
@@ -257,4 +279,31 @@ it("binds destination release provider secrets to every intended consumer while 
     }
     expect(functions(full).filter((r) => (JSON.stringify(r.Properties?.Environment) ?? "").includes(`\"${key}\"`))).toHaveLength(0);
   }
+});
+
+
+it("keeps release booking CORS confined to the destination's matching environment", () => {
+  const envs = allResources(released).filter((r) => r.Type === "AWS::Lambda::Function")
+    .map((r) => (r.Properties?.Environment as { Variables?: Record<string, string> })?.Variables ?? {});
+  const cors = envs.find((v) => v.BOOKING_CORS_ORIGINS)?.BOOKING_CORS_ORIGINS;
+  if (process.env.AWS_BRANCH === "codex-buzzkill-staging-migration") {
+    expect(cors?.split(",")).toEqual([
+      "https://migration-staging.d3owdoeg1om341.amplifyapp.com",
+      "https://migration-staging.d2y2zigtl5rx3.amplifyapp.com",
+      "https://staging.pestbuzzkill.com",
+    ]);
+  } else {
+    expect(cors).toBe("https://www.pestbuzzkill.com,https://pestbuzzkill.com");
+  }
+  expect(cors).not.toMatch(/d26qpsjewk0bee|d5ln2hbbp9s2j|localhost/);
+});
+
+
+it("detects a Cognito trigger referring back to its own pool before deployment", () => {
+  const broken = structuredClone(adminLogin);
+  const template = Object.values(broken.templates).find((t) => Object.values(t.Resources).some((r) => r.Type === "AWS::Cognito::UserPool"))!;
+  const poolId = Object.keys(template.Resources).find((id) => template.Resources[id].Type === "AWS::Cognito::UserPool")!;
+  const trigger = Object.values(template.Resources).find((r) => r.Type === "AWS::Lambda::Function" && JSON.stringify(r.Properties?.Environment).includes('"BUZZKILL_PREVIEW_ADMIN_LOGIN":"true"'))!;
+  (trigger.Properties!.Environment as { Variables: Record<string, unknown> }).Variables.BUZZKILL_PREVIEW_AUTH_POOL_ID = { Ref: poolId };
+  expect(() => assertReferenceClosure(broken)).toThrow("Circular resource dependency");
 });

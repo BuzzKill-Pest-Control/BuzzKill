@@ -308,6 +308,8 @@ const crmUrlEnv =
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
   (businessMode === "main"
     ? "https://app.pestbuzzkill.com"
+    : process.env.AWS_APP_ID === "d3owdoeg1om341"
+    ? "https://migration-staging.d2y2zigtl5rx3.amplifyapp.com"
     : "https://staging.d5ln2hbbp9s2j.amplifyapp.com");
 
 /**
@@ -386,8 +388,11 @@ if (previewAdminLogin) {
     BUZZKILL_PREVIEW_SES_CONFIGURATION_SET: previewAdminLogin.configurationSet,
     BUZZKILL_DESTINATION_ACCOUNT_ID: PREVIEW_ADMIN_ACCOUNT,
     BUZZKILL_PREVIEW_AUTH_BRANCH: process.env.AWS_BRANCH!,
-    BUZZKILL_PREVIEW_AUTH_POOL_ID: backend.auth.resources.userPool.userPoolId,
-    BUZZKILL_PREVIEW_AUTH_CLIENT_ID: backend.auth.resources.userPoolClient.userPoolClientId,
+    // These verified existing IDs must be literals: a trigger referencing its own
+    // pool/client creates a CloudFormation dependency cycle. Output-binding
+    // checks separately ensure the retained backend still has these identities.
+    BUZZKILL_PREVIEW_AUTH_POOL_ID: "us-east-1_NT4TiB2DQ",
+    BUZZKILL_PREVIEW_AUTH_CLIENT_ID: "5l5rqjoeenmp16h7i0pk1m8h20",
   })) fn.addEnvironment(key, value);
   fn.resources.lambda.addToRolePolicy(new PolicyStatement({
     actions: ["ses:SendEmail"],
@@ -609,6 +614,8 @@ const marketingUrl =
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
   (businessMode === "main"
     ? "https://www.pestbuzzkill.com"
+    : appId === "d3owdoeg1om341"
+    ? "https://migration-staging.d3owdoeg1om341.amplifyapp.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com");
 backend.stripeWebhook.addEnvironment("MARKETING_URL", marketingUrl);
 backend.bookingPublic.addEnvironment("MARKETING_URL", marketingUrl);
@@ -623,6 +630,8 @@ backend.bookingPublic.addEnvironment(
     ? migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)
     : businessMode === "main"
     ? "https://www.pestbuzzkill.com,https://pestbuzzkill.com"
+    : appId === "d3owdoeg1om341"
+    ? `${migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)},https://staging.pestbuzzkill.com`
     : "https://staging.d26qpsjewk0bee.amplifyapp.com,https://staging.pestbuzzkill.com,http://localhost:5173,http://localhost:5174"
 );
 // Preserve the source app's existing build-variable contract. The dedicated
