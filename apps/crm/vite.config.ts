@@ -15,6 +15,8 @@ export default defineConfig({
   resolve: { alias: migrationPreview ? [{ find: /^@stripe\/stripe-js$/, replacement: "@stripe/stripe-js/pure" }] : [] },
   define: {
     ...previewDefines,
+    "import.meta.env.VITE_BUZZKILL_PREVIEW_ADMIN_LOGIN": JSON.stringify(String(migrationPreview && process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN === "true")),
+    "import.meta.env.VITE_BUZZKILL_PREVIEW_ADMIN_LOGIN_UNTIL": JSON.stringify(process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN_UNTIL ?? ""),
     "import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW": JSON.stringify(String(migrationPreview)),
   },
   plugins: [react()],

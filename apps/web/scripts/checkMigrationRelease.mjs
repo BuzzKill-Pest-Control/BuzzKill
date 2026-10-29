@@ -25,6 +25,20 @@ export function assertMigrationReleaseReady(env, readOutputs) {
     }
     return;
   }
+  const pools = {
+    "codex-buzzkill-account-migration": "us-east-1_NT4TiB2DQ",
+    "codex-buzzkill-staging-migration": "us-east-1_CyX0nNTre",
+  };
+  const branch = env.AWS_BRANCH;
+  if (env.BUZZKILL_DESTINATION_ACCOUNT_ID !== "743917687359" ||
+      !["d3owdoeg1om341", "d2y2zigtl5rx3"].includes(env.AWS_APP_ID) ||
+      !Object.hasOwn(pools, branch ?? "") ||
+      outputs?.auth?.user_pool_id !== pools[branch] ||
+      outputs?.custom?.migrationBackendAppId !== "d3owdoeg1om341" ||
+      outputs?.custom?.migrationBackendBranch !== branch ||
+      outputs?.custom?.migrationAccountId !== "743917687359") {
+    throw new Error("Migration preview outputs do not match the exact destination backend.");
+  }
   if (outputs?.custom?.migrationPreview !== true || outputs?.custom?.migrationApiReady !== true) {
     throw new Error("Migration preview API is not complete. Wait for the full backend deployment before publishing either app.");
   }

@@ -17,16 +17,17 @@ const directory = mkdtempSync(join(tmpdir(), "buzzkill-migration-assembly-"));
 const execFileAsync = promisify(execFile);
 let full: Assembly;
 let bootstrap: Assembly;
+let adminLogin: Assembly;
 
-async function synth(phase: "full" | "bootstrap"): Promise<Assembly> {
-  const outdir = join(directory, phase);
-  const branch = process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
+async function synth(phase: "full" | "bootstrap", authTest = false): Promise<Assembly> {
+  const outdir = join(directory, phase + (authTest ? "-auth" : ""));
+  const branch = !authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
     ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
   try {
     // Synthesis can exceed Vitest's RPC timeout on CI. Keep this worker's
     // event loop free to receive acknowledgements while the child runs.
     await execFileAsync(process.execPath, [
-      "--import", "tsx", resolve("scripts/synthMigrationBackend.mts"), outdir, phase, branch,
+      "--import", "tsx", resolve("scripts/synthMigrationBackend.mts"), outdir, phase, branch, ...(authTest ? ["admin-login"] : []),
     ], { cwd: process.cwd(), encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
   } catch (error) {
     const result = error as Error & { stdout?: string; stderr?: string };
@@ -119,7 +120,8 @@ function allResources(assembly: Assembly) {
 beforeAll(async () => {
   full = await synth("full");
   bootstrap = await synth("bootstrap");
-}, 240_000);
+  adminLogin = await synth("full", true);
+}, 360_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 it("synthesizes the real full and bootstrap backends with closed references", () => {
@@ -193,4 +195,25 @@ it("detects a removed nested output even though the referenced stack still exist
     break;
   }
   expect(() => assertReferenceClosure(broken)).toThrow("Missing nested output");
+});
+
+
+it("grants only the expiring administrator test-mail capability while retaining all preview guards", () => {
+  assertReferenceClosure(adminLogin);
+  const resources = allResources(adminLogin);
+  const statements = resources.filter((r) => r.Type === "AWS::IAM::Policy")
+    .flatMap((r) => (r.Properties!.PolicyDocument as { Statement: Record<string, unknown>[] }).Statement);
+  const sends = statements.filter((s) => JSON.stringify(s.Action).includes("ses:Send"));
+  expect(sends).toHaveLength(1);
+  expect(sends[0]).toMatchObject({ Action: "ses:SendEmail", Resource: [
+    "arn:aws:ses:us-east-1:743917687359:identity/pestbuzzkill.com",
+    "arn:aws:ses:us-east-1:743917687359:configuration-set/buzzkill-migration-preview-test",
+  ], Condition: { StringEquals: { "ses:FromAddress": "info@pestbuzzkill.com" }, "ForAllValues:StringEquals": { "ses:Recipients": ["owner@example.com"] } } });
+  expect((sends[0].Condition as Record<string, unknown>).DateLessThan).toBeDefined();
+  const enabled = resources.filter((r) => r.Type === "AWS::Lambda::Function").filter((r) => (JSON.stringify(r.Properties?.Environment) ?? "").includes('"BUZZKILL_PREVIEW_ADMIN_LOGIN":"true"'));
+  expect(enabled).toHaveLength(1);
+  expect(JSON.stringify(enabled[0].Properties?.Environment)).toContain("BUZZKILL_PREVIEW_AUTH_POOL_ID");
+  expect(JSON.stringify(enabled[0].Properties?.Environment)).toContain("BUZZKILL_PREVIEW_AUTH_CLIENT_ID");
+  for (const resolver of resources.filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation")) expect(resolver.Properties?.RequestMappingTemplate).toBe(PREVIEW_MUTATION_REFUSAL);
+  expect(resources.filter((r) => r.Type === "AWS::Events::Rule")).toHaveLength(0);
 });

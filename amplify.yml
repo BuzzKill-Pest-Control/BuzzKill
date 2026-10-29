@@ -21,6 +21,12 @@ applications:
                 test "$BUZZKILL_DESTINATION_ACCOUNT_ID" != "637423611040" || { echo "Source account is forbidden in preview"; exit 1; }
                 test "$(aws sts get-caller-identity --query Account --output text)" = "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Build account mismatch"; exit 1; }
               fi
+              if [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ] || [ "$BUZZKILL_PREVIEW_ADMIN_LOGIN" = "true" ]; then
+                export BUZZKILL_DEPLOY_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) || exit 1
+                test "$BUZZKILL_DEPLOY_ACCOUNT_ID" = "743917687359" || { echo "Destination override forbidden in this account"; exit 1; }
+                test "$AWS_APP_ID" = "d3owdoeg1om341" || { echo "Destination backend app mismatch"; exit 1; }
+                test "$AWS_REGION" = "us-east-1" || { echo "Destination region mismatch"; exit 1; }
+              fi
               npx ampx pipeline-deploy --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID"
     frontend:
       phases:
