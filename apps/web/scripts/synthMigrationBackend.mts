@@ -5,7 +5,8 @@ import net from "node:net";
 import { syncBuiltinESMExports } from "node:module";
 import { resolve } from "node:path";
 
-const [outdir, phase, branch] = process.argv.slice(2);
+const [outdir, phase, branch, authTest] = process.argv.slice(2);
+if (authTest && authTest !== "admin-login") throw new Error("Unknown offline test mode.");
 if (!outdir || !["full", "bootstrap"].includes(phase) || ![
   "codex-buzzkill-account-migration", "codex-buzzkill-staging-migration",
 ].includes(branch)) throw new Error("Expected output directory, full/bootstrap, and a migration branch.");
@@ -37,8 +38,10 @@ Object.assign(process.env, {
   AWS_APP_ID: "d3owdoeg1om341",
   AWS_BRANCH: branch,
   BUZZKILL_MIGRATION_PREVIEW: "true",
+  BUZZKILL_SOURCE_ENVIRONMENT: branch === "codex-buzzkill-account-migration" ? "main" : "staging",
   BUZZKILL_MIGRATION_BOOTSTRAP: String(phase === "bootstrap"),
   BUZZKILL_DESTINATION_ACCOUNT_ID: "743917687359",
+  BUZZKILL_DEPLOY_ACCOUNT_ID: "743917687359",
   BUZZKILL_BOOTSTRAP_EMPTY_DESTINATION_CONFIRMED: "true",
   MARKETING_URL: `https://${prefix}.d3owdoeg1om341.amplifyapp.com`,
   CRM_APP_URL: `https://${prefix}.d2y2zigtl5rx3.amplifyapp.com`,
@@ -51,6 +54,13 @@ Object.assign(process.env, {
   }),
 });
 
+if (authTest === "admin-login") Object.assign(process.env, {
+  BUZZKILL_PREVIEW_ADMIN_LOGIN: "true",
+  BUZZKILL_PREVIEW_ADMIN_EMAIL: "owner@example.com",
+  BUZZKILL_PREVIEW_ADMIN_USERNAME: "destination-test-user",
+  BUZZKILL_PREVIEW_ADMIN_LOGIN_UNTIL: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  BUZZKILL_PREVIEW_SES_CONFIGURATION_SET: "buzzkill-migration-preview-test",
+});
 await import("../amplify/backend.ts");
 // Amplify's default app registers this synthesis hook. It performs no deploy.
 process.emit("message", "amplifySynth");

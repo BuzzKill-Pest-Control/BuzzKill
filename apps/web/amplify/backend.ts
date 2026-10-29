@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { assertDestinationDeploymentIdentity, businessEnvironment } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
 import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
+import { previewAdminLoginConfig, PREVIEW_ADMIN_FROM, PREVIEW_ADMIN_ACCOUNT } from "./functions/shared/previewAdminLogin";
 import { defineBackend } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
@@ -58,6 +60,7 @@ import { leadSweep } from "./functions/lead-sweep/resource";
 import { preToken } from "./functions/pre-token/resource";
 
 const migrationPreview = isMigrationPreview();
+const businessMode = businessEnvironment();
 
 const backend = defineBackend({
   auth,
@@ -80,6 +83,10 @@ const backend = defineBackend({
   leadSweep,
   preToken,
 });
+
+if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN === "true") {
+  assertDestinationDeploymentIdentity(process.env.BUZZKILL_DEPLOY_ACCOUNT_ID ?? "", process.env.AWS_REGION ?? "");
+}
 
 // CRM logins are invite-only (office provisions staff and portal users via
 // adminCreateUser) — block public self-signup. Invites go out as single-use
@@ -300,7 +307,7 @@ const sesPolicy = new PolicyStatement({
 const crmUrlEnv =
   process.env.CRM_APP_URL ??
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
-  (process.env.AWS_BRANCH === "main"
+  (businessMode === "main"
     ? "https://app.pestbuzzkill.com"
     : "https://staging.d5ln2hbbp9s2j.amplifyapp.com");
 
@@ -316,7 +323,7 @@ const crmUrlEnv =
  * boundary guarantees where they can LAND — including for the hardcoded
  * fallbacks in ownedWork's defaultWorkOwner, which no env var controls.
  */
-const IS_PRODUCTION_EMAIL = process.env.AWS_BRANCH === "main";
+const IS_PRODUCTION_EMAIL = businessMode === "main";
 const OPS_INBOX = IS_PRODUCTION_EMAIL
   ? "info@pestbuzzkill.com"
   : "jake+staginginfo@pestbuzzkill.com";
@@ -363,6 +370,39 @@ for (const fn of [
     fn.addEnvironment("PRODUCTION_EMAIL", "1");
   }
 }
+// Optional, expiring acceptance-test login. Never grants general preview mail,
+// never enables business handlers, and never changes the source deployment.
+const previewAdminLogin = previewAdminLoginConfig({
+  ...process.env,
+  BUZZKILL_PREVIEW_AUTH_BRANCH: process.env.AWS_BRANCH,
+  CRM_APP_URL: crmUrlEnv,
+});
+if (previewAdminLogin) {
+  const fn = backend.verifyChallenge;
+  for (const [key, value] of Object.entries({
+    BUZZKILL_PREVIEW_ADMIN_LOGIN: "true",
+    BUZZKILL_PREVIEW_ADMIN_EMAIL: previewAdminLogin.email,
+    BUZZKILL_PREVIEW_ADMIN_USERNAME: previewAdminLogin.username,
+    BUZZKILL_PREVIEW_ADMIN_LOGIN_UNTIL: previewAdminLogin.until,
+    BUZZKILL_PREVIEW_SES_CONFIGURATION_SET: previewAdminLogin.configurationSet,
+    BUZZKILL_DESTINATION_ACCOUNT_ID: PREVIEW_ADMIN_ACCOUNT,
+    BUZZKILL_PREVIEW_AUTH_BRANCH: process.env.AWS_BRANCH!,
+    BUZZKILL_PREVIEW_AUTH_POOL_ID: backend.auth.resources.userPool.userPoolId,
+    BUZZKILL_PREVIEW_AUTH_CLIENT_ID: backend.auth.resources.userPoolClient.userPoolClientId,
+  })) fn.addEnvironment(key, value);
+  fn.resources.lambda.addToRolePolicy(new PolicyStatement({
+    actions: ["ses:SendEmail"],
+    resources: [
+      `arn:aws:ses:us-east-1:${PREVIEW_ADMIN_ACCOUNT}:identity/pestbuzzkill.com`,
+      `arn:aws:ses:us-east-1:${PREVIEW_ADMIN_ACCOUNT}:configuration-set/${previewAdminLogin.configurationSet}`,
+    ],
+    conditions: {
+      DateLessThan: { "aws:CurrentTime": previewAdminLogin.until },
+      StringEquals: { "ses:FromAddress": PREVIEW_ADMIN_FROM },
+      "ForAllValues:StringEquals": { "ses:Recipients": [previewAdminLogin.email] },
+    },
+  }));
+}
 docsBucket.grantReadWrite(backend.crmDocs.resources.lambda);
 docsBucket.grantReadWrite(backend.crmPricing.resources.lambda);
 backend.crmDocs.addEnvironment("DOCS_BUCKET", docsBucket.bucketName);
@@ -405,6 +445,7 @@ backend.crmPricing.addEnvironment("AMPLIFY_APP_ID", appId);
 backend.crmPricing.addEnvironment("AMPLIFY_BRANCH", branch);
 backend.bookingPublic.addEnvironment("AMPLIFY_APP_ID", appId);
 backend.bookingPublic.addEnvironment("AMPLIFY_BRANCH", branch);
+backend.bookingPublic.addEnvironment("BUZZKILL_BUSINESS_ENVIRONMENT", businessMode);
 // GL-11: the daily run re-drives stuck group-change commands through
 // crm-admin (which holds the Cognito permissions). Direct CDK references
 // (grantInvoke + functionName env) created a CloudFormation circular
@@ -567,7 +608,7 @@ backend.pricingRefresh.addEnvironment("AMPLIFY_BRANCH", branch);
 const marketingUrl =
   process.env.MARKETING_URL ??
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
-  (branch === "main"
+  (businessMode === "main"
     ? "https://www.pestbuzzkill.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com");
 backend.stripeWebhook.addEnvironment("MARKETING_URL", marketingUrl);
@@ -581,7 +622,7 @@ backend.bookingPublic.addEnvironment(
   "BOOKING_CORS_ORIGINS",
   migrationPreview
     ? migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)
-    : branch === "main"
+    : businessMode === "main"
     ? "https://www.pestbuzzkill.com,https://pestbuzzkill.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com,https://staging.pestbuzzkill.com,http://localhost:5173,http://localhost:5174"
 );
@@ -747,7 +788,7 @@ backend.addOutput({
 // +alias and can never blend into the production alert stream.
 backend.opsAlerts.addEnvironment(
   "INFRA_ALERT_EMAIL",
-  process.env.AWS_BRANCH === "main"
+  businessMode === "main"
     ? "jake@pestbuzzkill.com"
     : "jake+staginginfra@pestbuzzkill.com"
 );
@@ -803,7 +844,7 @@ const bridgeFailureTopic = new Topic(opsAlarmsStack, "OpsBridgeFailureTopic");
 // the raw watchdog leg follows the branded one to jake@. NOTE: changing the
 // subscription address requires a ONE-TIME confirmation click from the new
 // inbox after deploy, or these emails silently never arrive.
-if (branch === "main" && !migrationPreview) {
+if (businessMode === "main" && !migrationPreview) {
   subscribeBusinessEvents(bridgeFailureTopic,
     new EmailSubscription("jake@pestbuzzkill.com")
   );
@@ -1053,6 +1094,6 @@ makeMigrationPreviewReadOnly(backupStack);
 const deferredApiResources = applyMigrationBootstrap(backupStack);
 if (migrationPreview) {
   backend.addOutput({
-    custom: { migrationPreview: true, migrationApiReady: deferredApiResources === 0 },
+    custom: { migrationPreview: true, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
   });
 }
