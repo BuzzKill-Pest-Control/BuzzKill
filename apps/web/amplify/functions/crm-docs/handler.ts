@@ -144,6 +144,7 @@ import {
   assertLeadOutreachAllowed,
   logLeadTouch,
 } from "../shared/leadLifecycle";
+import { settleLeadForOfficeJob } from "../shared/officeJobLead";
 import { assertScheduleReason } from "../shared/visitChangeReasons";
 import { formatMoney, formatMonthly } from "../shared/money";
 
@@ -248,6 +249,8 @@ type Args = {
   serviceType?: string;
   priceCents?: number;
   scheduledDate?: string;
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
   operation?: string;
   officeReason?: string;
   technicianId?: string;
@@ -572,7 +575,7 @@ export const handler = async (event: AppSyncResolverEvent<Args>) => {
     }
     case "createOfficeJob": {
       assertOffice(event.identity);
-      return createOfficeJob(event.arguments);
+      return createOfficeJob(event.identity, event.arguments);
     }
     case "updateJobSchedule": {
       // GL-13: the actor and controlled reason travel with the change into the
@@ -1490,6 +1493,43 @@ export async function updateOwnedWork(args: {
   const actorEmail = args.actorEmail ?? args.actorSub ?? "unknown staff";
   const now = new Date().toISOString();
 
+  if (args.action === "RETRY_OFFICE_JOB_LEAD") {
+    if (!args.actorSub) throw new Error("A staffed Office actor is required.");
+    const jobId = typeof item.relatedId === "string" && item.relatedId.startsWith("office-job:")
+      ? item.relatedId.slice("office-job:".length)
+      : "";
+    if (
+      item.kind !== "LEAD_LIFECYCLE_RECOVERY" || !item.customerId || !jobId ||
+      item.id !== workItemId("LEAD_LIFECYCLE_RECOVERY", item.relatedId)
+    ) return refusal("This work item is not a saved-job lead recovery.");
+    if (item.status === "RESOLVED") {
+      return { workItemId: item.id, status: "RESOLVED", alreadyResolved: true };
+    }
+    const saved = await client.models.Job.get({ id: jobId });
+    if (saved.errors?.length || !saved.data || saved.data.customerId !== item.customerId) {
+      return refusal("The saved job could not be verified for this customer. No lead was changed.");
+    }
+    if (saved.data.status === "CANCELED") {
+      return refusal("This job was canceled. Review the lead's next action instead of converting it from canceled work.");
+    }
+    const settlement = await settleLeadForOfficeJob({
+      customerId: item.customerId,
+      jobId: saved.data.id,
+      actor: { sub: args.actorSub, email: args.actorEmail },
+    });
+    if (settlement.warning) return { workItemId: item.id, status: "OPEN", ...settlement };
+    return closeResolvedWorkItem({
+      item,
+      actorSub: args.actorSub,
+      actorEmail,
+      now,
+      note: `Lead follow-up verified closed for saved office job ${saved.data.id}. Payment and billing unchanged.`,
+      eventType: "RESOLVED",
+      kind: item.kind,
+      relatedId: item.relatedId,
+    });
+  }
+
   if (args.action === "CLAIM") {
     // The queue is a snapshot; somebody closed this case while it was on
     // screen. Every refusal in this action is that same stale list.
@@ -2199,11 +2239,45 @@ function packetFields(args: Args) {
 }
 
 /** Jobs created by the office always start unassigned. */
-async function createOfficeJob(args: Args) {
+async function createOfficeJob(identity: AppSyncIdentity | undefined | null, args: Args) {
   const customerId = args.customerId?.trim() ?? "";
   let serviceType = args.serviceType?.trim() ?? "";
   if (!customerId) throw new Error("Customer is required");
   if (!serviceType) throw new Error("Service type is required");
+
+  const scheduledDate = args.scheduledDate?.trim() || undefined;
+  const scheduledStartTime = args.scheduledStartTime?.trim() || undefined;
+  const scheduledEndTime = args.scheduledEndTime?.trim() || undefined;
+  if (scheduledDate) {
+    const parsed = new Date(`${scheduledDate}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) ||
+      !Number.isFinite(parsed.valueOf()) ||
+      parsed.toISOString().slice(0, 10) !== scheduledDate
+    ) {
+      throw new Error("Choose a valid service date.");
+    }
+  }
+  if ((scheduledStartTime || scheduledEndTime) && !scheduledDate) {
+    throw new Error("Choose a service date before adding an arrival time.");
+  }
+  if (scheduledEndTime && !scheduledStartTime) {
+    throw new Error("Enter an arrival start time before an end time.");
+  }
+  for (const time of [scheduledStartTime, scheduledEndTime]) {
+    if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      throw new Error("Enter a valid arrival time in HH:mm format (Eastern time).");
+    }
+  }
+  if (scheduledStartTime && scheduledEndTime && scheduledEndTime <= scheduledStartTime) {
+    throw new Error("The arrival window must end after its start time.");
+  }
+  if (
+    args.priceCents != null &&
+    (!Number.isInteger(args.priceCents) || args.priceCents < 0 || args.priceCents > 2_147_483_647)
+  ) {
+    throw new Error("Enter a valid nonnegative job amount in whole cents.");
+  }
 
   const client = await dataClient();
   const { data: customer } = await client.models.Customer.get({ id: customerId });
@@ -2257,6 +2331,11 @@ async function createOfficeJob(args: Args) {
       `"${serviceType}" doesn't match a catalog service. Pick one from the list, or use "Something else…" to request a catalog decision — jobs are never created outside the catalog.`
     );
   }
+  // A one-time lead commitment needs an agreed amount, including an explicit
+  // zero. Recurring visits retain their verified service plan's billing.
+  if (customer.status === "LEAD" && !args.servicePlanId && args.priceCents == null) {
+    throw new Error("Enter the agreed job amount before adding a one-time job to a lead.");
+  }
   // The stored label is the catalog's canonical root unless a more specific
   // catalog-derived label was passed (funnel labels carry size/nest facts).
   if (requestedCode) serviceType = catalogService.label;
@@ -2266,7 +2345,7 @@ async function createOfficeJob(args: Args) {
   // explicit property classification), so the gap can never be created in the
   // first place. A date-less job (scheduled later) is allowed through;
   // updateJobSchedule enforces the full gate before it can reach a technician.
-  if (args.scheduledDate) {
+  if (scheduledDate) {
     assertDispatchFacts(customer, {
       propertyClass: (args as { propertyClass?: string | null }).propertyClass,
       serviceType,
@@ -2284,11 +2363,14 @@ async function createOfficeJob(args: Args) {
     if (!plan || plan.customerId !== customerId) {
       throw new Error("That service plan does not belong to this customer");
     }
+    if (plan.status !== "ACTIVE") {
+      throw new Error("Choose an active service plan before adding a recurring job.");
+    }
     // GL-17: a seasonal plan's visit may only land in an in-season month, and
     // never a second visit in a month whose treatment already happened — there
     // is no free-text bypass around the seasonal promise.
-    if (plan.seasonal && args.scheduledDate) {
-      const monthKey = args.scheduledDate.slice(0, 7);
+    if (plan.seasonal && scheduledDate) {
+      const monthKey = scheduledDate.slice(0, 7);
       if (!isServiceMonth(plan, monthKey)) {
         // The office picked a date; the plan says that month has no routine
         // treatment. Both parties are working correctly.
@@ -2337,11 +2419,13 @@ async function createOfficeJob(args: Args) {
     serviceCode: catalogService.id,
     catalogVersion: SERVICE_CATALOG_VERSION,
     priceCents: args.priceCents ?? undefined,
-    status: args.scheduledDate ? "SCHEDULED" : "UNSCHEDULED",
-    scheduledDate: args.scheduledDate || undefined,
+    status: scheduledDate ? "SCHEDULED" : "UNSCHEDULED",
+    scheduledDate,
+    scheduledStartTime,
+    scheduledEndTime,
     // GL-04: pool facts are STAMPED at birth so the one canonical release
     // path can give exactly these minutes back exactly once.
-    ...(args.scheduledDate
+    ...(scheduledDate
       ? {
           capacityMinutes: slotOnsiteMinutes(
             normalizePropertyClass(
@@ -2367,9 +2451,9 @@ async function createOfficeJob(args: Args) {
   }
   // GL-04: a dated office-created visit shows on the POOL accounting slot
   // until its real technician-day claim happens at assignment.
-  if (args.scheduledDate) {
+  if (scheduledDate) {
     await notePoolMinutes(
-      args.scheduledDate,
+      scheduledDate,
       slotOnsiteMinutes(
         normalizePropertyClass(
           (args as { propertyClass?: string | null }).propertyClass
@@ -2377,7 +2461,14 @@ async function createOfficeJob(args: Args) {
       )
     ).catch(() => undefined);
   }
-  return { jobId: created.id };
+  const settlement = customer.status === "LEAD"
+    ? await settleLeadForOfficeJob({
+        customerId,
+        jobId: created.id,
+        actor: { sub: callerSub(identity), email: callerEmail(identity) },
+      })
+    : {};
+  return { jobId: created.id, ...settlement };
 }
 
 /**
@@ -2848,6 +2939,11 @@ async function updateJobSchedule(
         technicianId: technician.id,
         routeOrder: args.routeOrder ?? 1,
         scheduledDate: args.scheduledDate,
+        // An arrival promise belongs to its original day, not to whatever
+        // date the dispatch board is showing when the stop is assigned.
+        ...(args.scheduledDate !== (job.scheduledDate ?? null)
+          ? { scheduledStartTime: null, scheduledEndTime: null }
+          : {}),
         status: "SCHEDULED",
         capacityMinutes: slotMinutes,
         // A real assignment supersedes the checkout-time hold — the release
@@ -3144,7 +3240,13 @@ async function updateJobSchedule(
           ? null
           : (job.capacityTechnicianId ?? null),
         ...(dateChanged
-          ? { routeId: null, technicianId: null, routeOrder: null }
+          ? {
+              routeId: null,
+              technicianId: null,
+              routeOrder: null,
+              scheduledStartTime: null,
+              scheduledEndTime: null,
+            }
           : {}),
       },
       jobScheduleGuards(job)

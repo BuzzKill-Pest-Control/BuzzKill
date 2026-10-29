@@ -384,22 +384,28 @@ describe("customer.subscription.deleted", () => {
     // GL-08 R4: cancellation is immediate; the paid visit's money outcome is
     // the server-calculated 72-hour rule (2026-10-14 is far out — full refund),
     // stated in the office alert and owned by a prescribed Finance case.
-    seedPlan();
-    const job = seedJob({
-      status: "SCHEDULED",
-      paidAt: "2026-07-10T12:00:00Z",
-      priceCents: 12000,
-    });
+    // Keep the October 14 visit >72h away regardless of the build date.
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    try {
+      seedPlan();
+      const job = seedJob({
+        status: "SCHEDULED",
+        paidAt: "2026-07-10T12:00:00Z",
+        priceCents: 12000,
+      });
 
-    await invoke("customer.subscription.deleted", deletedEvent);
+      await invoke("customer.subscription.deleted", deletedEvent);
 
-    expect(jobs.get(job.id)!.status).toBe("CANCELED");
-    const [alert] = notifyOffice.mock.calls[0] as unknown as [
-      { bodyHtml: string },
-    ];
-    expect(alert.bodyHtml).toMatch(/refunds owed in full/i);
-    expect(alert.bodyHtml).toContain("$120.00");
-    expect(alert.bodyHtml).not.toMatch(/refund it or honour it/i);
+      expect(jobs.get(job.id)!.status).toBe("CANCELED");
+      const [alert] = notifyOffice.mock.calls[0] as unknown as [
+        { bodyHtml: string },
+      ];
+      expect(alert.bodyHtml).toMatch(/refunds owed in full/i);
+      expect(alert.bodyHtml).toContain("$120.00");
+      expect(alert.bodyHtml).not.toMatch(/refund it or honour it/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stays silent when the CRM's own cancel already handled it", async () => {

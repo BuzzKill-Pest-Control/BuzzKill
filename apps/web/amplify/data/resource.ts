@@ -31,11 +31,10 @@ import { leadSweep } from "../functions/lead-sweep/resource";
  *     function, which is what makes "a user in a group can view the other
  *     customers in the same group" work as row-level read access.
  *
- * Leads are Customers with status LEAD. There is exactly one conversion
- * path: the customer books themselves through the public funnel (/quote —
- * day picked, terms accepted, paid by card), and the Stripe webhook's
- * finalization converts the lead record. No office-side conversion exists —
- * no quotes, no e-sign, no hand-created plans.
+ * Leads are Customers with status LEAD. A finalized public booking or an
+ * office-created job/plan converts the lead to ACTIVE and ends sales follow-up.
+ * Office conversion does not imply payment or start billing; those remain
+ * separate, explicit operations.
  */
 // GL-13 field-level least-privilege. A field carrying this rule is readable by
 // the office (OWNER) and the portal customer (the accessGroups dynamic
@@ -1668,6 +1667,11 @@ export const schema = a.schema({
       priceCents: a.integer(),
       status: a.ref("JobStatus").required(),
       scheduledDate: a.date(),
+      // The office-agreed arrival time/window, in HH:mm on the
+      // America/New_York clock. Kept separate from the route's computed ETA.
+      // A start alone is an exact appointment time; the end is optional.
+      scheduledStartTime: a.string(),
+      scheduledEndTime: a.string(),
       routeId: a.id(),
       route: a.belongsTo("Route", "routeId"),
       routeOrder: a.integer(),
@@ -3077,6 +3081,9 @@ export const schema = a.schema({
       serviceCode: a.string(),
       priceCents: a.integer(),
       scheduledDate: a.date(),
+      // Optional office-agreed arrival time/window (HH:mm, America/New_York).
+      scheduledStartTime: a.string(),
+      scheduledEndTime: a.string(),
       // GL-12 dispatch packet, captured at scheduling time.
       accessInstructions: a.string(),
       hazardNotes: a.string(),

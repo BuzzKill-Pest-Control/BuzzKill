@@ -23,6 +23,7 @@ import {
   webPageNode,
   type JsonLdGraph,
 } from "./schema";
+import { articleWordCount } from "../lib/articles";
 
 export const ROBOTS_INDEX =
   "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
@@ -46,9 +47,10 @@ export type HeadState = {
   description: string;
   robots: string;
   canonicalUrl: string;
-  ogType: "website";
+  ogType: "website" | "article";
   image: string;
-  /** Pixel size of `image` when it is the site default; unknown otherwise. */
+  imageAlt?: string;
+  /** Known pixel size for the site default or a validated article image. */
   imageSize?: { width: number; height: number };
   /** The page-level JSON-LD graph (WebPage, breadcrumb, service, FAQ). The
    *  site-level entity graph ships separately in the HTML shell. */
@@ -70,7 +72,7 @@ export function pageGraphFor(page: PageMeta, canonicalUrl: string): JsonLdGraph 
       type: page.webPageType,
       image: page.image,
       hasBreadcrumb: Boolean(crumbs),
-      mainEntityId: page.kind === "about" ? ORGANIZATION_ID : undefined,
+      mainEntityId: page.kind === "about" ? ORGANIZATION_ID : page.article ? `${canonicalUrl}#article` : undefined,
     }),
   ];
   if (crumbs) graph.push(breadcrumbNode(canonicalUrl, crumbs));
@@ -85,6 +87,20 @@ export function pageGraphFor(page: PageMeta, canonicalUrl: string): JsonLdGraph 
     );
   }
   if (page.faq && page.faq.length > 0) graph.push(faqNode(canonicalUrl, page.faq));
+  if (page.article) {
+    const article = page.article;
+    graph.push({
+      "@type": "BlogPosting", "@id": `${canonicalUrl}#article`,
+      mainEntityOfPage: { "@id": `${canonicalUrl}#webpage` },
+      headline: article.title, description: article.description,
+      datePublished: article.publishedAt, dateModified: article.updatedAt ?? article.publishedAt,
+      author: { "@type": "Organization", name: article.author },
+      publisher: { "@id": ORGANIZATION_ID },
+      image: { "@type": "ImageObject", url: assetUrl(article.image.src), width: article.image.width, height: article.image.height, caption: article.image.alt },
+      articleSection: article.topic, wordCount: articleWordCount(article), inLanguage: "en-US",
+      citation: article.sources.map((source) => source.url),
+    });
+  }
   return { "@context": "https://schema.org", "@graph": graph };
 }
 
@@ -129,9 +145,10 @@ export function computeHead(
     description,
     robots,
     canonicalUrl,
-    ogType: "website",
+    ogType: page.article ? "article" : "website",
     image,
-    imageSize: isDefaultImage ? { width: COMPANY.defaultImage.width, height: COMPANY.defaultImage.height } : undefined,
+    imageAlt: page.article?.image.alt,
+    imageSize: !overrides.image && page.article ? { width: page.article.image.width, height: page.article.image.height } : isDefaultImage ? { width: COMPANY.defaultImage.width, height: COMPANY.defaultImage.height } : undefined,
     pageGraph,
     jsonLd: serializeJsonLd(pageGraph),
   };
@@ -163,6 +180,7 @@ export function renderHeadTags(head: HeadState, opts: { includeCanonical: boolea
       `<meta property="og:image:height" content="${head.imageSize.height}" />`,
     );
   }
+  if (head.imageAlt) lines.push(`<meta property="og:image:alt" content="${esc(head.imageAlt)}" />`, `<meta name="twitter:image:alt" content="${esc(head.imageAlt)}" />`);
   if (opts.includeCanonical) {
     lines.push(`<meta property="og:url" content="${esc(head.canonicalUrl)}" />`);
   }

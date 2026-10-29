@@ -5,6 +5,7 @@ import { technicianDay, type Job, type TechnicianDay } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { clearAllDrafts } from "../lib/reportDraft";
 import { addDays, prettyWeekday, todayEastern } from "../lib/format";
+import { formatJobAppointmentTime } from "../lib/jobAppointment";
 import {
   Button,
   Card,
@@ -183,6 +184,11 @@ export default function TechToday() {
                           {shownAddr || addr}
                         </a>
                       </>
+                    ) : null}
+                    {j.scheduledDate && formatJobAppointmentTime(j) ? (
+                      <span className="nested-line">
+                        Appointment: {formatJobAppointmentTime(j)}
+                      </span>
                     ) : null}
                   </>
                 }

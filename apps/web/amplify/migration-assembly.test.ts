@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { PREVIEW_MUTATION_REFUSAL } from "./migration-read-only";
 
 type Resource = { Type: string; Properties?: Record<string, unknown>; [key: string]: unknown };
@@ -13,18 +14,23 @@ type Template = {
 };
 type Assembly = { templates: Record<string, Template>; assets: Record<string, string> };
 const directory = mkdtempSync(join(tmpdir(), "buzzkill-migration-assembly-"));
+const execFileAsync = promisify(execFile);
 let full: Assembly;
 let bootstrap: Assembly;
 
-function synth(phase: "full" | "bootstrap"): Assembly {
+async function synth(phase: "full" | "bootstrap"): Promise<Assembly> {
   const outdir = join(directory, phase);
   const branch = process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
     ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
-  const result = spawnSync(process.execPath, [
-    "--import", "tsx", resolve("scripts/synthMigrationBackend.mts"), outdir, phase, branch,
-  ], { cwd: process.cwd(), encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
-  if (result.status !== 0) {
-    throw new Error(`Offline ${phase} synthesis failed: ${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
+  try {
+    // Synthesis can exceed Vitest's RPC timeout on CI. Keep this worker's
+    // event loop free to receive acknowledgements while the child runs.
+    await execFileAsync(process.execPath, [
+      "--import", "tsx", resolve("scripts/synthMigrationBackend.mts"), outdir, phase, branch,
+    ], { cwd: process.cwd(), encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+  } catch (error) {
+    const result = error as Error & { stdout?: string; stderr?: string };
+    throw new Error(`Offline ${phase} synthesis failed: ${result.message}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`);
   }
   const templates: Record<string, Template> = {};
   const assets: Record<string, string> = {};
@@ -110,9 +116,9 @@ function allResources(assembly: Assembly) {
   return Object.values(assembly.templates).flatMap((t) => Object.values(t.Resources));
 }
 
-beforeAll(() => {
-  full = synth("full");
-  bootstrap = synth("bootstrap");
+beforeAll(async () => {
+  full = await synth("full");
+  bootstrap = await synth("bootstrap");
 }, 240_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 

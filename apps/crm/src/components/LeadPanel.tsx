@@ -24,17 +24,19 @@ import { Badge, Button, Card, ErrorNote, Field } from "../ui/kit";
 
 /**
  * The lead record is an exception-safe inbox, not a second sales system.
- * Staff either continue through the canonical public quote funnel or record a
- * terminal lost/DNC fact. Quote submission, email delivery, conversion, and
- * next-action replacement are written by the system; employees never manage
- * pipeline stages.
+ * Staff can record a job agreed offline, continue through the public quote
+ * funnel, or record a terminal lost/DNC fact. Quote submission, delivery,
+ * conversion, and next-action replacement are written by the system;
+ * employees never manage pipeline stages.
  */
 export default function LeadPanel({
   customer,
   onChanged,
+  onAddJob,
 }: {
   customer: Customer;
   onChanged: () => void | Promise<void>;
+  onAddJob: () => void;
 }) {
   const roles = useRoles();
   const [activity, setActivity] = useState<LeadActivity[] | null>(null);
@@ -150,12 +152,20 @@ export default function LeadPanel({
             {" · "}Due {due ? fmtDateTime(due.toISOString()) : "now"}
           </p>
           <p className="muted small">
-            Confirm the email, phone, and MA/RI service address on this record.
-            Then use the same website form every customer uses. Contact and
-            address fields will be filled in; you choose the actual service,
-            property type, and size from what the lead told you.
+            Add a job when you've agreed on the service, appointment, and price.
+            Confirm the service address on this record before scheduling.
+            You can also use the website quote form with this lead's details filled in.
           </p>
-          <Button block loading={busy === "quote"} onClick={() => void openQuote()}>
+          <Button block onClick={onAddJob}>
+            Add job
+          </Button>
+          <Button
+            block
+            variant="subtle"
+            style={{ marginTop: 8 }}
+            loading={busy === "quote"}
+            onClick={() => void openQuote()}
+          >
             Open prefilled website quote
           </Button>
           {preparedUrl ? (

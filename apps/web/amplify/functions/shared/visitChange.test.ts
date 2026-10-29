@@ -683,6 +683,48 @@ describe("rescheduleVisit", () => {
     expect(visitEvents[0]).toMatchObject({ action: "RESCHEDULE", outcome: "COMPLETE" });
   });
 
+  it.each(["assigned", "pool", "unscheduled"])("clears a prior arrival promise on a date change to %s", async (destination) => {
+    const newDate = daysFromNow(9);
+    seedForReschedule(newDate);
+    Object.assign(jobs.get("j1")!, { scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+
+    await rescheduleVisit({
+      jobId: "j1",
+      scheduledDate: destination === "unscheduled" ? null : newDate,
+      ...(destination === "assigned" ? { technicianId: "t1", routeId: "r-new" } : {}),
+      reason: "customer request",
+      actor: OFFICE,
+    });
+    expect(jobs.get("j1")!.scheduledDate ?? null).toBe(destination === "unscheduled" ? null : newDate);
+    expect(jobs.get("j1")!.scheduledStartTime ?? null).toBeNull();
+    expect(jobs.get("j1")!.scheduledEndTime ?? null).toBeNull();
+  });
+
+  it("preserves the promised time for a same-day assignment", async () => {
+    const date = daysFromNow(3);
+    seedForReschedule(date);
+    Object.assign(jobs.get("j1")!, { scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+    await rescheduleVisit({
+      jobId: "j1", scheduledDate: date, technicianId: "t1", routeId: "r-new",
+      reason: "route change", actor: OFFICE,
+    });
+    expect(jobs.get("j1")).toMatchObject({ scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+  });
+
+  it("keeps the original date and time when the move is refused", async () => {
+    const newDate = daysFromNow(9);
+    seedForReschedule(newDate);
+    Object.assign(jobs.get("j1")!, { scheduledStartTime: "15:30", scheduledEndTime: "16:30" });
+    technicians.get("t1")!.active = false;
+    await expect(rescheduleVisit({
+      jobId: "j1", scheduledDate: newDate, technicianId: "t1", routeId: "r-new",
+      reason: "customer request", actor: OFFICE,
+    })).rejects.toThrow(/inactive/);
+    expect(jobs.get("j1")).toMatchObject({
+      scheduledDate: daysFromNow(3), scheduledStartTime: "15:30", scheduledEndTime: "16:30",
+    });
+  });
+
   it("GL-07: the day's LAST STOP cannot be double-taken — the loser gets a plain refusal and holds nothing", async () => {
     const newDate = daysFromNow(9);
     seedForReschedule(newDate);

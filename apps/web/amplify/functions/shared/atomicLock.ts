@@ -1,6 +1,7 @@
 import {
   DynamoDBClient,
   UpdateItemCommand,
+  TransactWriteItemsCommand,
   DeleteItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
@@ -77,6 +78,8 @@ export type LockUpdateResult =
 
 export type LockDeleteResult = "OK" | "LOST" | "UNSUPPORTED";
 
+export type LockCheck = { model: string; id: string; conditions: LockCondition[] };
+
 export type LockStore = {
   /** One atomic guarded update. `sets` null values REMOVE the attribute;
    *  `bumpField` does SET #b = if_not_exists(#b, 0) + 1 in the same write.
@@ -92,6 +95,16 @@ export type LockStore = {
       /** Atomic numeric adds in the same guarded write (negative = decrement). */
       addFields?: Record<string, number>;
     }
+  ): Promise<LockUpdateResult>;
+  /** One update and checks on other rows committed atomically. Production
+   * transactions do not return prior attributes. Optional for older test
+   * stores; callers fail closed when transactions are unavailable. */
+  transactionalUpdate?(
+    model: string,
+    id: string,
+    sets: LockSets,
+    conditions: LockCondition[],
+    checks: LockCheck[]
   ): Promise<LockUpdateResult>;
   /** One atomic guarded delete. */
   conditionalDelete(
@@ -288,6 +301,57 @@ function dynamoStore(): LockStore {
         return { ok: false, reason: _classifyLockError(err) };
       }
     },
+    async transactionalUpdate(model, id, sets, conditions, checks) {
+      const suffix = await tableSuffix();
+      if (!suffix) return { ok: false, reason: "UNSUPPORTED" };
+      const names: Record<string, string> = {};
+      const values: Record<string, unknown> = {};
+      const setParts: string[] = [];
+      const removeParts: string[] = [];
+      Object.entries({ ...sets, updatedAt: new Date().toISOString() }).forEach(([field, value], i) => {
+        const name = `#s${i}`;
+        names[name] = field;
+        if (value === null) removeParts.push(name);
+        else {
+          values[`:s${i}`] = value;
+          setParts.push(`${name} = :s${i}`);
+        }
+      });
+      const condition = buildCondition(conditions, names, values, true);
+      try {
+        await clientFor().send(new TransactWriteItemsCommand({
+          TransactItems: [
+            { Update: {
+              TableName: `${model}${suffix}`,
+              Key: marshall({ id }),
+              UpdateExpression: `SET ${setParts.join(", ")}` + (removeParts.length ? ` REMOVE ${removeParts.join(", ")}` : ""),
+              ConditionExpression: condition,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: marshall(values),
+            } },
+            ...checks.map((check) => {
+              const checkNames: Record<string, string> = {};
+              const checkValues: Record<string, unknown> = {};
+              const expression = buildCondition(check.conditions, checkNames, checkValues, true);
+              return { ConditionCheck: {
+                TableName: `${check.model}${suffix}`,
+                Key: marshall({ id: check.id }),
+                ConditionExpression: expression,
+                ExpressionAttributeNames: checkNames,
+                ...(Object.keys(checkValues).length ? { ExpressionAttributeValues: marshall(checkValues) } : {}),
+              } };
+            }),
+          ],
+        }));
+        return { ok: true, prior: {} };
+      } catch (err) {
+        const reason = _classifyTransactionError(err);
+        if (reason === "UNSUPPORTED") {
+          console.error(`atomicLock: transactionalUpdate(${model}, ${id}) failed`, err);
+        }
+        return { ok: false, reason };
+      }
+    },
     async conditionalDelete(model, id, conditions) {
       const suffix = await tableSuffix();
       if (!suffix) return "UNSUPPORTED";
@@ -338,6 +402,18 @@ export function _classifyLockError(err: unknown): "LOST" | "UNSUPPORTED" {
     name === "UnrecognizedClientException"
     ? "UNSUPPORTED"
     : "LOST";
+}
+
+/** Transactions also use cancellation for validation/capacity failures.
+ * Only actual conditional conflicts mean another writer won. */
+export function _classifyTransactionError(err: unknown): "LOST" | "UNSUPPORTED" {
+  const error = err as { name?: string; CancellationReasons?: { Code?: string }[] };
+  if (error?.name === "ConditionalCheckFailedException" || error?.name === "TransactionConflictException") return "LOST";
+  if (error?.name === "TransactionCanceledException") {
+    const reasons = (error.CancellationReasons ?? []).map((reason) => reason.Code).filter((code) => code !== "None");
+    if (reasons.length && reasons.every((code) => code === "ConditionalCheckFailed" || code === "TransactionConflict")) return "LOST";
+  }
+  return "UNSUPPORTED";
 }
 
 let activeStore: LockStore | null = null;
@@ -464,6 +540,20 @@ export async function casGuardedUpdate(
   return store().conditionalUpdate(model, id, sets, conditions);
 }
 
+/** Commit a guarded update only if every cross-row fact still holds. No
+ * read-then-write fallback is safe: cancellation can race the conversion. */
+export async function casTransactionalUpdate(
+  model: string,
+  id: string,
+  sets: LockSets,
+  conditions: LockCondition[],
+  checks: LockCheck[]
+): Promise<LockUpdateResult> {
+  const active = store();
+  if (!active.transactionalUpdate) return { ok: false, reason: "UNSUPPORTED" };
+  return active.transactionalUpdate(model, id, sets, conditions, checks);
+}
+
 // ---------------------------------------------------------------------------
 // Deterministic in-memory store for unit tests
 // ---------------------------------------------------------------------------
@@ -538,6 +628,25 @@ export function memoryLockStore(
           row[field] = (Number(prior[field]) || 0) + delta;
         }
       }
+      return { ok: true, prior };
+    },
+    async transactionalUpdate(model, id, sets, conditions, checks) {
+      if (!tables[model] || checks.some((check) => !tables[check.model])) {
+        return { ok: false, reason: "UNSUPPORTED" };
+      }
+      const row = tables[model].get(id);
+      if (!row || !evaluate(row, conditions, true) ||
+        checks.some((check) => !evaluate(tables[check.model].get(check.id), check.conditions, true))) {
+        return { ok: false, reason: "LOST" };
+      }
+      // No await between checking ANY row and updating the target: models
+      // transaction serialization against a concurrent job cancellation.
+      const prior = { ...row };
+      for (const [field, value] of Object.entries(sets)) {
+        if (value === null) delete row[field];
+        else row[field] = value;
+      }
+      row.updatedAt = new Date().toISOString();
       return { ok: true, prior };
     },
     async conditionalDelete(model, id, conditions) {

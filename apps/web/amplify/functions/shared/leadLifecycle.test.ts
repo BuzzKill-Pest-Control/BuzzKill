@@ -146,6 +146,7 @@ vi.mock("./atomicLock", () => ({
 }));
 
 const {
+  appendLeadActivity,
   createLead,
   logLeadTouch,
   setLeadDisposition,
@@ -850,5 +851,38 @@ describe("DELETE_QUOTE — a quote money is attached to is not deletable", () =>
       )
     ).rejects.toThrow(/different customer/i);
     expect(bookingRequests.has("q1")).toBe(true);
+  });
+});
+
+
+describe("immutable business-fact activity retries", () => {
+  it("a colleague adopts a job note without replacing its original actor", async () => {
+    const fact = {
+      customerId: "c1", channel: "LIFECYCLE", outcome: "NOTE",
+      note: "Office job j1 is saved.", mutationId: "office-job:j1", preserveOriginalActor: true,
+    };
+    const first = await appendLeadActivity({ ...fact, actor });
+    const retry = await appendLeadActivity({ ...fact, actor: { sub: "colleague", email: "colleague@example.com" } });
+    expect(retry).toEqual(first);
+    expect(activities).toHaveLength(1);
+    expect(retry).toMatchObject({ actorSub: actor.sub, actorEmail: actor.email });
+  });
+
+  it("does not adopt a different fact under the saved job's activity key", async () => {
+    const fact = {
+      customerId: "c1", channel: "LIFECYCLE", outcome: "NOTE",
+      note: "Office job j1 is saved.", mutationId: "office-job:j1", preserveOriginalActor: true,
+    };
+    await appendLeadActivity({ ...fact, actor });
+    await expect(appendLeadActivity({ ...fact, note: "A different event", actor }))
+      .rejects.toThrow(/different lead action/);
+    expect(activities).toHaveLength(1);
+  });
+
+  it("ordinary staff actions still reject another actor's replay", async () => {
+    const fact = { customerId: "c1", channel: "LIFECYCLE", outcome: "NOTE", mutationId: "staff-note" };
+    await appendLeadActivity({ ...fact, actor });
+    await expect(appendLeadActivity({ ...fact, actor: { sub: "colleague", email: "colleague@example.com" } }))
+      .rejects.toThrow(/different lead action/);
   });
 });

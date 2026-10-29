@@ -451,32 +451,38 @@ describe("cancelPlanBilling resolves the queued visits", () => {
   it("a paid visit >72h out is CANCELED with a full-refund Finance case — no keep-or-refund choice", async () => {
     // GL-08 R4: cancellation is immediate for every visit; the money outcome
     // is the SERVER-calculated 72-hour rule, prescribed in the owned case.
-    seedPlan({ stripeSubscriptionId: "sub_live" });
-    const job = seedJob({ status: "SCHEDULED", paidAt: "2026-07-10T12:00:00Z" });
-    invoices.set("i1", {
-      id: "i1",
-      jobId: job.id,
-      status: "PAID",
-      amountCents: 12000,
-    });
+    // Keep the October 14 visit >72h away regardless of the build date.
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    try {
+      seedPlan({ stripeSubscriptionId: "sub_live" });
+      const job = seedJob({ status: "SCHEDULED", paidAt: "2026-07-10T12:00:00Z" });
+      invoices.set("i1", {
+        id: "i1",
+        jobId: job.id,
+        status: "PAID",
+        amountCents: 12000,
+      });
 
-    const result = await cancelPlanBilling(makeStripe({ hasPaymentMethod: true }), "p1");
+      const result = await cancelPlanBilling(makeStripe({ hasPaymentMethod: true }), "p1");
 
-    expect(jobs.get(job.id)!.status).toBe("CANCELED");
-    expect(result.queuedVisits.refundsOwed).toEqual([
-      expect.objectContaining({ jobId: job.id, amountCents: 12000 }),
-    ]);
-    expect(openOwnedWork).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "PAID_VISIT_CANCELLATION",
-        ownerTeam: "FINANCE",
-        resolutionAction: expect.stringMatching(/exact full refund/i),
-      })
-    );
-    const call = openOwnedWork.mock.calls.find((c) =>
-      String((c as unknown as [{ title: string }])[0].title).match(/refund/i)
-    ) as unknown as [{ detail: string }];
-    expect(call[0].detail).toMatch(/ONLY outcome is a full refund/);
+      expect(jobs.get(job.id)!.status).toBe("CANCELED");
+      expect(result.queuedVisits.refundsOwed).toEqual([
+        expect.objectContaining({ jobId: job.id, amountCents: 12000 }),
+      ]);
+      expect(openOwnedWork).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "PAID_VISIT_CANCELLATION",
+          ownerTeam: "FINANCE",
+          resolutionAction: expect.stringMatching(/exact full refund/i),
+        })
+      );
+      const call = openOwnedWork.mock.calls.find((c) =>
+        String((c as unknown as [{ title: string }])[0].title).match(/refund/i)
+      ) as unknown as [{ detail: string }];
+      expect(call[0].detail).toMatch(/ONLY outcome is a full refund/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a paid visit ≤72h out is CANCELED with the payment retained per policy — no refund, no credit", async () => {

@@ -157,6 +157,8 @@ beforeEach(() => {
     routeOrder: 1,
     serviceType: "General Pest",
     status: "SCHEDULED",
+    scheduledStartTime: "15:30",
+    scheduledEndTime: "16:30",
     priceCents: 12000,
     paidPaymentIntentId: "pi_secret",
   });
@@ -166,6 +168,8 @@ describe("buildTechnicianJob", () => {
   it("gives the assignee the job, with the customer reduced to visit fields", async () => {
     const d = await buildTechnicianJob(TECH_A, "job_a");
     expect(d.job.id).toBe("job_a");
+    expect(d.job.scheduledStartTime).toBe("15:30");
+    expect(d.job.scheduledEndTime).toBe("16:30");
     // Money fields are dropped even for the assignee's own job.
     expect(d.job.priceCents).toBeUndefined();
     expect(d.job.paidPaymentIntentId).toBeUndefined();
@@ -214,6 +218,8 @@ describe("buildTechnicianDay", () => {
     expect(d.technicians).toEqual([]);
     expect(d.route?.id).toBe("r_a");
     expect(d.jobs.map((j) => j.id)).toEqual(["job_a"]);
+    expect(d.jobs[0].scheduledStartTime).toBe("15:30");
+    expect(d.jobs[0].scheduledEndTime).toBe("16:30");
     expect(d.jobs[0].priceCents).toBeUndefined();
     expect(d.customers.c_a.serviceStreet).toBe("1 Main");
     expect(d.customers.c_a.billingStreet).toBeUndefined();

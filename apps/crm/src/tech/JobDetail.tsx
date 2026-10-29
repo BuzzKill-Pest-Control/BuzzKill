@@ -14,6 +14,7 @@ import {
   type TechnicianJobDetail,
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
+import { formatJobAppointmentTime } from "../lib/jobAppointment";
 import { toAmountText, splitAmount, composeAmount } from "../lib/productAmount";
 import {
   clearDraft,
@@ -499,6 +500,12 @@ export default function TechJob() {
           <dd>{customer.contactName?.trim() || customer.displayName}</dd>
           <dt>Date</dt>
           <dd>{fmtDate(job.scheduledDate, true)}</dd>
+          {job.scheduledDate && formatJobAppointmentTime(job) ? (
+            <>
+              <dt>Appointment</dt>
+              <dd>{formatJobAppointmentTime(job)}</dd>
+            </>
+          ) : null}
           <dt>Address</dt>
           <dd>
             {address ? (

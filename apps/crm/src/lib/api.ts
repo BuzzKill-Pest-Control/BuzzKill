@@ -302,7 +302,7 @@ export async function technicianJob(
  */
 export function updateOwnedWork(input: {
   workItemId: string;
-  action: "CLAIM" | "RESOLVE" | "RELEASE";
+  action: "CLAIM" | "RESOLVE" | "RELEASE" | "RETRY_OFFICE_JOB_LEAD";
   note?: string;
   resolutionActionId?: string;
   reasonCode?: string;
