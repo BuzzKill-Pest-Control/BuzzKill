@@ -18,8 +18,9 @@ const execFileAsync = promisify(execFile);
 let full: Assembly;
 let bootstrap: Assembly;
 let adminLogin: Assembly;
+let released: Assembly;
 
-async function synth(phase: "full" | "bootstrap", authTest = false): Promise<Assembly> {
+async function synth(phase: "full" | "bootstrap" | "release", authTest = false): Promise<Assembly> {
   const outdir = join(directory, phase + (authTest ? "-auth" : ""));
   const branch = !authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
     ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
@@ -121,7 +122,8 @@ beforeAll(async () => {
   full = await synth("full");
   bootstrap = await synth("bootstrap");
   adminLogin = await synth("full", true);
-}, 360_000);
+  released = await synth("release");
+}, 480_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 it("synthesizes the real full and bootstrap backends with closed references", () => {
@@ -216,4 +218,43 @@ it("grants only the expiring administrator test-mail capability while retaining 
   expect(JSON.stringify(enabled[0].Properties?.Environment)).toContain("BUZZKILL_PREVIEW_AUTH_CLIENT_ID");
   for (const resolver of resources.filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation")) expect(resolver.Properties?.RequestMappingTemplate).toBe(PREVIEW_MUTATION_REFUSAL);
   expect(resources.filter((r) => r.Type === "AWS::Events::Rule")).toHaveLength(0);
+});
+
+
+it("keeps destination stateful identities and properties when the retained backend becomes live", () => {
+  assertReferenceClosure(released);
+  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
+  let checked = 0;
+  for (const [name, template] of Object.entries(full.templates)) {
+    for (const [id, before] of Object.entries(template.Resources)) {
+      if (!stateful.has(before.Type)) continue;
+      const after = released.templates[name]?.Resources[id];
+      expect(after, `${name}:${id} must retain its logical identity`).toBeDefined();
+      const left = structuredClone(before), right = structuredClone(after!);
+      if (before.Type === "AWS::Cognito::UserPool") {
+        // Production intentionally removes only the preview's native-mail
+        // refusal trigger. Its identity and all other auth settings stay.
+        delete (left.Properties!.LambdaConfig as Record<string, unknown>).CustomMessage;
+        expect(right.Properties!.LambdaConfig).not.toHaveProperty("CustomMessage");
+      }
+      expect(right, `${name}:${id} must preserve stateful properties`).toEqual(left);
+      checked++;
+    }
+  }
+  expect(checked).toBe(62);
+});
+
+
+it("binds destination release provider secrets to every intended consumer while preview keeps them absent", () => {
+  const functions = (assembly: Assembly) => allResources(assembly).filter((r) => r.Type === "AWS::Lambda::Function");
+  for (const [key, expected] of [["GOOGLE_ROUTES_API_KEY", 7], ["ANTHROPIC_API_KEY", 2]] as const) {
+    const consumers = functions(released).filter((r) => (JSON.stringify(r.Properties?.Environment) ?? "").includes(`\"${key}\"`));
+    expect(consumers, key).toHaveLength(expected);
+    for (const fn of consumers) {
+      const variables = (fn.Properties?.Environment as { Variables: Record<string, string> }).Variables;
+      expect(variables[key]).toBe("<value will be resolved during runtime>");
+      expect(variables.AMPLIFY_SSM_ENV_CONFIG).toContain(key);
+    }
+    expect(functions(full).filter((r) => (JSON.stringify(r.Properties?.Environment) ?? "").includes(`\"${key}\"`))).toHaveLength(0);
+  }
 });
