@@ -75,6 +75,32 @@ describe("validateQuoteForm", () => {
     expect(validateQuoteForm(validFields)).toEqual({});
   });
 
+  it("accepts a description instead of a catalog service and structured size", () => {
+    expect(validateQuoteForm({
+      ...validFields,
+      service: DESCRIBE_SERVICE,
+      describe: "Mice in my 2,400 square foot house, one-time service please.",
+      sqft: "",
+    })).toEqual({});
+  });
+
+  it.each([undefined, "", "   "])("requires text for the describe option (%s)", (describe) => {
+    expect(validateQuoteForm({
+      ...validFields,
+      service: DESCRIBE_SERVICE,
+      describe,
+      sqft: "",
+    })).toEqual({ describe: "Tell us what you need and we'll price it." });
+  });
+
+  it("still rejects an unknown service even when a description is supplied", () => {
+    expect(validateQuoteForm({
+      ...validFields,
+      service: "UNKNOWN_SERVICE",
+      describe: "Mice in my house.",
+    })).toEqual({ service: "Choose a service" });
+  });
+
   it("requires name, email, service, and address parts with server-matching keys", () => {
     const errors = validateQuoteForm({
       ...validFields,

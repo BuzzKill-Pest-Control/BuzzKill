@@ -133,6 +133,56 @@ describe("office booking links", () => {
   });
 });
 
+it("submits the describe option after asking for missing description text", async () => {
+  await mount("/quote/instant");
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    for (const [id, value] of [
+      ["bq-name", prefill.name],
+      ["bq-email", prefill.email],
+      ["bq-street", prefill.address.street],
+      ["bq-city", prefill.address.city],
+      ["bq-state", prefill.address.state],
+      ["bq-zip", prefill.address.zip],
+    ]) {
+      const field = input(id);
+      setter.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const service = container.querySelector<HTMLSelectElement>("#bq-service")!;
+    service.value = "__DESCRIBE__";
+    service.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(container.querySelector("#bq-sqft")).toBeNull();
+
+  await act(async () => {
+    container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Tell us what you need and we'll price it.");
+
+  const description = "Mice in my 2,400 square foot house, one-time service please.";
+  await act(async () => {
+    const field = container.querySelector<HTMLTextAreaElement>("#bq-describe")!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, description);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  fetchMock.mockResolvedValueOnce(jsonResponse(pricedQuote));
+  await act(async () => {
+    container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+    "https://booking.test/quote",
+    expect.anything(),
+  );
+  const payload = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+  expect(payload).toMatchObject({ service: "__DESCRIBE__", describe: description, name: prefill.name });
+  expect(payload).not.toHaveProperty("sqft");
+  expect(container.textContent).not.toContain("Choose a service");
+  expect(loadFunnelState(window.sessionStorage)?.quote.bookingId).toBe("saved-booking");
+});
+
 describe("emailed quote resume links", () => {
   it.each(["/quote", "/quote/instant"])(
     "restores and polls the saved quote after removing the capability from %s",
