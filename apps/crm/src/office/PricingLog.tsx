@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, listAll, type LeadPricingRun } from "../lib/api";
+import { api, listAll, unwrap, type LeadPricingRun } from "../lib/api";
 import { useAction, useAsync } from "../lib/useAsync";
 import { fmtDate, money } from "../lib/format";
 import {
@@ -45,10 +45,10 @@ export default function PricingLog() {
   const [editing, setEditing] = useState<LeadPricingRun | null>(null);
 
   const saveOutcome = useAction(async (row: LeadPricingRun) => {
-    await api().models.LeadPricingRun.update({
+    unwrap(await api().models.LeadPricingRun.update({
       id: row.id,
       outcome: row.outcome ?? "PENDING",
-    });
+    }));
     setEditing(null);
     reload();
   }, "Save failed");
@@ -62,7 +62,7 @@ export default function PricingLog() {
 
   return (
     <Page title="Pricing log" back="/more">
-      <ErrorNote error={saveOutcome.error ?? loadError} />
+      <ErrorNote error={loadError} />
       {runs === null ? (
         <Spinner />
       ) : runs.length === 0 ? (
@@ -103,9 +103,11 @@ export default function PricingLog() {
         open={editing !== null}
         onClose={() => setEditing(null)}
         title="Pricing run"
+        locked={saveOutcome.busy}
       >
         {editing ? (
           <div className="form-grid">
+            <ErrorNote error={saveOutcome.error} />
             <dl className="kv">
               <dt>Service</dt>
               <dd>{editing.service ?? "—"}</dd>

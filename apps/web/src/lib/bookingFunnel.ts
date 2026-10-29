@@ -390,16 +390,18 @@ export function clearFunnelState(storage: StorageLike): void {
 
 /**
  * What the customer pays TODAY for a given selection — the same rule the
- * server applies in `/book`: recurring pays the plan's initial fee, one-time
- * pays the selected day's price.
+ * server applies in `/book`: recurring pays the selected day's first-visit
+ * fee (or the plan's fallback fee), one-time pays the selected day's price.
  */
 export function amountDueCents(
   quote: PricedQuote,
   selection: FunnelSelection
 ): number | null {
-  if (selection.recurring) {
-    return quote.recurringOffer?.initialFeeCents ?? null;
-  }
   const day = quote.days.find((d) => d.date === selection.date);
+  if (selection.recurring) {
+    return quote.recurringOffer
+      ? day?.planInitialFeeCents ?? quote.recurringOffer.initialFeeCents
+      : null;
+  }
   return day ? day.priceCents : null;
 }

@@ -31,11 +31,10 @@ import { leadSweep } from "../functions/lead-sweep/resource";
  *     function, which is what makes "a user in a group can view the other
  *     customers in the same group" work as row-level read access.
  *
- * Leads are Customers with status LEAD. There is exactly one conversion
- * path: the customer books themselves through the public funnel (/quote —
- * day picked, terms accepted, paid by card), and the Stripe webhook's
- * finalization converts the lead record. No office-side conversion exists —
- * no quotes, no e-sign, no hand-created plans.
+ * Leads are Customers with status LEAD. A finalized public booking or an
+ * office-created job/plan converts the lead to ACTIVE and ends sales follow-up.
+ * Office conversion does not imply payment or start billing; those remain
+ * separate, explicit operations.
  */
 // GL-13 field-level least-privilege. A field carrying this rule is readable by
 // the office (OWNER) and the portal customer (the accessGroups dynamic

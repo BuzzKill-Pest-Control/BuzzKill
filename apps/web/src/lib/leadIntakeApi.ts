@@ -94,11 +94,14 @@ export async function submitLead(input: LeadRequest): Promise<LeadResult> {
     };
   }
 
-  let body: { error?: string; leadId?: string } = {};
+  let body: { error?: string; leadId?: string };
   try {
     body = await resp.json();
   } catch {
-    // non-JSON body — fall through to the generic message below
+    return {
+      ok: false,
+      error: "We couldn't confirm your request. Please try again.",
+    };
   }
 
   if (resp.ok) return { ok: true, leadId: body.leadId };

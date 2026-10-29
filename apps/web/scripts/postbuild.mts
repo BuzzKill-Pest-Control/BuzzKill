@@ -6,8 +6,8 @@
  *
  * 2. Writes one static HTML file per route (dist/<path>.html) carrying that
  *    route's own head: title, description, robots, self-referential canonical,
- *    social tags, and page JSON-LD. The About artifact also includes its
- *    rendered page content, using the same component as the browser app.
+ *    social tags, and page JSON-LD. About and blog artifacts also include their
+ *    rendered page content, using the same components as the browser app.
  *    Amplify serves `<path>.html` for a clean
  *    `/<path>` request without a redirect. Also writes dist/404.html (noindex
  *    not-found page) and dist/track.html (noindex tracking shell for the
@@ -24,9 +24,14 @@ import { artifactHtml, routeArtifacts } from "../src/seo/artifacts";
 import { indexablePages } from "../src/seo/pages";
 import { renderSitemap } from "../src/seo/sitemap";
 import { renderRouteBody } from "../src/seo/prerender";
+import { ARTICLES } from "../src/lib/articles";
+import { validateArticleAssets, validateArticleLinks, validateArticleRelease } from "./validate-editorial-content.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
+validateArticleRelease(ARTICLES);
+await validateArticleAssets(join(here, "..", "public"), ARTICLES);
+validateArticleLinks(ARTICLES);
 
 if (!existsSync(join(dist, "index.html"))) {
   console.error("postbuild: dist/index.html not found; run vite build first");

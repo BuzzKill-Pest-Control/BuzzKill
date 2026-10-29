@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import SEO from "../../components/SEO";
 import { checkTrack, type TrackResponse } from "../../lib/bookingApi";
@@ -64,16 +64,13 @@ function StaticMap({ lat, lng }: { lat: number; lng: number }) {
  */
 export default function TrackPage() {
   const { token } = useParams<{ token: string }>();
-  const [phase, setPhase] = useState<Phase>({ kind: "loading" });
+  const [livePhase, setPhase] = useState<Phase>({ kind: "loading" });
   // Re-render the "updated N ago" line on a timer without a new network call.
   const [, setTick] = useState(0);
-  const firstName = useRef<string | null>(null);
+  const [firstName, setFirstName] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setPhase({ kind: "error", message: "This tracking link is incomplete." });
-      return;
-    }
+    if (!token) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -92,7 +89,7 @@ export default function TrackPage() {
       }
       const body = res.body;
       if (body.status === "EN_ROUTE") {
-        if (body.techFirstName) firstName.current = body.techFirstName;
+        if (body.techFirstName) setFirstName(body.techFirstName);
         setPhase({ kind: "en-route", data: body });
         timer = setTimeout(poll, POLL_MS);
       } else if (body.status === "ARRIVED") {
@@ -114,7 +111,10 @@ export default function TrackPage() {
     };
   }, [token]);
 
-  const who = firstName.current ?? "Your technician";
+  const phase: Phase = token
+    ? livePhase
+    : { kind: "error", message: "This tracking link is incomplete." };
+  const who = firstName ?? "Your technician";
 
   return (
     <>

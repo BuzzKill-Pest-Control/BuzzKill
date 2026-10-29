@@ -14,20 +14,10 @@ const candidates = import.meta.glob<Record<string, unknown>>(
   { import: "default" }
 );
 
-let outputs: Record<string, unknown> | null = null;
-
 export async function connectBackend(): Promise<boolean> {
   const loader = candidates["/amplify_outputs.json"];
   if (!loader) return false;
-  outputs = await loader();
+  const outputs = await loader();
   Amplify.configure(outputs as Parameters<typeof Amplify.configure>[0]);
   return true;
-}
-
-/** Custom backend outputs (Function URLs published by backend.ts). */
-export function getCustomOutput(key: string): string | null {
-  const custom = (outputs as { custom?: Record<string, unknown> } | null)
-    ?.custom;
-  const value = custom?.[key];
-  return typeof value === "string" ? value : null;
 }

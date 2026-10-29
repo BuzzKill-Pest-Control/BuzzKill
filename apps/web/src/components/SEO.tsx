@@ -31,7 +31,7 @@ import { computeHead, type HeadOverrides, type HeadState } from "../seo/head";
 import { resolvePage } from "../seo/pages";
 
 type HeadContextValue = {
-  overrides: HeadOverrides;
+  overrides: HeadOverrides | null;
   setOverrides: (next: HeadOverrides | null) => void;
 };
 
@@ -52,11 +52,11 @@ const BUILD_NOINDEX: boolean = (() => {
 })();
 
 export function HeadProvider({ children }: { children: ReactNode }) {
-  const [overrides, setState] = useState<HeadOverrides>({});
+  const [overrides, setState] = useState<HeadOverrides | null>(null);
   const value = useMemo<HeadContextValue>(
     () => ({
       overrides,
-      setOverrides: (next) => setState(next ?? {}),
+      setOverrides: setState,
     }),
     [overrides],
   );
@@ -110,6 +110,13 @@ function applyHead(head: HeadState): void {
   setMeta("property", "og:description", head.description);
   setMeta("property", "og:url", head.canonicalUrl);
   setMeta("property", "og:image", head.image);
+  if (head.imageAlt) {
+    setMeta("property", "og:image:alt", head.imageAlt);
+    setMeta("name", "twitter:image:alt", head.imageAlt);
+  } else {
+    document.head.querySelector('meta[property="og:image:alt"]')?.remove();
+    document.head.querySelector('meta[name="twitter:image:alt"]')?.remove();
+  }
   if (head.imageSize) {
     setMeta("property", "og:image:width", String(head.imageSize.width));
     setMeta("property", "og:image:height", String(head.imageSize.height));

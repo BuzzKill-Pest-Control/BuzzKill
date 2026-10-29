@@ -20,6 +20,30 @@ npm run dev        # local dev server
 npx ampx sandbox   # personal cloud sandbox for the Amplify backend
 ```
 
+## Public articles
+
+The marketing site's `/blog` index and `/blog/:slug` pages share the existing header, footer, typography, and black/lime design. The collection starts empty; no demonstration articles are published. Published entries live in `apps/web/src/content/articles/articles.json` and are validated by `src/lib/articles.ts`. Every record needs:
+
+- A unique lowercase hyphenated `slug`, `title` (at most 90 characters), `description` (at most 200), `topic`, and the company editorial `author` byline, `BuzzKill Pest Control`.
+- A released ISO `publishedAt` timestamp with timezone and, when corrected, a truthful `updatedAt` that does not precede publication. The build rejects future timestamps using its own clock. The shipped article collection never gates on a visitor's clock; a future timestamp is not a publishing scheduler.
+- An `image` with a local `src` under `/images/blog/<slug>/`, useful `alt`, pixel `width`/`height`, visible `credit`, and a `sourceUrl` documenting provenance. Supported extensions: webp, jpg, jpeg, png, avif. Images must exist inside this site's public directory and be at most 10 MiB and 25 megapixels. Build-only Sharp decoding rejects corrupt pixels, incorrect extensions, mismatched display dimensions (including EXIF orientation), and multiple frames.
+- A `body` containing 1,000–2,000 words in typed blocks: `{type: "heading", id, text}`, `{type: "paragraph", content: [{text, href?}]}`, or `{type: "list", items: [[{text, href?}]], ordered?}`. Heading IDs must be unique. Prose is rendered as escaped text, never raw HTML or executable content.
+- A nonempty `sources` array of `{title, url}` references. Sources use credential-free HTTPS; prose links may also use local site paths. Source quality, factual accuracy, permission to use images, internal-link validity, and any required professional review still need editorial verification before release.
+
+Run from `apps/web`:
+
+```bash
+npx tsx scripts/validate-editorial-content.mts
+npx vitest run src/lib/articles.test.ts src/seo
+npm run build
+```
+
+The build validates articles, release timestamps, local prose-link destinations, and actual image pixels, then writes the listing and each complete article body into clean-URL HTML artifacts, together with page metadata, article/breadcrumb structured data, and sitemap entries. Each published article has byte-identical `blog/<slug>.html` and `blog/<slug>/index.html` files so both URL forms serve complete HTML. Links and canonical metadata remain slashless; a universal trailing-slash HTTP redirect is not required. The pinned `sharp` development dependency is used only by validation scripts/tests and is not imported by browser code. This uses the existing postbuild pipeline and preserves deployment noindex rules. Test fixtures stay in tests. Keep unreleased work outside the public collection.
+
+Use the established reviewed website release workflow. The web app still owns the shared backend; adding an article does not establish a separate content-only deployment procedure or authorize an autonomous release. Before production source release, check staging's raw `/blog.html` HTML and rendered desktop/mobile `/blog` page. The client router does not recognize `.html` URLs. Canonical initial-HTML delivery remains a separate check after the hosting-rule switch.
+
+Blog clean URLs also require the separately applied app-wide hosting rules. Follow [the Blog routing release guide](docs/blog-initial-html-2026-10-18.md); builds and article updates do not change live hosting configuration.
+
 The Amplify Hosting app has `AMPLIFY_MONOREPO_APP_ROOT=apps/web` set in the console so builds resolve the correct app root.
 
 ---

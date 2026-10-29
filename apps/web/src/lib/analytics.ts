@@ -49,12 +49,16 @@ function clarity(...args: unknown[]) {
  * effectively published. The funnel already strips these from the address bar
  * (QuotePage), but that happens in a lazily-loaded page's effect, which is not
  * guaranteed to win the race against the first page_view.
+ * Checkout also carries its status capability as `t` and Stripe's redirect
+ * credential as `payment_intent_client_secret`.
  *
  * `bk_lid` is not secret, just noise: it identifies the lead for `lead_id`,
  * which is its own dimension now, so leaving it in `page_path` would fragment
  * the Pages report into one row per lead.
  */
-const REDACTED_QUERY_PARAMS = ["lead", "token", "request", "bk_lid"];
+const REDACTED_QUERY_PARAMS = [
+  "lead", "token", "request", "bk_lid", "t", "payment_intent_client_secret",
+];
 
 /** `/track/<token>` is a private "on my way" link — the secret IS the path. */
 function maskSecretPathSegments(pathname: string): string {

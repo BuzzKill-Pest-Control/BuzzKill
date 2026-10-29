@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PageResult } from "../shared/pagination";
 
 /**
  * GL-22 — mailbox delivery events are never lost quietly:
@@ -10,7 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
-let updateThrows = false;
+const logPages: PageResult<LogRow>[] = [];
+let updateFailure: "THROW" | "GRAPHQL" | null = null;
 const customers = new Map<string, Record<string, unknown>>();
 let customerGets = 0;
 const suppressions: Record<string, unknown>[] = [];
@@ -18,11 +20,12 @@ vi.mock("../shared/dataClient", () => ({
   dataClient: async () => ({
     models: {
       EmailLog: {
-        listEmailLogByMessageId: async ({ messageId }: { messageId: string }) => ({
+        listEmailLogByMessageId: async ({ messageId }: { messageId: string }) => logPages.shift() ?? ({
           data: logs.filter((l) => l.messageId === messageId),
         }),
         update: async (patch: LogRow) => {
-          if (updateThrows) throw new Error("dynamo down");
+          if (updateFailure === "THROW") throw new Error("dynamo down");
+          if (updateFailure === "GRAPHQL") return { data: null, errors: [{ message: "log update unavailable" }] };
           const row = logs.find((l) => l.id === patch.id);
           if (row) Object.assign(row, patch);
           return { data: row ?? null };
@@ -68,7 +71,8 @@ const snsEvent = (message: unknown, raw?: string) =>
 
 beforeEach(() => {
   logs.length = 0;
-  updateThrows = false;
+  logPages.length = 0;
+  updateFailure = null;
   workOpened.length = 0;
   customers.clear();
   customerGets = 0;
@@ -76,16 +80,30 @@ beforeEach(() => {
 });
 
 describe("ses-events durability (GL-22)", () => {
-  it("a failed write THROWS so the event redelivers — never acknowledged unrecorded", async () => {
+  it.each([false, true])("retries an errored log lookup before updating any logs (later page: %s)", async (laterPage) => {
     logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
-    updateThrows = true;
+    if (laterPage) logPages.push({ data: [...logs], nextToken: "page-2" });
+    logPages.push({ data: null, errors: [{ message: "log lookup unavailable" }] });
+    const event = snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } });
 
-    await expect(
-      handler(
-        snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } })
-      )
-    ).rejects.toThrow(/notification\(s\) failed/);
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
+    expect(logs[0].deliveryStatus).toBe("SENT");
+
+    await handler(event);
+    expect(logs[0].deliveryStatus).toBe("DELIVERED");
+  });
+
+  it.each(["THROW", "GRAPHQL"] as const)("retries a failed log write (%s) instead of acknowledging it unrecorded", async (failure) => {
+    logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
+    updateFailure = failure;
+    const event = snsEvent({ notificationType: "delivery", mail: { messageId: "m1" } });
+
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
     expect(logs[0].deliveryStatus).toBe("SENT"); // unchanged, will retry
+
+    updateFailure = null;
+    await handler(event);
+    expect(logs[0].deliveryStatus).toBe("DELIVERED");
   });
 
   it("a malformed message becomes owned work instead of an infinite retry or a silent drop", async () => {

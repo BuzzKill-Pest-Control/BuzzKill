@@ -421,6 +421,142 @@ beforeEach(() => {
 });
 
 describe("zone UNKNOWN never prices (R59)", () => {
+  it("promises the same closure-aware deadline that the follow-up queue records", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-17T19:30:00Z")); // Friday 3:30pm ET.
+    capacityFixture.maps.closures.set("2026-07-20", { id: "2026-07-20" });
+    nearestBaseMinutes = null;
+    const createWork = vi.spyOn(fakeDataClient.models.WorkItem, "create");
+    const updateBooking = vi.spyOn(fakeDataClient.models.BookingRequest, "update");
+    try {
+      const res = await postQuote(rodentInput);
+
+      expect(res.status).toBe(200);
+      expect(res.body.decision).toBe("CONTACT");
+      expect(createWork).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "CALLBACK_PROMISE",
+        dueAt: "2026-07-21T19:30:00.000Z",
+      }));
+      expect(res.body.message).toContain("by Tuesday");
+      expect(leadEmails[0].bodyHtml).toContain("by Tuesday");
+      expect(JSON.parse(String(bookings[0].quoteJson)).contactMessage).toBe(
+        res.body.message
+      );
+      expect(updateBooking.mock.invocationCallOrder[0]).toBeLessThan(
+        createWork.mock.invocationCallOrder[0]
+      );
+    } finally {
+      createWork.mockRestore();
+      updateBooking.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["new", "resumed"] as const)(
+    "keeps a %s CONTACT request recoverable when the closure calendar is unavailable",
+    async (requestKind) => {
+      const rate = marketRateResult;
+      let pending: Awaited<ReturnType<typeof postQuote>> | undefined;
+      if (requestKind === "resumed") {
+        marketRateResult = null;
+        pending = await postQuote({
+          ...rodentInput,
+          phone: "(413) 555-0123",
+          callConsent: true,
+          callConsentTextVersion: "2026-07-01.1",
+        });
+        expect(pending.body.decision).toBe("PENDING");
+        marketRateResult = rate;
+        // No capacity remains when the pending quote is resumed.
+        for (let i = 0; i <= 41; i++) {
+          const date = new Date(Date.now() + i * 86_400_000)
+            .toISOString()
+            .slice(0, 10);
+          capacityFixture.maps.capacityDays.set(`${date}#t1`, {
+            id: `${date}#t1`,
+            date,
+            technicianId: "t1",
+            committedMinutes: 540,
+          });
+        }
+      } else {
+        nearestBaseMinutes = null;
+      }
+      leadEmails.length = 0;
+      const statusesAtCalendarRead: unknown[] = [];
+      const calendar = vi.spyOn(capacityFixture.models.CompanyClosure, "get")
+        .mockImplementation(async () => {
+          statusesAtCalendarRead.push(bookings[0]?.status);
+          return { data: null, errors: [{ message: "Calendar unavailable" }] };
+        });
+      const createWork = vi.spyOn(fakeDataClient.models.WorkItem, "create");
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const res = pending
+          ? await postQuoteStatus({
+              bookingId: pending.body.bookingId,
+              statusToken: pending.body.statusToken,
+            })
+          : await postQuote(rodentInput);
+
+        expect(res.status).toBe(503);
+        expect(res.body.error).toContain("We saved your request");
+        expect(calendar).toHaveBeenCalled();
+        if (requestKind === "new") {
+          expect(
+            statusesAtCalendarRead.every((status) => status === "CONTACT")
+          ).toBe(true);
+        }
+        expect(bookings).toHaveLength(1);
+        expect(bookings[0]).toMatchObject({
+          status: "CONTACT",
+          email: rodentInput.email,
+          leadCustomerId: "web-lead-1",
+        });
+        if (pending) {
+          expect(bookings[0]).toMatchObject({
+            id: pending.body.bookingId,
+            callConsent: true,
+            callConsentTextVersion: "2026-07-01.1",
+          });
+          const polled = await postQuoteStatus({
+            bookingId: pending.body.bookingId,
+            statusToken: pending.body.statusToken,
+          });
+          expect(polled.body.message).toContain("couldn't confirm");
+        }
+        expect(createWork).not.toHaveBeenCalled();
+        expect(leadEmails).toHaveLength(0);
+      } finally {
+        calendar.mockRestore();
+        createWork.mockRestore();
+        errors.mockRestore();
+      }
+    }
+  );
+
+  it("keeps CONTACT without opening or notifying a promise when its message cannot be saved", async () => {
+    nearestBaseMinutes = null;
+    const updateBooking = vi.spyOn(fakeDataClient.models.BookingRequest, "update")
+      .mockResolvedValue({ data: null });
+    const createWork = vi.spyOn(fakeDataClient.models.WorkItem, "create");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await postQuote(rodentInput);
+
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain("We saved your request");
+      expect(bookings).toHaveLength(1);
+      expect(bookings[0].status).toBe("CONTACT");
+      expect(createWork).not.toHaveBeenCalled();
+      expect(leadEmails).toHaveLength(0);
+    } finally {
+      updateBooking.mockRestore();
+      createWork.mockRestore();
+      errors.mockRestore();
+    }
+  });
+
   it("falls to the callback path instead of silently pricing as Zone B", async () => {
     nearestBaseMinutes = null; // Routes outage / dead key
 

@@ -6,11 +6,7 @@ import {
   ensureStripeCustomer,
   getDefaultPaymentMethod,
 } from "./subscription";
-import {
-  agingBucketForDays,
-  utcDayNumber,
-  type AgingBucket,
-} from "./agingMath";
+import { utcDayNumber } from "./agingMath";
 
 /**
  * The money-out recovery lifecycle's shared spine: aging maths, payment terms,
@@ -48,14 +44,6 @@ export function daysPastDue(opts: {
   if (!ref) return 0;
   const today = Math.floor((opts.now ?? new Date()).getTime() / 86_400_000);
   return today - utcDayNumber(ref);
-}
-
-/** Convenience: bucket an invoice straight from its dates. */
-export function invoiceAgingBucket(
-  invoice: { dueDate?: string | null; issuedAt?: string | null },
-  now?: Date
-): AgingBucket {
-  return agingBucketForDays(daysPastDue({ ...invoice, now }));
 }
 
 // ── Dunning retry cadence ─────────────────────────────────────────────────

@@ -95,6 +95,15 @@ export default function CancelPlanSheet({
         </div>
       ) : !preview ? (
         <Spinner label="Loading your plan…" />
+      ) : preview.cancellationPending ? (
+        <div className="form-grid">
+          <div className="warn-note" role="status">
+            <p>{preview.pendingMessage}</p>
+          </div>
+          <Button block variant="subtle" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       ) : preview.alreadyResolved ? (
         <div className="form-grid">
           <p>This plan is already canceled — there's nothing more to do.</p>

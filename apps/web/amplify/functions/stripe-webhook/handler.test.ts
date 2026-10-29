@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "../shared/atomicLock";
 
 /**
@@ -232,6 +232,9 @@ const invoiceLockTable = {
 } as unknown as Map<string, Record<string, unknown>>;
 
 beforeEach(() => {
+  // Keep the fixed October visit outside the 72-hour refund window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-07-16T12:00:00Z"));
   _setLockStoreForTests(
     memoryLockStore({
       Job: jobs,
@@ -251,6 +254,8 @@ beforeEach(() => {
   notifyOffice.mockClear();
   startPlanBilling.mockClear();
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("setup_intent.succeeded starts ACTIVE-not-billing plans", () => {
   const setupIntent = {
@@ -563,6 +568,32 @@ describe("invoice.paid mirrors the monthly settlement and sends the receipt", ()
 
     expect(invoicesCreated).toHaveLength(1);
     expect(sendEmail).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["2026-08-01T00:30:00.000Z", "July 2026"],
+    ["2026-08-01T04:00:00.000Z", "August 2026"],
+    ["2027-01-01T00:30:00.000Z", "December 2026"],
+    ["2027-01-01T05:00:00.000Z", "January 2027"],
+  ])("labels the invoice and receipt with the Eastern month at %s", async (createdAt, month) => {
+    seedPlan();
+    const created = Date.parse(createdAt) / 1000;
+
+    const res = await invoke("invoice.paid", {
+      ...stripeInvoice,
+      created,
+      status_transitions: { paid_at: created },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(invoicesCreated).toHaveLength(1);
+    expect(invoicesCreated[0]).toMatchObject({
+      description: `Residential quarterly — ${month}`,
+      issuedAt: createdAt,
+    });
+    expect(sendEmail).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      html: expect.stringContaining(`Residential quarterly — ${month}`),
+    }));
   });
 
   it("routes to the office when the customer has no email on file", async () => {

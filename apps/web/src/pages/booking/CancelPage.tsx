@@ -74,7 +74,7 @@ export default function CancelPage() {
       trackFormSubmit("cancel", "success", { refunded: result.body.refunded });
       return;
     }
-    if (result.status === 503) {
+    if (result.status === 503 && result.body.reassurance) {
       setPhase({ kind: "recorded-failure", body: result.body });
       trackFormSubmit("cancel", "error", { status: 503 });
       return;

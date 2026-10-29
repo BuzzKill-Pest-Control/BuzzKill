@@ -10,7 +10,7 @@ import {
   type VisitChangePreview,
 } from "../lib/api";
 import { money } from "../lib/format";
-import { useAction } from "../lib/useAsync";
+import { useAction, useAsync } from "../lib/useAsync";
 import { Button, ErrorNote, Field, Sheet, Spinner } from "../ui/kit";
 
 /** CUSTOMER_REQUEST → "Customer request". */
@@ -44,12 +44,16 @@ export default function VisitCancelSheet({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [preview, setPreview] = useState<VisitChangePreview | null>(null);
+  const { data: preview, error } = useAsync(async () => {
+    if (!open || !jobId) return null;
+    const data = opResult<VisitChangePreview>(await previewVisitChange({ jobId }));
+    if (!data) throw new Error("Could not load this visit");
+    return data;
+  }, [open, jobId], "Could not load this visit");
   const [decision, setDecision] = useState<CancelDecision>("CANCEL_REFUND");
   const [reasonCode, setReasonCode] = useState<string>(VISIT_CANCEL_REASONS[0]);
   const [note, setNote] = useState("");
   const [outcome, setOutcome] = useState<VisitCancelOutcome | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   // The confirmed cancel carries the policy refund with it; a double-click must
   // not send a second cancel-and-refund for the same visit.
@@ -76,22 +80,11 @@ export default function VisitCancelSheet({
   const { clearError } = cancel;
   useEffect(() => {
     if (!open || !jobId) return;
-    setPreview(null);
     setDecision("CANCEL_REFUND");
     setReasonCode(VISIT_CANCEL_REASONS[0]);
     setNote("");
     setOutcome(null);
-    setError(null);
     clearError();
-    previewVisitChange({ jobId })
-      .then((res) => {
-        const data = opResult<VisitChangePreview>(res);
-        if (!data) throw new Error("Could not load this visit");
-        setPreview(data);
-      })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Could not load this visit")
-      );
   }, [open, jobId, clearError]);
 
   return (

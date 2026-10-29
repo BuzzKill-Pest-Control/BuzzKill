@@ -43,6 +43,16 @@ describe("shared America/New_York one-business-day deadline", () => {
       .resolves.toEqual(new Date("2026-07-21T12:00:00Z"));
   });
 
+  it.each(["2026-07-18T14:00:00Z", "2026-07-20T19:30:00Z"])(
+    "starts a request from %s at the next opening after a company closure",
+    async (from) => {
+      closures.add("2026-07-20");
+      // Monday is closed: the clock starts Tuesday at 8am, due Wednesday at 8am.
+      await expect(oneBusinessDayDeadline(new Date(from)))
+        .resolves.toEqual(new Date("2026-07-22T12:00:00Z"));
+    }
+  );
+
   it("uses one shared deadline contract for GL-02 and GL-03", async () => {
     const from = new Date("2026-07-17T19:00:00Z");
     await expect(oneBusinessDayDueAt(from)).resolves.toEqual(

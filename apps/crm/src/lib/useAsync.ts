@@ -57,7 +57,8 @@ export function useAsync<T>(
 
   const guardRef = useRef(createRequestGuard());
   useEffect(() => {
-    const guard = guardRef.current;
+    const guard = createRequestGuard();
+    guardRef.current = guard;
     return () => guard.dispose();
   }, []);
 

@@ -106,6 +106,7 @@ import { licenseFactsFor, licenseRecordsFor, licenseValidOnDate } from "../share
 import { isServiceMonth } from "../shared/season";
 import {
   assertDispatchFacts,
+  dispatchFactsRefusal,
   normalizePropertyClass,
   onsiteMinutesFor,
   proveRoutable,
@@ -144,6 +145,7 @@ import {
   assertLeadOutreachAllowed,
   logLeadTouch,
 } from "../shared/leadLifecycle";
+import { settleLeadForOfficeJob } from "../shared/officeJobLead";
 import { assertScheduleReason } from "../shared/visitChangeReasons";
 import { formatMoney, formatMonthly } from "../shared/money";
 
@@ -574,7 +576,7 @@ export const handler = async (event: AppSyncResolverEvent<Args>) => {
     }
     case "createOfficeJob": {
       assertOffice(event.identity);
-      return createOfficeJob(event.arguments);
+      return createOfficeJob(event.identity, event.arguments);
     }
     case "updateJobSchedule": {
       // GL-13: the actor and controlled reason travel with the change into the
@@ -1492,6 +1494,43 @@ export async function updateOwnedWork(args: {
   const actorEmail = args.actorEmail ?? args.actorSub ?? "unknown staff";
   const now = new Date().toISOString();
 
+  if (args.action === "RETRY_OFFICE_JOB_LEAD") {
+    if (!args.actorSub) throw new Error("A staffed Office actor is required.");
+    const jobId = typeof item.relatedId === "string" && item.relatedId.startsWith("office-job:")
+      ? item.relatedId.slice("office-job:".length)
+      : "";
+    if (
+      item.kind !== "LEAD_LIFECYCLE_RECOVERY" || !item.customerId || !jobId ||
+      item.id !== workItemId("LEAD_LIFECYCLE_RECOVERY", item.relatedId)
+    ) return refusal("This work item is not a saved-job lead recovery.");
+    if (item.status === "RESOLVED") {
+      return { workItemId: item.id, status: "RESOLVED", alreadyResolved: true };
+    }
+    const saved = await client.models.Job.get({ id: jobId });
+    if (saved.errors?.length || !saved.data || saved.data.customerId !== item.customerId) {
+      return refusal("The saved job could not be verified for this customer. No lead was changed.");
+    }
+    if (saved.data.status === "CANCELED") {
+      return refusal("This job was canceled. Review the lead's next action instead of converting it from canceled work.");
+    }
+    const settlement = await settleLeadForOfficeJob({
+      customerId: item.customerId,
+      jobId: saved.data.id,
+      actor: { sub: args.actorSub, email: args.actorEmail },
+    });
+    if (settlement.warning) return { workItemId: item.id, status: "OPEN", ...settlement };
+    return closeResolvedWorkItem({
+      item,
+      actorSub: args.actorSub,
+      actorEmail,
+      now,
+      note: `Lead follow-up verified closed for saved office job ${saved.data.id}. Payment and billing unchanged.`,
+      eventType: "RESOLVED",
+      kind: item.kind,
+      relatedId: item.relatedId,
+    });
+  }
+
   if (args.action === "CLAIM") {
     // The queue is a snapshot; somebody closed this case while it was on
     // screen. Every refusal in this action is that same stale list.
@@ -2201,7 +2240,7 @@ function packetFields(args: Args) {
 }
 
 /** Jobs created by the office always start unassigned. */
-async function createOfficeJob(args: Args) {
+async function createOfficeJob(identity: AppSyncIdentity | undefined | null, args: Args) {
   const customerId = args.customerId?.trim() ?? "";
   let serviceType = args.serviceType?.trim() ?? "";
   if (!customerId) throw new Error("Customer is required");
@@ -2293,6 +2332,11 @@ async function createOfficeJob(args: Args) {
       `"${serviceType}" doesn't match a catalog service. Pick one from the list, or use "Something else…" to request a catalog decision — jobs are never created outside the catalog.`
     );
   }
+  // A one-time lead commitment needs an agreed amount, including an explicit
+  // zero. Recurring visits retain their verified service plan's billing.
+  if (customer.status === "LEAD" && !args.servicePlanId && args.priceCents == null) {
+    throw new Error("Enter the agreed job amount before adding a one-time job to a lead.");
+  }
   // The stored label is the catalog's canonical root unless a more specific
   // catalog-derived label was passed (funnel labels carry size/nest facts).
   if (requestedCode) serviceType = catalogService.label;
@@ -2303,10 +2347,11 @@ async function createOfficeJob(args: Args) {
   // first place. A date-less job (scheduled later) is allowed through;
   // updateJobSchedule enforces the full gate before it can reach a technician.
   if (scheduledDate) {
-    assertDispatchFacts(customer, {
+    const notReady = dispatchFactsRefusal(customer, {
       propertyClass: (args as { propertyClass?: string | null }).propertyClass,
       serviceType,
-    });
+    }, { creatingJob: true });
+    if (notReady) return notReady;
   }
   let seasonalClaim: {
     servicePlanId: string;
@@ -2319,6 +2364,9 @@ async function createOfficeJob(args: Args) {
     });
     if (!plan || plan.customerId !== customerId) {
       throw new Error("That service plan does not belong to this customer");
+    }
+    if (plan.status !== "ACTIVE") {
+      throw new Error("Choose an active service plan before adding a recurring job.");
     }
     // GL-17: a seasonal plan's visit may only land in an in-season month, and
     // never a second visit in a month whose treatment already happened — there
@@ -2415,7 +2463,14 @@ async function createOfficeJob(args: Args) {
       )
     ).catch(() => undefined);
   }
-  return { jobId: created.id };
+  const settlement = customer.status === "LEAD"
+    ? await settleLeadForOfficeJob({
+        customerId,
+        jobId: created.id,
+        actor: { sub: callerSub(identity), email: callerEmail(identity) },
+      })
+    : {};
+  return { jobId: created.id, ...settlement };
 }
 
 /**
@@ -2651,10 +2706,11 @@ async function updateJobSchedule(
     // before the technician's own credential so the office sees every blocker,
     // and never bypassable — there is no override branch.
     if (!customer) throw new Error(`Customer ${job.customerId} no longer exists`);
-    assertDispatchFacts(customer, {
+    const notReady = dispatchFactsRefusal(customer, {
       propertyClass: job.propertyClass,
       serviceType: job.serviceType,
     });
+    if (notReady) return notReady;
     if (!technician) throw new Error(`Technician ${args.technicianId} not found`);
     if (!technician.active) {
       // A roster the board rendered before someone was deactivated. The office

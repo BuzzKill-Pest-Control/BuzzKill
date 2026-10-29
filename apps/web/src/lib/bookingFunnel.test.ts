@@ -462,7 +462,22 @@ describe("amountDueCents", () => {
       amountDueCents(pricedQuote, { date: "2026-07-22", recurring: false })
     ).toBe(22900);
   });
-  it("recurring pays the plan's initial fee", () => {
+  it.each([7900, 10900])("recurring pays the selected day's %i first-visit fee", (fee) => {
+    const quote: PricedQuote = {
+      ...pricedQuote,
+      days: [
+        { date: "2026-07-21", priceCents: 24900, planInitialFeeCents: 9900 },
+        { date: "2026-07-22", priceCents: 22900, planInitialFeeCents: fee },
+      ],
+    };
+    expect(
+      amountDueCents(quote, { date: "2026-07-22", recurring: true })
+    ).toBe(fee);
+    expect(
+      amountDueCents(quote, { date: "2026-07-22", recurring: false })
+    ).toBe(22900);
+  });
+  it("recurring falls back to the plan's initial fee for older quotes", () => {
     expect(
       amountDueCents(pricedQuote, { date: "2026-07-21", recurring: true })
     ).toBe(9900);

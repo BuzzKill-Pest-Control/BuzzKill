@@ -95,7 +95,7 @@ export default function PortalGroup() {
 }
 
 function MemberDetail({ customer }: { customer: Customer }) {
-  const { data, error } = useAsync<Job[]>(
+  const { data: jobs, error } = useAsync<Job[]>(
     () =>
       listAll((t) =>
         api().models.Job.list({
@@ -107,10 +107,6 @@ function MemberDetail({ customer }: { customer: Customer }) {
     [customer.id],
     "Could not load visits"
   );
-  // This panel has never shown a load failure — a failed load falls through to
-  // the "Nothing scheduled" / "None yet" copy rather than spinning forever.
-  const jobs = data ?? (error ? [] : null);
-
   const today = todayEastern();
   const upcoming = (jobs ?? []).filter(
     (j) => j.status === "SCHEDULED" && (j.scheduledDate ?? "") >= today
@@ -132,7 +128,9 @@ function MemberDetail({ customer }: { customer: Customer }) {
             .join(", ") || "—"}
         </dd>
       </dl>
-      {jobs === null ? (
+      {error ? (
+        <ErrorNote error={error} />
+      ) : jobs === null ? (
         <Spinner />
       ) : (
         <>

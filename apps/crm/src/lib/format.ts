@@ -1,3 +1,8 @@
+import { addDays } from "../../../web/amplify/functions/shared/cancellationPolicy";
+
+// Calendar arithmetic must not shift with the browser's timezone.
+export { addDays };
+
 /** The CRM's `money` was the most correct of the nine formatters — locale-aware
  *  and null-safe — so it became the shared one. Re-exported here so the ~89
  *  call sites keep their existing import. */
@@ -34,12 +39,6 @@ export const todayEastern = () =>
  *  filenames, and for comparing against fields the backend itself writes in
  *  UTC (`processingExpectedBy`) — never for a business rule. */
 export const todayUtc = () => new Date().toISOString().slice(0, 10);
-
-export const addDays = (isoDate: string, days: number) => {
-  const d = new Date(`${isoDate}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-};
 
 /** Monday of the week containing `isoDate` (the shop's weeks start Monday). */
 export const startOfWeek = (isoDate: string) => {

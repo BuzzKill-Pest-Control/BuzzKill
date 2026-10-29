@@ -1101,7 +1101,7 @@ function NoAccessCard({
       if (res?.refused) throw new Error(res.refused);
       // The visit is over and no report will be filed for it — a lingering
       // draft would only restore stale words into a future rebooked visit.
-      clearDraft(job.id, localStorage, ownerSub);
+      clearDraft(job.id, undefined, ownerSub);
       await onDone();
     } catch (err) {
       throw asOfflineError(
@@ -1234,11 +1234,11 @@ function ReportForm({
   const ownerSub = technician?.userSub ?? null;
   const [restoreState] = useState(() => {
     const none = { draft: null as ReportDraft<DraftFields> | null, stale: false };
-    const d = loadDraft<DraftFields>(job.id, localStorage, ownerSub);
+    const d = loadDraft<DraftFields>(job.id, undefined, ownerSub);
     if (!d) return none;
     // Identical to the office copy → nothing to restore.
     if (JSON.stringify(d.fields) === JSON.stringify(serverCopyFields())) {
-      clearDraft(job.id, localStorage, ownerSub);
+      clearDraft(job.id, undefined, ownerSub);
       return none;
     }
     // The office copy was updated AFTER this phone last saved its draft (a
@@ -1247,7 +1247,7 @@ function ReportForm({
     // record, so set the stale draft aside and keep the office copy. (No office
     // copy yet → nothing newer to lose, so a local-only draft still restores.)
     if (isDraftStale(d, existing?.updatedAt)) {
-      clearDraft(job.id, localStorage, ownerSub);
+      clearDraft(job.id, undefined, ownerSub);
       return { draft: null as ReportDraft<DraftFields> | null, stale: true };
     }
     return { draft: d, stale: false };
@@ -1345,7 +1345,7 @@ function ReportForm({
     lastMirrored.current = snapshot;
     editGen.current += 1;
     setDirty(true);
-    setPersisted(saveDraft(job.id, fields, localStorage, ownerSub));
+    setPersisted(saveDraft(job.id, fields, undefined, ownerSub));
   }, [
     job.id,
     ownerSub,
@@ -1487,7 +1487,7 @@ function ReportForm({
     setRestoredNote(null);
     setStaleNote(false);
     if (editGen.current === gen) {
-      clearDraft(job.id, localStorage, ownerSub);
+      clearDraft(job.id, undefined, ownerSub);
       setDirty(false);
     }
   };
