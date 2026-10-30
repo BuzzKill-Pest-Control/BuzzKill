@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 
 const [outdir, phase, branch, authTest] = process.argv.slice(2);
 if (authTest && authTest !== "admin-login") throw new Error("Unknown offline test mode.");
-if (!outdir || !["full", "bootstrap", "release", "paused-release"].includes(phase) || ![
+if (!outdir || !["full", "bootstrap", "release", "paused-release", "primed-release"].includes(phase) || ![
   "codex-buzzkill-account-migration", "codex-buzzkill-staging-migration",
 ].includes(branch)) throw new Error("Expected output directory, full/bootstrap/release, and a migration branch.");
 
@@ -37,15 +37,16 @@ Object.assign(process.env, {
   CDK_DEFAULT_ACCOUNT: "743917687359",
   AWS_APP_ID: "d3owdoeg1om341",
   AWS_BRANCH: branch,
-  BUZZKILL_MIGRATION_PREVIEW: String(!["release", "paused-release"].includes(phase)),
+  BUZZKILL_MIGRATION_PREVIEW: String(!["release", "paused-release", "primed-release"].includes(phase)),
   BUZZKILL_CUTOVER_PAUSED: String(phase === "paused-release"),
+  BUZZKILL_WORKERS_PAUSED: String(phase === "primed-release"),
   BUZZKILL_SOURCE_ENVIRONMENT: branch === "codex-buzzkill-account-migration" ? "main" : "staging",
   BUZZKILL_MIGRATION_BOOTSTRAP: String(phase === "bootstrap"),
   BUZZKILL_DESTINATION_ACCOUNT_ID: "743917687359",
   BUZZKILL_DEPLOY_ACCOUNT_ID: "743917687359",
   BUZZKILL_BOOTSTRAP_EMPTY_DESTINATION_CONFIRMED: "true",
-  MARKETING_URL: ["release", "paused-release"].includes(phase) && prefix === "migration" ? "https://www.pestbuzzkill.com" : `https://${prefix}.d3owdoeg1om341.amplifyapp.com`,
-  CRM_APP_URL: ["release", "paused-release"].includes(phase) && prefix === "migration" ? "https://app.pestbuzzkill.com" : `https://${prefix}.d2y2zigtl5rx3.amplifyapp.com`,
+  MARKETING_URL: ["release", "paused-release", "primed-release"].includes(phase) && prefix === "migration" ? "https://www.pestbuzzkill.com" : `https://${prefix}.d3owdoeg1om341.amplifyapp.com`,
+  CRM_APP_URL: ["release", "paused-release", "primed-release"].includes(phase) && prefix === "migration" ? "https://app.pestbuzzkill.com" : `https://${prefix}.d2y2zigtl5rx3.amplifyapp.com`,
   CDK_OUTDIR: resolve(outdir),
   CDK_CONTEXT_JSON: JSON.stringify({
     "amplify-backend-namespace": "d3owdoeg1om341",

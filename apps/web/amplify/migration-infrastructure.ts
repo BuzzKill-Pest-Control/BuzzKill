@@ -1,4 +1,4 @@
-import { isCutoverPaused } from "./cutover-pause";
+import { areWorkersPaused } from "./cutover-pause";
 import { FunctionUrlAuthType } from "aws-cdk-lib/aws-lambda";
 import type { Alarm } from "aws-cdk-lib/aws-cloudwatch";
 import type { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
@@ -10,11 +10,11 @@ export function publicFunctionUrlAuthType() {
 }
 
 export function subscribeBusinessEvents(topic: ITopic, subscription: ITopicSubscription): void {
-  if (!isMigrationPreview() && !isCutoverPaused()) topic.addSubscription(subscription);
+  if (!isMigrationPreview() && !areWorkersPaused()) topic.addSubscription(subscription);
 }
 
 export function wireBusinessAlarm(alarm: Alarm, action: SnsAction): void {
-  if (isMigrationPreview() || isCutoverPaused()) return;
+  if (isMigrationPreview() || areWorkersPaused()) return;
   alarm.addAlarmAction(action);
   alarm.addOkAction(action);
 }
