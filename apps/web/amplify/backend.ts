@@ -2,7 +2,7 @@ import { applyWorkerPause, isCutoverPaused, areWorkersPaused } from "./cutover-p
 import { assertDestinationDeploymentIdentity, businessEnvironment, retentionVaultName } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
-import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
+import { leadIntakeCorsOrigins, migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
 import { previewAdminLoginConfig, PREVIEW_ADMIN_FROM, PREVIEW_ADMIN_ACCOUNT } from "./functions/shared/previewAdminLogin";
 import { defineBackend, secret } from "@aws-amplify/backend";
@@ -267,13 +267,7 @@ const leadIntakeUrl = backend.leadIntake.resources.lambda.addFunctionUrl({
   authType: publicFunctionUrlAuthType(),
   invokeMode: InvokeMode.BUFFERED,
   cors: {
-    allowedOrigins: [
-      "https://www.pestbuzzkill.com",
-      "https://pestbuzzkill.com",
-      "https://staging.pestbuzzkill.com",
-      "https://buzzkill-pest-control.squarespace.com",
-      "http://localhost:5173",
-    ],
+    allowedOrigins: leadIntakeCorsOrigins(),
     allowedMethods: [HttpMethod.POST],
     allowedHeaders: ["Content-Type"],
     maxAge: Duration.seconds(86400),

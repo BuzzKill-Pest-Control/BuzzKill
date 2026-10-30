@@ -1,3 +1,4 @@
+import { assertDestinationDeploymentIdentity } from "./deployment-environment";
 import { areWorkersPaused } from "./cutover-pause";
 import { FunctionUrlAuthType } from "aws-cdk-lib/aws-lambda";
 import type { Alarm } from "aws-cdk-lib/aws-cloudwatch";
@@ -35,4 +36,26 @@ export function migrationBookingCorsOrigins(marketingUrl: string, crmUrl: string
     throw new Error("Migration preview requires distinct website and CRM origins for the same environment.");
   }
   return origins.join(",");
+}
+
+/** Preserve canonical lead origins; allow the exact isolated staging website too. */
+export function leadIntakeCorsOrigins(env = process.env): string[] {
+  const origins = [
+    "https://www.pestbuzzkill.com",
+    "https://pestbuzzkill.com",
+    "https://staging.pestbuzzkill.com",
+    "https://buzzkill-pest-control.squarespace.com",
+    "http://localhost:5173",
+  ];
+  if (env.AWS_APP_ID === "d3owdoeg1om341" &&
+      env.AWS_BRANCH === "codex-buzzkill-staging-migration" &&
+      env.BUZZKILL_SOURCE_ENVIRONMENT === "staging") {
+    assertDestinationDeploymentIdentity(env.BUZZKILL_DEPLOY_ACCOUNT_ID ?? "", env.AWS_REGION ?? "");
+    const stagingOrigin = "https://migration-staging.d3owdoeg1om341.amplifyapp.com";
+    if (env.BUZZKILL_DESTINATION_ACCOUNT_ID !== "743917687359" || env.MARKETING_URL !== stagingOrigin) {
+      throw new Error("Staging lead CORS requires the exact configured destination website origin.");
+    }
+    origins.push(stagingOrigin);
+  }
+  return origins;
 }
