@@ -1,4 +1,5 @@
 /** Offline only: build the real backend assembly with fake credentials. */
+import { execFileSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -6,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { resolve } from "node:path";
 
 const [outdir, phase, branch, authTest] = process.argv.slice(2);
-if (authTest && authTest !== "admin-login") throw new Error("Unknown offline test mode.");
+if (authTest && !["admin-login", "hosting-main"].includes(authTest)) throw new Error("Unknown offline test mode.");
 if (!outdir || !["full", "bootstrap", "release", "paused-release", "primed-release"].includes(phase) || ![
   "codex-buzzkill-account-migration", "codex-buzzkill-staging-migration",
 ].includes(branch)) throw new Error("Expected output directory, full/bootstrap/release, and a migration branch.");
@@ -55,6 +56,14 @@ Object.assign(process.env, {
     "aws:cdk:bundling-stacks": ["**"],
   }),
 });
+
+if (authTest === "hosting-main") {
+  if (phase !== "release" || branch !== "codex-buzzkill-account-migration") throw new Error("Hosting main synthesis requires the active retained main backend.");
+  process.env.AWS_BRANCH = "main";
+  process.env.BUZZKILL_BACKEND_BRANCH = branch;
+  process.env.AWS_BRANCH = execFileSync(process.execPath, [resolve("scripts/retainedBackend.mjs")], { env: process.env, encoding: "utf8" }).trim();
+  if (process.env.AWS_BRANCH !== branch) throw new Error("Hosting main changed the backend namespace.");
+}
 
 if (authTest === "admin-login") Object.assign(process.env, {
   BUZZKILL_PREVIEW_ADMIN_LOGIN: "true",

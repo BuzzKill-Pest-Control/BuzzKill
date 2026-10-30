@@ -59,3 +59,14 @@ it("rejects publishing a frontend with a different cutover pause mode", () => {
   expect(check(false, false, live, env).status).not.toBe(0);
   expect(check(false, false, live, { ...env, BUZZKILL_CUTOVER_PAUSED: "true" }).status).toBe(0);
 });
+
+
+it("binds ordinary Hosting main to the retained backend on both apps", () => {
+  const live = { ...complete, custom: { ...complete.custom, migrationPreview: false } };
+  const env = { AWS_APP_ID: "d3owdoeg1om341", AWS_BRANCH: "main", AWS_REGION: "us-east-1", BUZZKILL_BACKEND_BRANCH: "codex-buzzkill-account-migration", BUZZKILL_SOURCE_ENVIRONMENT: "main", BUZZKILL_CUTOVER_PAUSED: "false", BUZZKILL_WORKERS_PAUSED: "false" };
+  expect(check(false, false, live, env).status).toBe(0);
+  expect(check(false, false, live, { ...env, AWS_APP_ID: "d2y2zigtl5rx3", BUZZKILL_BACKEND_APP_ID: "d3owdoeg1om341" }).status).toBe(0);
+  expect(check(false, false, live, { ...env, BUZZKILL_BACKEND_BRANCH: "" }).status).not.toBe(0);
+  expect(check(false, false, { ...live, auth: { user_pool_id: "us-east-1_CyX0nNTre" } }, env).status).not.toBe(0);
+  expect(check(false, false, { ...live, custom: { ...live.custom, migrationBackendBranch: "main" } }, env).status).not.toBe(0);
+});

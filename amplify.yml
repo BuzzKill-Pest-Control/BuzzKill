@@ -8,6 +8,7 @@ applications:
             - nvm install 22.23.3 && nvm use 22.23.3
             - npm install --global npm@11.11.0
             - npm ci --cache .npm --prefer-offline
+            - node --test scripts/retainedBackend.test.mjs
             # Backend business rules (billing cadence, lead capture) are tested
             # before anything deploys — a broken money rule must fail the build,
             # not reach production and wait to be noticed.
@@ -27,6 +28,10 @@ applications:
                 test "$AWS_APP_ID" = "d3owdoeg1om341" || { echo "Destination backend app mismatch"; exit 1; }
                 test "$AWS_REGION" = "us-east-1" || { echo "Destination region mismatch"; exit 1; }
               fi
+              # Hosting main deploys the existing backend namespace. The live
+              # identity/root check prevents accidentally creating a new backend.
+              BACKEND_BRANCH=$(node scripts/retainedBackend.mjs --verify) || exit 1
+              export AWS_BRANCH="$BACKEND_BRANCH"
               npx ampx pipeline-deploy --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID"
     frontend:
       phases:
@@ -95,9 +100,10 @@ applications:
                   *) echo "Backend app does not belong to the destination account"; exit 1 ;;
                 esac
               fi
+              BACKEND_BRANCH=$(node ../web/scripts/retainedBackend.mjs --verify) || exit 1
               for i in $(seq 1 60); do
                 rm -f amplify_outputs.json
-                npx ampx generate outputs --app-id "$BACKEND_APP_ID" --branch "$AWS_BRANCH" || true
+                npx ampx generate outputs --app-id "$BACKEND_APP_ID" --branch "$BACKEND_BRANCH" || true
                 # Wait for appointment fields AND mutation arguments: stale
                 # introspection silently drops unrecognized mutation inputs.
                 if node ../web/scripts/checkMigrationRelease.mjs 2>/dev/null && node -e "const i=(require('./amplify_outputs.json').data||{}).model_introspection||{};const m=i.models||{};const p=(i.mutations||{}).prepareLeadQuote;const j=(i.mutations||{}).createOfficeJob;process.exit(m.Product&&m.ServiceReport&&m.LeadPricingRun&&m.LeadPricingRun.fields.researchRateKey&&p&&p.arguments.customerId&&m.Job&&m.Job.fields.scheduledStartTime&&m.Job.fields.scheduledEndTime&&j&&j.arguments.scheduledStartTime&&j.arguments.scheduledEndTime&&!m.Job.fields.timeWindow&&!m.Job.fields.capacityWindow?0:1)" 2>/dev/null; then

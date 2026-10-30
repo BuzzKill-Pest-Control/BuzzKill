@@ -24,6 +24,9 @@ export const createChallenge = defineFunction({
 
 export const verifyChallenge = defineFunction({
   environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
+  // Cognito waits at most five seconds. Avoid Lambda's shorter default killing
+  // REQUEST_LINK after SES has accepted the email but before bookkeeping ends.
+  timeoutSeconds: 5,
   name: "auth-verify-challenge",
   entry: "./verify.ts",
   resourceGroupName: "auth",

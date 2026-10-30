@@ -1,4 +1,5 @@
 import process from "node:process";
+import { retainedBackendBranch } from "./retainedBackend.mjs";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,7 +27,7 @@ export function assertMigrationReleaseReady(env, readOutputs) {
     "codex-buzzkill-account-migration": { pool: "us-east-1_NT4TiB2DQ", environment: "main" },
     "codex-buzzkill-staging-migration": { pool: "us-east-1_CyX0nNTre", environment: "staging" },
   };
-  const branch = env.AWS_BRANCH;
+  const branch = retainedBackendBranch(env);
   const expected = Object.hasOwn(bindings, branch ?? "") ? bindings[branch] : undefined;
   if (!destination || env.BUZZKILL_DESTINATION_ACCOUNT_ID !== "743917687359" || !expected ||
       (env.AWS_APP_ID === "d2y2zigtl5rx3" && env.BUZZKILL_BACKEND_APP_ID !== "d3owdoeg1om341") ||

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setLockStoreForTests, memoryLockStore } from "../shared/atomicLock";
 import { capacityFixtureModels } from "../shared/capacityTestFixture";
 import {
@@ -1937,6 +1937,13 @@ describe("staff-assisted lead prefill", () => {
 });
 
 describe("GL-17 — mosquito seasonal plans on the funnel", () => {
+  beforeEach(() => {
+    // Pricing tests need available in-season dates even when CI runs in winter
+    // or at the end of October. Boundary tests below set their own dates.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-12T15:00:00Z"));
+  });
+  afterEach(() => { vi.useRealTimers(); });
   const mosquitoInput = {
     name: "Dana Whitlock",
     email: "dana@example.com",
