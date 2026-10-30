@@ -1,9 +1,11 @@
-import { createHash } from "node:crypto";
+import { applyWorkerPause, isCutoverPaused, areWorkersPaused } from "./cutover-pause";
+import { assertDestinationDeploymentIdentity, businessEnvironment, retentionVaultName } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
-import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
+import { leadIntakeCorsOrigins, migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 import { isMigrationPreview } from "./functions/shared/migrationPreview";
-import { defineBackend } from "@aws-amplify/backend";
+import { previewAdminLoginConfig, PREVIEW_ADMIN_FROM, PREVIEW_ADMIN_ACCOUNT } from "./functions/shared/previewAdminLogin";
+import { defineBackend, secret } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import {
@@ -14,6 +16,7 @@ import {
 } from "aws-cdk-lib/aws-backup";
 import { Schedule } from "aws-cdk-lib/aws-events";
 import {
+  CfnFunction,
   HttpMethod,
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
@@ -58,6 +61,9 @@ import { leadSweep } from "./functions/lead-sweep/resource";
 import { preToken } from "./functions/pre-token/resource";
 
 const migrationPreview = isMigrationPreview();
+const businessMode = businessEnvironment();
+const cutoverPaused = isCutoverPaused();
+const workersPaused = areWorkersPaused();
 
 const backend = defineBackend({
   auth,
@@ -80,6 +86,10 @@ const backend = defineBackend({
   leadSweep,
   preToken,
 });
+
+if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN === "true") {
+  assertDestinationDeploymentIdentity(process.env.BUZZKILL_DEPLOY_ACCOUNT_ID ?? "", process.env.AWS_REGION ?? "");
+}
 
 // CRM logins are invite-only (office provisions staff and portal users via
 // adminCreateUser) — block public self-signup. Invites go out as single-use
@@ -257,13 +267,7 @@ const leadIntakeUrl = backend.leadIntake.resources.lambda.addFunctionUrl({
   authType: publicFunctionUrlAuthType(),
   invokeMode: InvokeMode.BUFFERED,
   cors: {
-    allowedOrigins: [
-      "https://www.pestbuzzkill.com",
-      "https://pestbuzzkill.com",
-      "https://staging.pestbuzzkill.com",
-      "https://buzzkill-pest-control.squarespace.com",
-      "http://localhost:5173",
-    ],
+    allowedOrigins: leadIntakeCorsOrigins(),
     allowedMethods: [HttpMethod.POST],
     allowedHeaders: ["Content-Type"],
     maxAge: Duration.seconds(86400),
@@ -300,8 +304,10 @@ const sesPolicy = new PolicyStatement({
 const crmUrlEnv =
   process.env.CRM_APP_URL ??
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
-  (process.env.AWS_BRANCH === "main"
+  (businessMode === "main"
     ? "https://app.pestbuzzkill.com"
+    : process.env.AWS_APP_ID === "d3owdoeg1om341"
+    ? "https://migration-staging.d2y2zigtl5rx3.amplifyapp.com"
     : "https://staging.d5ln2hbbp9s2j.amplifyapp.com");
 
 /**
@@ -316,7 +322,7 @@ const crmUrlEnv =
  * boundary guarantees where they can LAND — including for the hardcoded
  * fallbacks in ownedWork's defaultWorkOwner, which no env var controls.
  */
-const IS_PRODUCTION_EMAIL = process.env.AWS_BRANCH === "main";
+const IS_PRODUCTION_EMAIL = businessMode === "main";
 const OPS_INBOX = IS_PRODUCTION_EMAIL
   ? "info@pestbuzzkill.com"
   : "jake+staginginfo@pestbuzzkill.com";
@@ -363,6 +369,42 @@ for (const fn of [
     fn.addEnvironment("PRODUCTION_EMAIL", "1");
   }
 }
+// Optional, expiring acceptance-test login. Never grants general preview mail,
+// never enables business handlers, and never changes the source deployment.
+const previewAdminLogin = previewAdminLoginConfig({
+  ...process.env,
+  BUZZKILL_PREVIEW_AUTH_BRANCH: process.env.AWS_BRANCH,
+  CRM_APP_URL: crmUrlEnv,
+});
+if (previewAdminLogin) {
+  const fn = backend.verifyChallenge;
+  for (const [key, value] of Object.entries({
+    BUZZKILL_PREVIEW_ADMIN_LOGIN: "true",
+    BUZZKILL_PREVIEW_ADMIN_EMAIL: previewAdminLogin.email,
+    BUZZKILL_PREVIEW_ADMIN_USERNAME: previewAdminLogin.username,
+    BUZZKILL_PREVIEW_ADMIN_LOGIN_UNTIL: previewAdminLogin.until,
+    BUZZKILL_PREVIEW_SES_CONFIGURATION_SET: previewAdminLogin.configurationSet,
+    BUZZKILL_DESTINATION_ACCOUNT_ID: PREVIEW_ADMIN_ACCOUNT,
+    BUZZKILL_PREVIEW_AUTH_BRANCH: process.env.AWS_BRANCH!,
+    // These verified existing IDs must be literals: a trigger referencing its own
+    // pool/client creates a CloudFormation dependency cycle. Output-binding
+    // checks separately ensure the retained backend still has these identities.
+    BUZZKILL_PREVIEW_AUTH_POOL_ID: "us-east-1_NT4TiB2DQ",
+    BUZZKILL_PREVIEW_AUTH_CLIENT_ID: "5l5rqjoeenmp16h7i0pk1m8h20",
+  })) fn.addEnvironment(key, value);
+  fn.resources.lambda.addToRolePolicy(new PolicyStatement({
+    actions: ["ses:SendEmail"],
+    resources: [
+      `arn:aws:ses:us-east-1:${PREVIEW_ADMIN_ACCOUNT}:identity/pestbuzzkill.com`,
+      `arn:aws:ses:us-east-1:${PREVIEW_ADMIN_ACCOUNT}:configuration-set/${previewAdminLogin.configurationSet}`,
+    ],
+    conditions: {
+      DateLessThan: { "aws:CurrentTime": previewAdminLogin.until },
+      StringEquals: { "ses:FromAddress": PREVIEW_ADMIN_FROM },
+      "ForAllValues:StringEquals": { "ses:Recipients": [previewAdminLogin.email] },
+    },
+  }));
+}
 docsBucket.grantReadWrite(backend.crmDocs.resources.lambda);
 docsBucket.grantReadWrite(backend.crmPricing.resources.lambda);
 backend.crmDocs.addEnvironment("DOCS_BUCKET", docsBucket.bucketName);
@@ -405,6 +447,7 @@ backend.crmPricing.addEnvironment("AMPLIFY_APP_ID", appId);
 backend.crmPricing.addEnvironment("AMPLIFY_BRANCH", branch);
 backend.bookingPublic.addEnvironment("AMPLIFY_APP_ID", appId);
 backend.bookingPublic.addEnvironment("AMPLIFY_BRANCH", branch);
+backend.bookingPublic.addEnvironment("BUZZKILL_BUSINESS_ENVIRONMENT", businessMode);
 // GL-11: the daily run re-drives stuck group-change commands through
 // crm-admin (which holds the Cognito permissions). Direct CDK references
 // (grantInvoke + functionName env) created a CloudFormation circular
@@ -567,8 +610,10 @@ backend.pricingRefresh.addEnvironment("AMPLIFY_BRANCH", branch);
 const marketingUrl =
   process.env.MARKETING_URL ??
   (migrationPreview ? "https://preview-unconfigured.invalid" : undefined) ??
-  (branch === "main"
+  (businessMode === "main"
     ? "https://www.pestbuzzkill.com"
+    : appId === "d3owdoeg1om341"
+    ? "https://migration-staging.d3owdoeg1om341.amplifyapp.com"
     : "https://staging.d26qpsjewk0bee.amplifyapp.com");
 backend.stripeWebhook.addEnvironment("MARKETING_URL", marketingUrl);
 backend.bookingPublic.addEnvironment("MARKETING_URL", marketingUrl);
@@ -581,15 +626,17 @@ backend.bookingPublic.addEnvironment(
   "BOOKING_CORS_ORIGINS",
   migrationPreview
     ? migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)
-    : branch === "main"
+    : businessMode === "main"
     ? "https://www.pestbuzzkill.com,https://pestbuzzkill.com"
+    : appId === "d3owdoeg1om341"
+    ? `${migrationBookingCorsOrigins(marketingUrl, crmUrlEnv)},https://staging.pestbuzzkill.com`
     : "https://staging.d26qpsjewk0bee.amplifyapp.com,https://staging.pestbuzzkill.com,http://localhost:5173,http://localhost:5174"
 );
-// The API keys live as Amplify Console app-level env vars — present in the
-// build container at synth time. Bake them into the Lambda env so runtime
-// doesn't depend on SSM entries the Console never writes.
+// Preserve the source app's existing build-variable contract. The dedicated
+// destination binds the already provisioned Amplify secrets at runtime, so
+// every intended consumer receives its key without exposing it to a build.
 for (const key of ["ANTHROPIC_API_KEY", "GOOGLE_ROUTES_API_KEY"] as const) {
-  const v = process.env[key];
+  const v = !migrationPreview && appId === "d3owdoeg1om341" ? secret(key) : process.env[key];
   if (!migrationPreview && v && v !== "placeholder-set-me") {
     backend.crmPricing.addEnvironment(key, v);
     // The funnel is a pure rate READER now — it keeps Routes (drive times,
@@ -685,7 +732,7 @@ const sesEventDestination = new CfnConfigurationSetEventDestination(
   {
     configurationSetName: sesConfigurationSetName,
     eventDestination: {
-      enabled: !migrationPreview,
+      enabled: !migrationPreview && !workersPaused,
       // Branch-suffixed: SES scopes destination names per config set, but
       // CloudFormation treats the name as an account-wide physical ID — a
       // hard-coded name here made the main stack collide with staging's
@@ -747,7 +794,7 @@ backend.addOutput({
 // +alias and can never blend into the production alert stream.
 backend.opsAlerts.addEnvironment(
   "INFRA_ALERT_EMAIL",
-  process.env.AWS_BRANCH === "main"
+  businessMode === "main"
     ? "jake@pestbuzzkill.com"
     : "jake+staginginfra@pestbuzzkill.com"
 );
@@ -803,7 +850,7 @@ const bridgeFailureTopic = new Topic(opsAlarmsStack, "OpsBridgeFailureTopic");
 // the raw watchdog leg follows the branded one to jake@. NOTE: changing the
 // subscription address requires a ONE-TIME confirmation click from the new
 // inbox after deploy, or these emails silently never arrive.
-if (branch === "main" && !migrationPreview) {
+if (businessMode === "main" && !migrationPreview) {
   subscribeBusinessEvents(bridgeFailureTopic,
     new EmailSubscription("jake@pestbuzzkill.com")
   );
@@ -1013,14 +1060,9 @@ cfnDocsBucket.versioningConfiguration = { status: "Enabled" };
 // bucket reference adds only a one-way data→storage edge.
 const backupStack = Stack.of(backend.data.resources.graphqlApi);
 const backupVault = new BackupVault(backupStack, "BuzzKillBackupVault", {
-  // AWS Backup vault names are limited to 50 characters. Keep existing live
-  // names unchanged; preview names are bounded and scoped to app + branch.
-  backupVaultName: migrationPreview
-    ? `buzzkill-preview-${createHash("sha256")
-        .update(`${lockAppId}:${lockBranch}`)
-        .digest("hex")
-        .slice(0, 16)}-retention`
-    : `buzzkill-${lockBranch}-retention`,
+  // The dedicated destination keeps its existing bounded vault name when
+  // preview is disabled. Source names retain their original behavior.
+  backupVaultName: retentionVaultName(lockAppId, lockBranch, migrationPreview),
 });
 const backupPlan = new BackupPlan(backupStack, "BuzzKillRetentionPlan", {
   backupVault,
@@ -1048,11 +1090,13 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
   ],
 });
 
+applyWorkerPause(Stack.of(backend.auth.resources.userPool), backend.preToken.resources.lambda.node.defaultChild as CfnFunction);
+
 // Fresh, empty destination only; the normal final deployment omits this flag.
 makeMigrationPreviewReadOnly(backupStack);
 const deferredApiResources = applyMigrationBootstrap(backupStack);
-if (migrationPreview) {
+if (migrationPreview || appId === "d3owdoeg1om341") {
   backend.addOutput({
-    custom: { migrationPreview: true, migrationApiReady: deferredApiResources === 0 },
+    custom: { migrationPreview, migrationCutoverPaused: cutoverPaused, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
   });
 }

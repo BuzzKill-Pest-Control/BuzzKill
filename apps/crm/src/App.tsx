@@ -1,3 +1,4 @@
+import { previewAdminLoginAvailable } from "./lib/previewAdmin";
 import {
   BrowserRouter,
   Navigate,
@@ -108,13 +109,14 @@ function MagicLinkFooter() {
     setSent(true);
   });
 
+  const preview = import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true";
   const request = async () => {
-    if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") return;
+    if (preview && !previewAdminLoginAvailable()) return;
     if (!email.trim()) return;
     await send.run();
   };
 
-  if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+  if (preview && !previewAdminLoginAvailable()) {
     return <p className="small">Email sign-in links and password recovery are disabled in this migration preview.</p>;
   }
 
@@ -152,11 +154,11 @@ function MagicLinkFooter() {
               setOpen(true);
             }}
           >
-            Prefer no password? Email me a sign-in link
+            {preview ? "Email my administrator preview sign-in link" : "Prefer no password? Email me a sign-in link"}
           </button>
-          <button className="linklike linklike-muted" onClick={toForgotPassword}>
+          {!preview && <button className="linklike linklike-muted" onClick={toForgotPassword}>
             Forgot password?
-          </button>
+          </button>}
         </div>
       )}
     </div>
