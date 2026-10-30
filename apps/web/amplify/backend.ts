@@ -1,3 +1,4 @@
+import { applyCutoverPause, isCutoverPaused } from "./cutover-pause";
 import { assertDestinationDeploymentIdentity, businessEnvironment, retentionVaultName } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
@@ -15,6 +16,7 @@ import {
 } from "aws-cdk-lib/aws-backup";
 import { Schedule } from "aws-cdk-lib/aws-events";
 import {
+  CfnFunction,
   HttpMethod,
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
@@ -60,6 +62,7 @@ import { preToken } from "./functions/pre-token/resource";
 
 const migrationPreview = isMigrationPreview();
 const businessMode = businessEnvironment();
+const cutoverPaused = isCutoverPaused();
 
 const backend = defineBackend({
   auth,
@@ -734,7 +737,7 @@ const sesEventDestination = new CfnConfigurationSetEventDestination(
   {
     configurationSetName: sesConfigurationSetName,
     eventDestination: {
-      enabled: !migrationPreview,
+      enabled: !migrationPreview && !cutoverPaused,
       // Branch-suffixed: SES scopes destination names per config set, but
       // CloudFormation treats the name as an account-wide physical ID — a
       // hard-coded name here made the main stack collide with staging's
@@ -1092,11 +1095,13 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
   ],
 });
 
+applyCutoverPause(Stack.of(backend.auth.resources.userPool), backend.preToken.resources.lambda.node.defaultChild as CfnFunction);
+
 // Fresh, empty destination only; the normal final deployment omits this flag.
 makeMigrationPreviewReadOnly(backupStack);
 const deferredApiResources = applyMigrationBootstrap(backupStack);
 if (migrationPreview || appId === "d3owdoeg1om341") {
   backend.addOutput({
-    custom: { migrationPreview, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
+    custom: { migrationPreview, migrationCutoverPaused: cutoverPaused, migrationApiReady: deferredApiResources === 0, migrationBackendAppId: appId, migrationBackendBranch: branch, migrationAccountId: Stack.of(backend.auth.resources.userPool).account },
   });
 }

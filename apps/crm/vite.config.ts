@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true";
+const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true" || process.env.BUZZKILL_CUTOVER_PAUSED === "true";
 const previewDefines = migrationPreview ? {
   "import.meta.env.VITE_GOOGLE_MAPS_API_KEY": JSON.stringify(""),
   "import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY": JSON.stringify(""),
