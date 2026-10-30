@@ -51,3 +51,11 @@ it("preserves destination CRM binding after preview is disabled and never falls 
   for (const change of [{ BUZZKILL_BACKEND_APP_ID: "" }, { BUZZKILL_BACKEND_APP_ID: "d26qpsjewk0bee" }, { BUZZKILL_SOURCE_ENVIRONMENT: "staging" }, { BUZZKILL_SOURCE_ENVIRONMENT: "" }]) expect(check(false, false, live, { ...env, ...change }).status).not.toBe(0);
   expect(check(false, false, undefined, env).status).not.toBe(0);
 });
+
+
+it("rejects publishing a frontend with a different cutover pause mode", () => {
+  const live = { ...complete, custom: { ...complete.custom, migrationPreview: false, migrationCutoverPaused: true } };
+  const env = { AWS_APP_ID: "d2y2zigtl5rx3", BUZZKILL_BACKEND_APP_ID: "d3owdoeg1om341", BUZZKILL_SOURCE_ENVIRONMENT: "main" };
+  expect(check(false, false, live, env).status).not.toBe(0);
+  expect(check(false, false, live, { ...env, BUZZKILL_CUTOVER_PAUSED: "true" }).status).toBe(0);
+});

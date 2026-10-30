@@ -37,6 +37,9 @@ export function assertMigrationReleaseReady(env, readOutputs) {
       outputs?.custom?.migrationAccountId !== "743917687359") {
     throw new Error("Migration outputs do not match the exact destination backend and business environment.");
   }
+  if ((outputs?.custom?.migrationCutoverPaused ?? false) !== (env.BUZZKILL_CUTOVER_PAUSED === "true")) {
+    throw new Error("Cutover pause mode does not match this frontend build.");
+  }
   if (outputs?.custom?.migrationPreview !== preview || outputs?.custom?.migrationApiReady !== true) {
     throw new Error("Migration API mode is not complete or does not match this frontend build.");
   }

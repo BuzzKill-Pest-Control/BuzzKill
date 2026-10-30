@@ -19,8 +19,9 @@ let full: Assembly;
 let bootstrap: Assembly;
 let adminLogin: Assembly;
 let released: Assembly;
+let pausedRelease: Assembly;
 
-async function synth(phase: "full" | "bootstrap" | "release", authTest = false): Promise<Assembly> {
+async function synth(phase: "full" | "bootstrap" | "release" | "paused-release", authTest = false): Promise<Assembly> {
   const outdir = join(directory, phase + (authTest ? "-auth" : ""));
   const branch = !authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
     ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
@@ -142,7 +143,8 @@ beforeAll(async () => {
   bootstrap = await synth("bootstrap");
   adminLogin = await synth("full", true);
   released = await synth("release");
-}, 480_000);
+  pausedRelease = await synth("paused-release");
+}, 600_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 it("synthesizes the real full and bootstrap backends with closed references", () => {
@@ -306,4 +308,43 @@ it("detects a Cognito trigger referring back to its own pool before deployment",
   const trigger = Object.values(template.Resources).find((r) => r.Type === "AWS::Lambda::Function" && JSON.stringify(r.Properties?.Environment).includes('"BUZZKILL_PREVIEW_ADMIN_LOGIN":"true"'))!;
   (trigger.Properties!.Environment as { Variables: Record<string, unknown> }).Variables.BUZZKILL_PREVIEW_AUTH_POOL_ID = { Ref: poolId };
   expect(() => assertReferenceClosure(broken)).toThrow("Circular resource dependency");
+});
+
+
+it("deploys a production-configured cutover with every application worker and writer paused", () => {
+  assertReferenceClosure(pausedRelease);
+  const resources = allResources(pausedRelease);
+  expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
+  const functions = resources.filter((r) => r.Type === "AWS::Lambda::Function");
+  expect(functions.filter((r) => r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
+  const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
+  expect(schedules).toHaveLength(3);
+  for (const schedule of schedules) expect(schedule.Properties?.State).toBe("DISABLED");
+  expect(resources.filter((r) => r.Type === "AWS::SNS::Subscription")).toHaveLength(0);
+  for (const r of resources.filter((r) => r.Type === "AWS::SES::ConfigurationSetEventDestination")) {
+    expect((r.Properties?.EventDestination as { Enabled: boolean }).Enabled).toBe(false);
+  }
+  for (const alarm of resources.filter((r) => r.Type === "AWS::CloudWatch::Alarm")) {
+    expect(alarm.Properties?.AlarmActions).toBeUndefined();
+    expect(alarm.Properties?.OKActions).toBeUndefined();
+  }
+  const mutations = resources.filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation");
+  expect(mutations.length).toBeGreaterThan(0);
+  expect(mutations).toHaveLength(allResources(released).filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation").length);
+  for (const resolver of mutations) expect(resolver.Properties?.RequestMappingTemplate).toBe(PREVIEW_MUTATION_REFUSAL);
+  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
+  let checked = 0, functionCount = 0;
+  for (const [name, template] of Object.entries(released.templates)) {
+    for (const [id, before] of Object.entries(template.Resources)) {
+      if (stateful.has(before.Type)) { expect(pausedRelease.templates[name]?.Resources[id], `${name}:${id}`).toEqual(before); checked++; }
+      if (before.Type !== "AWS::Lambda::Function") continue;
+      const paused = structuredClone(pausedRelease.templates[name]?.Resources[id]);
+      expect(paused, `${name}:${id} function identity must remain`).toBeDefined();
+      if (paused.Properties) delete paused.Properties.ReservedConcurrentExecutions;
+      expect(paused, `${name}:${id} only concurrency may change`).toEqual(before);
+      functionCount++;
+    }
+  }
+  expect(checked).toBe(62);
+  expect(functionCount).toBe(functions.length);
 });
