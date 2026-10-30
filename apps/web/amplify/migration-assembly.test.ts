@@ -12,7 +12,7 @@ type Template = {
   Parameters?: Record<string, { Default?: unknown }>;
   Outputs?: Record<string, unknown>;
 };
-type Assembly = { templates: Record<string, Template>; assets: Record<string, string> };
+type Assembly = { templates: Record<string, Template>; assets: Record<string, string>; terminationProtection: boolean };
 const directory = mkdtempSync(join(tmpdir(), "buzzkill-migration-assembly-"));
 const execFileAsync = promisify(execFile);
 let full: Assembly;
@@ -47,7 +47,10 @@ async function synth(phase: "full" | "bootstrap" | "release" | "paused-release" 
       for (const [hash, asset] of Object.entries(manifest.files)) assets[hash] = asset.source.path;
     }
   }
-  return { templates, assets };
+  const manifest = JSON.parse(readFileSync(join(outdir, "manifest.json"), "utf8")) as { artifacts: Record<string, { type: string; properties?: { terminationProtection?: boolean } }> };
+  const roots = Object.values(manifest.artifacts).filter((artifact) => artifact.type === "aws:cloudformation:stack");
+  if (roots.length !== 1) throw new Error("Expected the single retained root stack.");
+  return { templates, assets, terminationProtection: roots[0].properties?.terminationProtection === true };
 }
 
 /** CloudFormation validates references per template. Nested transport must
@@ -387,4 +390,13 @@ it("primes the complete normal API while all execution remains paused", () => {
     }
   }
   expect(mutations).toBe(239);
+});
+
+
+it("keeps destination main termination protection enabled across automatic deployment phases", () => {
+  const isMain = process.env.AWS_BRANCH !== "codex-buzzkill-staging-migration";
+  for (const assembly of [full, bootstrap, released, pausedRelease, primedRelease]) {
+    expect(assembly.terminationProtection).toBe(isMain);
+  }
+  expect(adminLogin.terminationProtection).toBe(true);
 });

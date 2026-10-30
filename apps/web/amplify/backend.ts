@@ -91,6 +91,12 @@ if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKIL
   assertDestinationDeploymentIdentity(process.env.BUZZKILL_DEPLOY_ACCOUNT_ID ?? "", process.env.AWS_REGION ?? "");
 }
 
+// CDK otherwise defaults this deployment setting to false on every build.
+// Main keeps the existing protected root, including automatic redeployments.
+if (process.env.AWS_APP_ID === "d3owdoeg1om341" && businessMode === "main") {
+  backend.stack.terminationProtection = true;
+}
+
 // CRM logins are invite-only (office provisions staff and portal users via
 // adminCreateUser) — block public self-signup. Invites go out as single-use
 // magic sign-in links (crm-admin + the auth-challenge triggers), not
