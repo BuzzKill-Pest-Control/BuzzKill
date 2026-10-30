@@ -11,7 +11,7 @@ applications:
             # Backend business rules (billing cadence, lead capture) are tested
             # before anything deploys — a broken money rule must fail the build,
             # not reach production and wait to be noticed.
-            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED npm test
+            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED npm test
             # Deploys the backend (auth, data, lead-intake function) and writes
             # amplify_outputs.json — including the lead-intake Function URL —
             # to the app root before the frontend phase runs.
@@ -109,7 +109,7 @@ applications:
             - env | grep -E '^VITE_' >> .env || true
             # The office money screens compute revenue. Same rule as the backend:
             # a broken money rule fails the build rather than shipping.
-            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED npm test
+            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED npm test
             - npm run build
       artifacts:
         baseDirectory: dist

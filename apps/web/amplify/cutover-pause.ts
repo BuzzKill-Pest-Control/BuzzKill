@@ -20,12 +20,26 @@ export function isCutoverPaused(env = process.env): boolean {
   return true;
 }
 
+/** Keep execution paused while normal API resolvers and frontend configuration deploy.
+ * Unlike the full cutover pause, this does not alter API or browser behavior.
+ */
+export function areWorkersPaused(env = process.env): boolean {
+  const cutover = isCutoverPaused(env);
+  const flag = env.BUZZKILL_WORKERS_PAUSED;
+  if (flag === undefined || flag === "false") return cutover;
+  if (flag !== "true") throw new Error("Invalid worker pause flag.");
+  // Reuse the exact destination/account/business binding checks. This override
+  // exists only inside validation; the real API/frontend pause stays unchanged.
+  isCutoverPaused({ ...env, BUZZKILL_CUTOVER_PAUSED: "true" });
+  return true;
+}
+
 /** Keep an externally established fence explicit throughout CloudFormation updates.
  * Framework providers stay runnable so deployment can finish. No stream cursor is
  * introduced; new mappings require a separately reviewed replay strategy.
  */
-export function applyCutoverPause(stack: Stack, preTokenFunction: CfnFunction): void {
-  if (!isCutoverPaused()) return;
+export function applyWorkerPause(stack: Stack, preTokenFunction: CfnFunction): void {
+  if (!areWorkersPaused()) return;
   let root = stack;
   while (root.nestedStackParent) root = root.nestedStackParent;
   let functions = 0, schedules = 0;

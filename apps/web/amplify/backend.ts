@@ -1,4 +1,4 @@
-import { applyCutoverPause, isCutoverPaused } from "./cutover-pause";
+import { applyWorkerPause, isCutoverPaused, areWorkersPaused } from "./cutover-pause";
 import { assertDestinationDeploymentIdentity, businessEnvironment, retentionVaultName } from "./deployment-environment";
 import { applyMigrationBootstrap } from "./migration-bootstrap";
 import { makeMigrationPreviewReadOnly } from "./migration-read-only";
@@ -63,6 +63,7 @@ import { preToken } from "./functions/pre-token/resource";
 const migrationPreview = isMigrationPreview();
 const businessMode = businessEnvironment();
 const cutoverPaused = isCutoverPaused();
+const workersPaused = areWorkersPaused();
 
 const backend = defineBackend({
   auth,
@@ -737,7 +738,7 @@ const sesEventDestination = new CfnConfigurationSetEventDestination(
   {
     configurationSetName: sesConfigurationSetName,
     eventDestination: {
-      enabled: !migrationPreview && !cutoverPaused,
+      enabled: !migrationPreview && !workersPaused,
       // Branch-suffixed: SES scopes destination names per config set, but
       // CloudFormation treats the name as an account-wide physical ID — a
       // hard-coded name here made the main stack collide with staging's
@@ -1095,7 +1096,7 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
   ],
 });
 
-applyCutoverPause(Stack.of(backend.auth.resources.userPool), backend.preToken.resources.lambda.node.defaultChild as CfnFunction);
+applyWorkerPause(Stack.of(backend.auth.resources.userPool), backend.preToken.resources.lambda.node.defaultChild as CfnFunction);
 
 // Fresh, empty destination only; the normal final deployment omits this flag.
 makeMigrationPreviewReadOnly(backupStack);

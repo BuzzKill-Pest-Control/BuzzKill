@@ -20,8 +20,9 @@ let bootstrap: Assembly;
 let adminLogin: Assembly;
 let released: Assembly;
 let pausedRelease: Assembly;
+let primedRelease: Assembly;
 
-async function synth(phase: "full" | "bootstrap" | "release" | "paused-release", authTest = false): Promise<Assembly> {
+async function synth(phase: "full" | "bootstrap" | "release" | "paused-release" | "primed-release", authTest = false): Promise<Assembly> {
   const outdir = join(directory, phase + (authTest ? "-auth" : ""));
   const branch = !authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
     ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
@@ -144,6 +145,7 @@ beforeAll(async () => {
   adminLogin = await synth("full", true);
   released = await synth("release");
   pausedRelease = await synth("paused-release");
+  primedRelease = await synth("primed-release");
 }, 600_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
@@ -347,4 +349,42 @@ it("deploys a production-configured cutover with every application worker and wr
   }
   expect(checked).toBe(62);
   expect(functionCount).toBe(functions.length);
+});
+
+it("primes the complete normal API while all execution remains paused", () => {
+  assertReferenceClosure(primedRelease);
+  const resources = allResources(primedRelease);
+  expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
+  expect(resources.filter((r) => r.Type === "AWS::Lambda::Function" && r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
+  const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
+  expect(schedules).toHaveLength(3);
+  for (const r of schedules) expect(r.Properties?.State).toBe("DISABLED");
+  expect(resources.filter((r) => r.Type === "AWS::SNS::Subscription")).toHaveLength(0);
+  for (const r of resources.filter((r) => r.Type === "AWS::SES::ConfigurationSetEventDestination")) {
+    expect((r.Properties?.EventDestination as { Enabled: boolean }).Enabled).toBe(false);
+  }
+  for (const r of resources.filter((r) => r.Type === "AWS::CloudWatch::Alarm")) {
+    expect(r.Properties?.AlarmActions).toBeUndefined();
+    expect(r.Properties?.OKActions).toBeUndefined();
+  }
+  let mutations = 0;
+  for (const [name, template] of Object.entries(released.templates)) {
+    // Final worker release must not change any API resolver, resolver function,
+    // public output, stateful declaration or application code/environment.
+    if (!name.endsWith(".nested.template.json")) expect(primedRelease.templates[name]?.Outputs).toEqual(template.Outputs);
+    for (const [id, before] of Object.entries(template.Resources)) {
+      if (["AWS::AppSync::Resolver", "AWS::AppSync::FunctionConfiguration", "Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::S3::BucketPolicy", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"].includes(before.Type)) {
+        expect(primedRelease.templates[name]?.Resources[id], `${name}:${id}`).toEqual(before);
+      }
+      if (before.Type === "AWS::AppSync::Resolver" && before.Properties?.TypeName === "Mutation") {
+        expect(before.Properties?.RequestMappingTemplate).not.toBe(PREVIEW_MUTATION_REFUSAL); mutations++;
+      }
+      if (before.Type === "AWS::Lambda::Function") {
+        const held = structuredClone(primedRelease.templates[name]?.Resources[id]);
+        if (held.Properties) delete held.Properties.ReservedConcurrentExecutions;
+        expect(held, `${name}:${id}`).toEqual(before);
+      }
+    }
+  }
+  expect(mutations).toBe(239);
 });
