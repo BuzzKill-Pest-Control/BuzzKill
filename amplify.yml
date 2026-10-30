@@ -8,19 +8,30 @@ applications:
             - nvm install 22.23.3 && nvm use 22.23.3
             - npm install --global npm@11.11.0
             - npm ci --cache .npm --prefer-offline
+            - node --test scripts/retainedBackend.test.mjs
             # Backend business rules (billing cadence, lead capture) are tested
             # before anything deploys — a broken money rule must fail the build,
             # not reach production and wait to be noticed.
-            - env -u BUZZKILL_MIGRATION_PREVIEW npm test
+            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
             # Deploys the backend (auth, data, lead-intake function) and writes
             # amplify_outputs.json — including the lead-intake Function URL —
             # to the app root before the frontend phase runs.
             - |
-              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ]; then
+              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ]; then
                 test -n "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Destination account ID is required"; exit 1; }
                 test "$BUZZKILL_DESTINATION_ACCOUNT_ID" != "637423611040" || { echo "Source account is forbidden in preview"; exit 1; }
                 test "$(aws sts get-caller-identity --query Account --output text)" = "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Build account mismatch"; exit 1; }
               fi
+              if [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ] || [ "$BUZZKILL_PREVIEW_ADMIN_LOGIN" = "true" ] || [ "$BUZZKILL_CUTOVER_PAUSED" = "true" ]; then
+                export BUZZKILL_DEPLOY_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) || exit 1
+                test "$BUZZKILL_DEPLOY_ACCOUNT_ID" = "743917687359" || { echo "Destination override forbidden in this account"; exit 1; }
+                test "$AWS_APP_ID" = "d3owdoeg1om341" || { echo "Destination backend app mismatch"; exit 1; }
+                test "$AWS_REGION" = "us-east-1" || { echo "Destination region mismatch"; exit 1; }
+              fi
+              # Hosting main deploys the existing backend namespace. The live
+              # identity/root check prevents accidentally creating a new backend.
+              BACKEND_BRANCH=$(node scripts/retainedBackend.mjs --verify) || exit 1
+              export AWS_BRANCH="$BACKEND_BRANCH"
               npx ampx pipeline-deploy --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID"
     frontend:
       phases:
@@ -35,7 +46,7 @@ applications:
             # Staging must never compete with www.pestbuzzkill.com in search:
             # non-main branches get a hard noindex (robots.txt + meta).
             - |
-              if [ "$AWS_BRANCH" != "main" ]; then
+              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ "$BUZZKILL_CUTOVER_PAUSED" = "true" ] || [ "${BUZZKILL_SOURCE_ENVIRONMENT:-$AWS_BRANCH}" != "main" ]; then
                 printf 'User-agent: *\nDisallow: /\n' > dist/robots.txt
                 find dist -name '*.html' -exec sed -i 's/<meta name="robots" content="[^"]*"/<meta name="robots" content="noindex, nofollow"/' {} +
                 # The sitemap lists production URLs; a staging host must not
@@ -74,7 +85,7 @@ applications:
             # this introspection, so stale outputs make new models undefined OR
             # keep querying a removed field (AppSync then rejects the query).
             - |
-              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ]; then
+              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ]; then
                 test -n "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Destination account ID is required"; exit 1; }
                 test "$BUZZKILL_DESTINATION_ACCOUNT_ID" != "637423611040" || { echo "Source account is forbidden in preview"; exit 1; }
                 test "$(aws sts get-caller-identity --query Account --output text)" = "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Build account mismatch"; exit 1; }
@@ -82,16 +93,17 @@ applications:
                 test "$BUZZKILL_BACKEND_APP_ID" != "d26qpsjewk0bee" || { echo "Source backend is forbidden in preview"; exit 1; }
               fi
               BACKEND_APP_ID="${BUZZKILL_BACKEND_APP_ID:-d26qpsjewk0bee}"
-              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ]; then
+              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ]; then
                 BACKEND_ARN=$(aws amplify get-app --app-id "$BACKEND_APP_ID" --query app.appArn --output text) || exit 1
                 case "$BACKEND_ARN" in
                   arn:aws:amplify:*:"$BUZZKILL_DESTINATION_ACCOUNT_ID":apps/"$BACKEND_APP_ID") ;;
                   *) echo "Backend app does not belong to the destination account"; exit 1 ;;
                 esac
               fi
+              BACKEND_BRANCH=$(node ../web/scripts/retainedBackend.mjs --verify) || exit 1
               for i in $(seq 1 60); do
                 rm -f amplify_outputs.json
-                npx ampx generate outputs --app-id "$BACKEND_APP_ID" --branch "$AWS_BRANCH" || true
+                npx ampx generate outputs --app-id "$BACKEND_APP_ID" --branch "$BACKEND_BRANCH" || true
                 # Wait for appointment fields AND mutation arguments: stale
                 # introspection silently drops unrecognized mutation inputs.
                 if node ../web/scripts/checkMigrationRelease.mjs 2>/dev/null && node -e "const i=(require('./amplify_outputs.json').data||{}).model_introspection||{};const m=i.models||{};const p=(i.mutations||{}).prepareLeadQuote;const j=(i.mutations||{}).createOfficeJob;process.exit(m.Product&&m.ServiceReport&&m.LeadPricingRun&&m.LeadPricingRun.fields.researchRateKey&&p&&p.arguments.customerId&&m.Job&&m.Job.fields.scheduledStartTime&&m.Job.fields.scheduledEndTime&&j&&j.arguments.scheduledStartTime&&j.arguments.scheduledEndTime&&!m.Job.fields.timeWindow&&!m.Job.fields.capacityWindow?0:1)" 2>/dev/null; then
@@ -103,7 +115,7 @@ applications:
             - env | grep -E '^VITE_' >> .env || true
             # The office money screens compute revenue. Same rule as the backend:
             # a broken money rule fails the build rather than shipping.
-            - env -u BUZZKILL_MIGRATION_PREVIEW npm test
+            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
             - npm run build
       artifacts:
         baseDirectory: dist
