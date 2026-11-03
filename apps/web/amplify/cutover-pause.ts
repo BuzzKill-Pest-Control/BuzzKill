@@ -59,7 +59,9 @@ export function applyWorkerPause(stack: Stack, preTokenFunction: CfnFunction): v
       schedules++;
     }
   }
-  if (functions !== 18 || schedules !== 3) {
+  // Includes the Google account-linking trigger: a cutover pause must also
+  // prevent it from changing copied Cognito identities.
+  if (functions !== 19 || schedules !== 3) {
     throw new Error(`Cutover pause coverage changed: ${functions} application functions, ${schedules} schedules.`);
   }
 }
