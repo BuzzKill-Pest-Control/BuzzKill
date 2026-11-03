@@ -9,15 +9,20 @@ import {
 } from "react-router-dom";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { myGroupIds, RolesProvider, useRoles } from "./lib/auth";
 import { useAction } from "./lib/useAsync";
-import { Button, EmptyState, Spinner } from "./ui/kit";
+import { Button, EmptyState, ErrorNote, Spinner } from "./ui/kit";
 import { Icon, type IconName } from "./ui/icons";
 import InstallBanner from "./components/InstallBanner";
 import ScreenErrorBoundary from "./components/ScreenErrorBoundary";
 import { confirmSignIn, signIn, signOut } from "aws-amplify/auth";
 import { clearAllDrafts } from "./lib/reportDraft";
+import { isGoogleSignInEnabled } from "./lib/backend";
+import {
+  getGoogleSignInError,
+  subscribeGoogleSignInError,
+} from "./lib/googleSignInStatus";
 
 import Dashboard from "./office/Dashboard";
 import WorkQueue from "./office/Work";
@@ -169,13 +174,26 @@ function AuthedApp() {
   return (
     <Authenticator
       hideSignUp
-      components={{ Header: AuthHeader, SignIn: { Footer: MagicLinkFooter } }}
+      socialProviders={isGoogleSignInEnabled() ? ["google"] : []}
+      components={{
+        Header: AuthHeader,
+        SignIn: { Header: GoogleSignInNotice, Footer: MagicLinkFooter },
+      }}
     >
       <RolesProvider>
         <Shell />
       </RolesProvider>
     </Authenticator>
   );
+}
+
+function GoogleSignInNotice() {
+  const error = useSyncExternalStore(
+    subscribeGoogleSignInError,
+    getGoogleSignInError,
+    () => null
+  );
+  return <ErrorNote error={error} />;
 }
 
 function Require({ when, children }: { when: boolean; children: ReactNode }) {

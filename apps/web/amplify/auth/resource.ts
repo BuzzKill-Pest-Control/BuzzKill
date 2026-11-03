@@ -1,6 +1,8 @@
 import { isMigrationPreview } from "../functions/shared/migrationPreview";
 import { previewAuthMessage } from "../functions/preview-auth-message/resource";
-import { defineAuth } from "@aws-amplify/backend";
+import { defineAuth, secret } from "@aws-amplify/backend";
+import { googleSignInSettings } from "./google";
+import { googleSignIn } from "../functions/google-sign-in/resource";
 import { crmAdmin } from "../functions/crm-admin/resource";
 import { postAuth } from "../functions/post-auth/resource";
 import { stripeWebhook } from "../functions/stripe-webhook/resource";
@@ -40,15 +42,36 @@ import {
  * runtime by the crm-admin function (`cus-<customerId>`, `grp-<groupId>`)
  * and matched against each record's `accessGroups` field.
  *
- * Sign-in: password (SRP) or emailed magic link (custom auth flow — the
+ * Sign-in: password (SRP), Google (when configured), or emailed magic link (custom auth flow — the
  * auth-challenge triggers). Invites send a magic link, not a temp password;
  * `custom:loginTokenHash/Exp` hold the pending single-use link token.
  */
+const google = googleSignInSettings(process.env);
+
 export const auth = defineAuth({
   loginWith: {
     email: true,
+    ...(google ? {
+      externalProviders: {
+        google: {
+          clientId: secret("GOOGLE_CLIENT_ID"),
+          clientSecret: secret("GOOGLE_CLIENT_SECRET"),
+          scopes: ["openid", "email", "profile"],
+          attributeMapping: {
+            email: "email",
+            emailVerified: "email_verified",
+            custom: { "custom:googleHostedDomain": "hd" },
+          },
+        },
+        callbackUrls: google.redirectUrls,
+        logoutUrls: google.redirectUrls,
+      },
+    } : {}),
   },
   userAttributes: {
+    // Mapped from Google's signed hd claim, used only during first-login
+    // linking to prove Google controls a Workspace email's domain.
+    "custom:googleHostedDomain": { dataType: "String", mutable: true },
     "custom:loginTokenHash": { dataType: "String", mutable: true },
     "custom:loginTokenExp": { dataType: "String", mutable: true },
     // GL-14: last successful sign-in, stamped by the post-auth trigger. Cognito
@@ -60,6 +83,7 @@ export const auth = defineAuth({
   groups: ["OWNER", "TECH", "CUSTOMER"],
   triggers: {
     ...(isMigrationPreview() ? { customMessage: previewAuthMessage } : {}),
+    preSignUp: googleSignIn,
     postAuthentication: postAuth,
     // NOTE: the pre-token-generation trigger is wired in backend.ts, not here.
     // It must add email/name to the ACCESS token (Amplify signs AppSync with
