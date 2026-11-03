@@ -59,6 +59,8 @@ import { sesEvents } from "./functions/ses-events/resource";
 import { opsAlerts } from "./functions/ops-alerts/resource";
 import { leadSweep } from "./functions/lead-sweep/resource";
 import { preToken } from "./functions/pre-token/resource";
+import { googleSignIn } from "./functions/google-sign-in/resource";
+import { grantGoogleAccountLinking } from "./auth/google-account-linking";
 
 const migrationPreview = isMigrationPreview();
 const businessMode = businessEnvironment();
@@ -85,6 +87,7 @@ const backend = defineBackend({
   opsAlerts,
   leadSweep,
   preToken,
+  googleSignIn,
 });
 
 if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN === "true") {
@@ -104,6 +107,14 @@ if (process.env.AWS_APP_ID === "d3owdoeg1om341" && businessMode === "main") {
 backend.auth.resources.cfnResources.cfnUserPool.adminCreateUserConfig = {
   allowAdminCreateUserOnly: true,
 };
+// The first Google login links an already-provisioned native account. No
+// permission to create users or change roles: existing sub/groups stay intact.
+if (!migrationPreview) {
+  grantGoogleAccountLinking(
+    backend.googleSignIn.resources.lambda,
+    backend.auth.resources.userPool
+  );
+}
 // The pre-token trigger adds `email`/`name` to the ACCESS token so the CRM
 // resolvers can name the acting human — Amplify signs AppSync with the access
 // token, which omits them (only the id token carries them). It must run as the
@@ -140,6 +151,10 @@ backend.auth.resources.cfnResources.cfnUserPoolClient.explicitAuthFlows = [
 // their own custom:loginTokenHash and mint themselves sign-in links.
 backend.auth.resources.cfnResources.cfnUserPoolClient.writeAttributes = [
   "email",
+  // Cognito requires mapped profile attributes to be client-writable.
+  // Hosted-domain is trusted only on the pre-sign-up provider event, never
+  // from an existing user's editable profile.
+  "custom:googleHostedDomain",
   "name",
 ];
 // GL-13/GL-14: a global sign-out revokes refresh tokens, but access/id tokens

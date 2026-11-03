@@ -1,4 +1,7 @@
 import { Amplify } from "aws-amplify";
+import "aws-amplify/auth/enable-oauth-listener";
+import "./googleSignInStatus";
+import { configureGoogleSignIn } from "./googleSignInConfig";
 
 /**
  * amplify_outputs.json is generated, never committed:
@@ -15,13 +18,24 @@ const candidates = import.meta.glob<Record<string, unknown>>(
 );
 
 let outputs: Record<string, unknown> | null = null;
+let googleSignInEnabled = false;
 
 export async function connectBackend(): Promise<boolean> {
   const loader = candidates["/amplify_outputs.json"];
   if (!loader) return false;
-  outputs = await loader();
+  const configured = configureGoogleSignIn(
+    await loader(),
+    window.location.origin,
+    import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true"
+  );
+  outputs = configured.outputs;
+  googleSignInEnabled = configured.enabled;
   Amplify.configure(outputs as Parameters<typeof Amplify.configure>[0]);
   return true;
+}
+
+export function isGoogleSignInEnabled(): boolean {
+  return googleSignInEnabled;
 }
 
 /** Custom backend outputs (Function URLs published by backend.ts). */
