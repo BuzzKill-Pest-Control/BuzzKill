@@ -1,5 +1,7 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
+import { createMonitoringBuild } from '../../monitoring/build.mjs'
 import { renderShellHead } from './src/seo/shell'
 
 /**
@@ -39,20 +41,32 @@ const previewDefines = migrationPreview ? {
 } : {};
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  // The default Stripe entrypoint loads its external script on import, even
-  // without a key. The pure entrypoint waits for an explicit loadStripe call.
-  resolve: { alias: migrationPreview ? [{ find: /^@stripe\/stripe-js$/, replacement: "@stripe/stripe-js/pure" }] : [] },
-  define: {
-    ...previewDefines,
-    "import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW": JSON.stringify(String(migrationPreview)),
-  },
-  plugins: [react(), shellHead()],
-  server: {
-    watch: {
-      // Plain glob (no path.resolve) — chokidar treats backslashes as glob
-      // escapes, so a Windows-style resolved path never matches here.
-      ignored: ['**/creative/**'],
+export default defineConfig(({ command, mode }) => {
+  const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
+  const monitoring = createMonitoringBuild({
+    env, command,
+    branch: env.SENTRY_DEPLOYMENT_BRANCH || env.BUZZKILL_SOURCE_ENVIRONMENT || env.AWS_BRANCH,
+    preview: migrationPreview,
+    expectedProject: 'buzzkill-web',
+    sentryPlugin: sentryVitePlugin,
+  })
+  return {
+    // The default Stripe entrypoint loads its external script on import, even
+    // without a key. The pure entrypoint waits for an explicit loadStripe call.
+    resolve: { alias: migrationPreview ? [{ find: /^@stripe\/stripe-js$/, replacement: "@stripe/stripe-js/pure" }] : [] },
+    define: {
+      ...previewDefines,
+      ...monitoring.define,
+      "import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW": JSON.stringify(String(migrationPreview)),
     },
-  },
+    build: monitoring.build,
+    plugins: [react(), shellHead(), ...monitoring.plugins],
+    server: {
+      watch: {
+        // Plain glob (no path.resolve) — chokidar treats backslashes as glob
+        // escapes, so a Windows-style resolved path never matches here.
+        ignored: ['**/creative/**'],
+      },
+    },
+  }
 })

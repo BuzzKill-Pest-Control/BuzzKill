@@ -13,6 +13,13 @@ dist-ssr
 *.local
 .vite
 
+# Local browser configuration and private CI upload credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.sentryclirc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

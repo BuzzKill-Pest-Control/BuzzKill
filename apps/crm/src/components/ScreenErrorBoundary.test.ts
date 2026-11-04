@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ScreenErrorBoundary from "./ScreenErrorBoundary";
+import { captureRenderFailure } from "../lib/monitoring";
+
+vi.mock("../lib/monitoring", () => ({ captureRenderFailure: vi.fn() }));
 
 /**
  * The boundary's state machine, exercised through its two static hooks — no
@@ -26,6 +29,16 @@ const healthy = (path: string): State => ({
 });
 
 describe("ScreenErrorBoundary", () => {
+  it("reports caught render failures with a fixed operation and keeps the existing fallback", () => {
+    const boundary = new ScreenErrorBoundary({ resetKey: "/customers/private-id", children: null });
+    const failure = new TypeError("Private customer data in an unexpected API payload");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    boundary.componentDidCatch(failure, { componentStack: "Private component details" });
+    expect(captureRenderFailure).toHaveBeenCalledWith(failure, "render.crm_screen");
+    expect(fromError(failure)).toMatchObject({ failed: true, message: failure.message });
+    consoleError.mockRestore();
+  });
+
   it("records the failure and the message it will show", () => {
     expect(fromError(new Error("x.localeCompare is not a function"))).toEqual({
       failed: true,
