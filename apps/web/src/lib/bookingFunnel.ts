@@ -257,7 +257,7 @@ export function validateQuoteForm(f: QuoteFormFields): Record<string, string> {
     errors.email = "A valid email is required";
   if (f.phone.trim() && !normalizePhone(f.phone))
     errors.phone = "Enter a valid phone number, e.g. (413) 555-0123";
-  if (!svc) errors.service = "Choose a service";
+  if (!svc && f.service !== DESCRIBE_SERVICE) errors.service = "Choose a service";
   if (!f.street.trim()) errors["address.street"] = "Street address is required";
   if (!f.city.trim()) errors["address.city"] = "City is required";
   if (!f.state.trim()) errors["address.state"] = "State is required";
