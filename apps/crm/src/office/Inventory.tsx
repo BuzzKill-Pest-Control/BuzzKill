@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useState } from "react";
 import {
   api,
@@ -245,7 +246,7 @@ function StockEntryForm({
       throw new Error("The unit cost must be zero or greater.");
     }
     unwrap(
-      await api().models.ProductStockEntry.create({
+      await confirmedMutation(api().models.ProductStockEntry.create({
         productId: row.product.id,
         deltaBaseUnits: delta,
         reason: mode,
@@ -256,7 +257,7 @@ function StockEntryForm({
         note: note.trim() || null,
         enteredByEmail: enteredByEmail ?? "office",
         at: new Date().toISOString(),
-      })
+      }))
     );
     await onDone();
   }, "Could not save the entry");

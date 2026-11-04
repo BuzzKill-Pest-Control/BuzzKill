@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -161,13 +162,13 @@ function EnginePanel({
     // clean attempt count. The parked state (and its owned work item) is
     // the office's to clear — this is that one safe action.
     unwrap(
-      await api().models.RateCoverage.update({
+      await confirmedMutation(api().models.RateCoverage.update({
         id: c.id,
         exhaustedAt: null,
         nextEligibleAt: null,
         failCount: 0,
         researchRequestedAt: new Date().toISOString(),
-      })
+      }))
     );
     await onChanged();
   }, "Could not retry research");
@@ -530,7 +531,7 @@ function RateForm({
         const reasonLabel =
           EDIT_REASONS.find((r) => r.code === editReason)?.label ?? editReason;
         unwrap(
-          await api().models.MarketRate.create({
+          await confirmedMutation(api().models.MarketRate.create({
             rateKey: rate.rateKey,
             service: rate.service,
             areaKey: rate.areaKey,
@@ -543,7 +544,7 @@ function RateForm({
             prevResearchedAt: rate.researchedAt ?? undefined,
             editedBy: roles.email ?? undefined,
             editReason,
-          } as Parameters<ReturnType<typeof api>["models"]["MarketRate"]["create"]>[0])
+          } as Parameters<ReturnType<typeof api>["models"]["MarketRate"]["create"]>[0]))
         );
         unwrap(
           await updateMarketRate({ id: rate.id, active: false, pinned: false })
@@ -574,11 +575,11 @@ function RateForm({
     // which closes this editor as though the research had been queued — the
     // one thing that did not happen.
     opResultUnlessRefused(
-      await api().mutations.requestPricingResearch({
+      await confirmedMutation(api().mutations.requestPricingResearch({
         rateKey: rate.rateKey,
         reasonCode: researchReason,
         note: researchNote.trim() || undefined,
-      })
+      }))
     );
     await onDone();
   }, "Could not request research");
@@ -930,11 +931,11 @@ function RollbackPanel({
   const applyAct = useAction(async () => {
     setError(null);
     unwrap(
-      await api().mutations.rollbackPricing({
+      await confirmedMutation(api().mutations.rollbackPricing({
         versionId,
         reasonCode: reason,
         note: note.trim() || undefined,
-      })
+      }))
     );
     setOpen(false);
     setVersionId("");
@@ -945,7 +946,7 @@ function RollbackPanel({
 
   const clearAct = useAction(async () => {
     setError(null);
-    unwrap(await api().mutations.clearPricingRollback({}));
+    unwrap(await confirmedMutation(api().mutations.clearPricingRollback({})));
     await onChanged();
   }, "Could not clear the rollback");
 

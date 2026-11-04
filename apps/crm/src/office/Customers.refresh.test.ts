@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Customers from "./Customers";
+import { queryCache } from "../lib/queryCache";
 const mocks = vi.hoisted(() => ({ customers: vi.fn(), groups: vi.fn(), create: vi.fn() }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ sub: "refresh-owner", office: true, owner: true }) }));
 vi.mock("../lib/api", () => ({
@@ -14,6 +15,7 @@ vi.mock("../lib/api", () => ({
 let container: HTMLDivElement, root: Root;
 const button = (text: string) => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === text)!;
 beforeEach(() => {
+  queryCache.activate(null); queryCache.activate("refresh-owner", ["OWNER"]);
   sessionStorage.clear();
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -22,13 +24,16 @@ beforeEach(() => {
   mocks.customers.mockReset().mockResolvedValue({ data: [] }); mocks.groups.mockReset().mockResolvedValue({ data: [] }); mocks.create.mockReset();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount());
+  queryCache.activate(null); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("customer directory refresh", () => {
   it("refreshes a visible list without replacing a group being drafted", async () => {
     await act(async () => root.render(createElement(MemoryRouter, null, createElement(Customers))));
     expect(mocks.customers).toHaveBeenCalledTimes(1);
     await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(mocks.customers).toHaveBeenCalledTimes(1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Refresh customers"]')!.click());
     expect(mocks.customers).toHaveBeenCalledTimes(2);
     await act(async () => button("Groups").click());
     await act(async () => button("+ Group").click());

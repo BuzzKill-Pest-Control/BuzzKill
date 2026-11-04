@@ -76,7 +76,7 @@ export default function Leads() {
       ),
     [],
     "Could not load leads",
-    { refreshOnResume: true, suspended: adding || dupe !== null || mergeStart.busyKey !== null }
+    { cacheKey: ["leads"], refreshOnResume: true, suspended: adding || dupe !== null || mergeStart.busyKey !== null }
   );
   const { data: leads, error: loadError, reload } = freshness;
 

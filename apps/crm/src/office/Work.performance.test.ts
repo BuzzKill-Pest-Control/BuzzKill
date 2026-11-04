@@ -3,14 +3,18 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorkQueue from "./Work";
+import { queryCache } from "../lib/queryCache";
 
-const mocks = vi.hoisted(() => ({ work: vi.fn(), events: vi.fn(), bookings: vi.fn(), update: vi.fn(), scan: vi.fn() }));
+const mocks = vi.hoisted(() => ({ work: vi.fn(), events: vi.fn(), bookings: vi.fn(), update: vi.fn(), scan: vi.fn(), write: vi.fn() }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ owner: true, office: true, finance: true, sub: "owner" }) }));
 vi.mock("../lib/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/api")>(),
   updateOwnedWork: mocks.update,
-  api: () => ({ models: {
+  api: () => ({ mutations: {
+    resendEmailLog: mocks.write, rebookJob: mocks.write, retryBookingFinalization: mocks.write,
+    resumePlanCancellation: mocks.write, resumeVisitChange: mocks.write,
+  }, models: {
     WorkItem: { list: mocks.scan, listWorkItemByStatusAndDueAt: mocks.work },
     WorkEvent: { list: mocks.scan, listWorkEventByWorkItemIdAndOccurredAt: mocks.events },
     BookingRequest: { listBookingRequestByStatus: mocks.bookings },
@@ -49,12 +53,34 @@ beforeEach(() => {
   mocks.bookings.mockReset().mockResolvedValue({ data: [], nextToken: null });
   mocks.update.mockReset().mockResolvedValue({ data: JSON.stringify({ workItemId: "one" }) });
   mocks.scan.mockReset().mockRejectedValue(new Error("A table scan is forbidden"));
+  mocks.write.mockReset();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); queryCache.activate(null); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => root.render(createElement(WorkQueue))); }
 
 describe("bounded owned work reads", () => {
+  it.each([
+    ["EMAIL_FAILURE", "el-one", "Resend exact message"],
+    ["NO_ACCESS", "job-one", "Rebook visit"],
+    ["PAID_NOT_FINALIZED", "booking-one", "Retry finalization"],
+    ["PLAN_CANCELLATION_RECOVERY", "plan-one", "Resume cancellation"],
+    ["VISIT_CHANGE_RECOVERY", "job-one", "Resume visit change"],
+  ])("invalidates cached operational lists only after the %s action returns", async (kind, relatedId, label) => {
+    queryCache.activate("owner", ["OWNER"]);
+    await queryCache.request(["schedule"], async () => "pre-action server rows").promise;
+    const pending = deferred<{ data: string }>(); mocks.write.mockReturnValue(pending.promise);
+    mocks.work.mockResolvedValue({ data: [item("one", { kind, relatedId })], nextToken: null });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await render(); await click(label);
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+    expect(queryCache.read(["schedule"])?.data).toBe("pre-action server rows");
+    expect(mocks.work).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ data: JSON.stringify({ resent: true, jobId: "new-job", status: "COMPLETED", outcome: "COMPLETED" }) }));
+    expect(queryCache.read(["schedule"])).toBeNull();
+    expect(mocks.work).toHaveBeenCalledTimes(2);
+  });
+
   it("renders the first deadline-ordered open page without loading the archive or any history", async () => {
     mocks.work.mockResolvedValue({ data: [item("one")], nextToken: "open-2" });
     await render();

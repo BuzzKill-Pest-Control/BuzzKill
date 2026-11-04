@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, listAll, type LeadPricingRun } from "../lib/api";
@@ -45,10 +46,10 @@ export default function PricingLog() {
   const [editing, setEditing] = useState<LeadPricingRun | null>(null);
 
   const saveOutcome = useAction(async (row: LeadPricingRun) => {
-    await api().models.LeadPricingRun.update({
+    await confirmedMutation(api().models.LeadPricingRun.update({
       id: row.id,
       outcome: row.outcome ?? "PENDING",
-    });
+    }));
     setEditing(null);
     reload();
   }, "Save failed");

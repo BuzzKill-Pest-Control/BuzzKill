@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -166,12 +167,12 @@ export default function PortalRequests() {
         promisedBy: string;
         status: string;
       }>(
-        await api().mutations.requestCallback({
+        await confirmedMutation(api().mutations.requestCallback({
           customerId,
           originalJobId: jobId,
           photoKey,
           note: message.trim() || undefined,
-        })
+        }))
       );
       setConfirmation(
         res?.status === "ALREADY_REQUESTED"
@@ -184,14 +185,14 @@ export default function PortalRequests() {
       // "Request received — reference undefined" to a person who then waits
       // for a call that is not coming.
       const res = opResultUnlessRefused<{ reference: string }>(
-        await api().mutations.submitPortalRequest({
+        await confirmedMutation(api().mutations.submitPortalRequest({
           customerId,
           kind: mode,
           jobId: mode === "RESCHEDULE" ? jobId : undefined,
           preferredDate:
             mode === "RESCHEDULE" && preferredDate ? preferredDate : undefined,
           message: message.trim() || undefined,
-        })
+        }))
       );
       setConfirmation(
         `Request received — reference ${res?.reference}. We'll respond within one business day; you can watch it below.`

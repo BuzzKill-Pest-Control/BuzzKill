@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useState } from "react";
 import { api, listAll, unwrap, type PromoCode } from "../lib/api";
 import { useAction, useAsync } from "../lib/useAsync";
@@ -267,10 +268,10 @@ function PromoForm({
       maxRedemptions: maxValue,
     };
     if (existing) {
-      unwrap(await api().models.PromoCode.update({ id: existing.id, ...fields }));
+      unwrap(await confirmedMutation(api().models.PromoCode.update({ id: existing.id, ...fields })));
     } else {
       unwrap(
-        await api().models.PromoCode.create({ ...fields, timesRedeemed: 0 })
+        await confirmedMutation(api().models.PromoCode.create({ ...fields, timesRedeemed: 0 }))
       );
     }
     await onDone();
@@ -278,7 +279,7 @@ function PromoForm({
 
   const removeCode = useAction(async () => {
     if (!existing) return;
-    unwrap(await api().models.PromoCode.delete({ id: existing.id }));
+    unwrap(await confirmedMutation(api().models.PromoCode.delete({ id: existing.id })));
     await onDone();
   }, "Could not delete the code");
 

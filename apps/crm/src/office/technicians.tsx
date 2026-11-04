@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -423,12 +424,12 @@ function TechForm({
       throw new Error("Choosing 'Other' needs a short note saying why.");
     }
     try {
-      const res = await api().mutations.deactivateTechnician({
+      const res = await confirmedMutation(api().mutations.deactivateTechnician({
         technicianId: existing.id,
         reasonCode: offboardReason,
         note: offboardNote.trim() || undefined,
         idempotencyKey: offboardKey,
-      });
+      }));
       if (res.errors?.length) throw new Error(res.errors[0].message);
       const data = opResult<{
         outcome?: string;
@@ -477,7 +478,7 @@ function TechForm({
     }
     if (existing) {
       opResult(
-        await api().mutations.saveTechnician({
+        await confirmedMutation(api().mutations.saveTechnician({
           technicianId: existing.id,
           name: name.trim(),
           email: email.trim() || undefined,
@@ -489,7 +490,7 @@ function TechForm({
           baseCity: baseCity.trim() || undefined,
           baseState: baseState.trim() || undefined,
           baseZip: baseZip.trim() || undefined,
-        })
+        }))
       );
       await onDone();
       return;
@@ -499,7 +500,7 @@ function TechForm({
     let technicianId = createdTechId;
     if (technicianId) {
       opResult(
-        await api().mutations.saveTechnician({
+        await confirmedMutation(api().mutations.saveTechnician({
           technicianId,
           name: name.trim(),
           email: email.trim() || undefined,
@@ -511,11 +512,11 @@ function TechForm({
           baseCity: baseCity.trim() || undefined,
           baseState: baseState.trim() || undefined,
           baseZip: baseZip.trim() || undefined,
-        })
+        }))
       );
     } else {
       const saved = opResult<{ technicianId?: string }>(
-        await api().mutations.saveTechnician({
+        await confirmedMutation(api().mutations.saveTechnician({
           name: name.trim(),
           email: email.trim() || undefined,
           phone: phone.trim() || undefined,
@@ -526,7 +527,7 @@ function TechForm({
           baseCity: baseCity.trim() || undefined,
           baseState: baseState.trim() || undefined,
           baseZip: baseZip.trim() || undefined,
-        })
+        }))
       );
       technicianId = saved?.technicianId ?? null;
       if (!technicianId) throw new Error("Could not save technician");
@@ -538,12 +539,12 @@ function TechForm({
         // envelope rather than an error — treat it as the invite failing, so
         // the "saved, but the invite failed" wording below still applies.
         const invited = opResult<{ refused?: string }>(
-          await api().mutations.adminCreateUser({
+          await confirmedMutation(api().mutations.adminCreateUser({
             email: email.trim(),
             name: name.trim(),
             roles: ["TECH"],
             technicianId,
-          })
+          }))
         );
         if (invited?.refused) throw new Error(invited.refused);
       } catch (err) {

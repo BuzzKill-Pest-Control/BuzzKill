@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Schedule from "./Schedule";
+import { queryCache } from "../lib/queryCache";
 const mocks = vi.hoisted(() => ({ technicians: vi.fn(), unscheduled: vi.fn(), mutate: vi.fn() }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ sub: "refresh-owner", office: true, owner: true }) }));
 vi.mock("./technicians", () => ({ technicianComplianceIssue: () => null }));
@@ -26,6 +27,7 @@ let container: HTMLDivElement, root: Root;
 const tech = (name: string) => ({ id: name, name, active: true, licenseNumber: "example", licenseExpiresOn: "2030-01-01" });
 const button = (text: string) => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes(text))!;
 beforeEach(() => {
+  queryCache.activate(null); queryCache.activate("refresh-owner", ["OWNER"]);
   sessionStorage.clear();
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-03T16:00:00Z"));
@@ -34,7 +36,8 @@ beforeEach(() => {
   mocks.technicians.mockReset(); mocks.unscheduled.mockReset().mockResolvedValue({ data: [] }); mocks.mutate.mockReset();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount());
+  queryCache.activate(null); container.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("schedule refresh", () => {
   it("paginates the status-only pool and includes an undated job from a later page", async () => {
@@ -65,7 +68,7 @@ describe("schedule refresh", () => {
     mocks.technicians.mockResolvedValueOnce({ data: [tech("Current technician")] }).mockReturnValueOnce(refresh.promise);
     mocks.unscheduled.mockResolvedValue({ data: [{ id: "job", customerId: "customer", status: "UNSCHEDULED", serviceType: "Rodent control" }] });
     await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
-    await act(async () => window.dispatchEvent(new Event("focus")));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Refresh schedule"]')!.click());
     expect(container.textContent).toContain("Current technician"); expect(container.textContent).toContain("Refreshing");
     await act(async () => refresh.resolve({ data: [tech("Current technician")] }));
     await act(async () => button("Assign").click());

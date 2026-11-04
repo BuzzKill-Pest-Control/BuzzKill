@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { COMMON_UNITS } from "../../../web/amplify/functions/shared/units";
 import { displayAddress, routingAddress } from "../lib/serviceAddress";
@@ -337,12 +338,12 @@ export default function TechJob() {
     // Only START (which emails the customer) on the first tap; if this
     // visit is already en route, resume streaming without a second email.
     opResult(
-      await api().mutations.enRoute({
+      await confirmedMutation(api().mutations.enRoute({
         jobId: j.id,
         action: j.enRouteAt ? "PING" : "START",
         lat,
         lng,
-      })
+      }))
     );
   }, "Could not start On My Way");
 
@@ -373,12 +374,12 @@ export default function TechJob() {
             const now = Date.now();
             if (now - omwLastPing.current < 15000) return;
             omwLastPing.current = now;
-            void api().mutations.enRoute({
+            void confirmedMutation(api().mutations.enRoute({
               jobId: job.id,
               action: "PING",
               lat: p.coords.latitude,
               lng: p.coords.longitude,
-            });
+            }), ["schedule"]).catch(() => { /* Best-effort sample; the next ping can recover. */ });
           },
           () => {
             /* a dropped sample is fine — the next one updates the map */
@@ -404,10 +405,10 @@ export default function TechJob() {
   };
 
   const acknowledge = useAction(async (j: Job) => {
-    const res = await api().mutations.acknowledgePacket({
+    const res = await confirmedMutation(api().mutations.acknowledgePacket({
       jobId: j.id,
       version: j.packetVersion ?? 1,
-    });
+    }));
     if (res.errors?.length) throw new Error(res.errors[0].message);
     // A refusal (the office reassigned this stop while the packet was open)
     // comes back as a successful response — without this the screen would
@@ -422,7 +423,7 @@ export default function TechJob() {
       // The application's start time on the pesticide record — stamped
       // by the server's clock. The Job model is read-only for techs, so
       // there is no browser-supplied timestamp to rewrite.
-      const res = await api().mutations.startJob({ jobId: j.id });
+      const res = await confirmedMutation(api().mutations.startJob({ jobId: j.id }));
       if (res.errors?.length) throw new Error(res.errors[0].message);
       // The packet-changed refusal is the whole point of GL-12: the technician
       // has to be TOLD to read the change. Silently reloading would leave them
@@ -822,16 +823,16 @@ function ScopePrepExits({ job, onDone }: { job: Job; onDone: () => Promise<void>
       const mutations = api().mutations;
       const res =
         mode === "scope"
-          ? await mutations.reportScopeMismatch({
+          ? await confirmedMutation(mutations.reportScopeMismatch({
               jobId: job.id,
               reason,
               note: note.trim() || undefined,
-            })
-          : await mutations.reportPrepMissing({
+            }))
+          : await confirmedMutation(mutations.reportPrepMissing({
               jobId: job.id,
               reason,
               note: note.trim() || undefined,
-            });
+            }));
       if (res.errors?.length) throw new Error(res.errors[0].message);
       // The visit was completed or canceled from the office side while this
       // screen was open — a refusal, not a failure. Without this the sheet
@@ -967,12 +968,12 @@ function CallbackFindingCard({
     if (!finding || !note.trim()) return;
     try {
       const res = opResult<{ status: string }>(
-        await api().mutations.recordCallbackFinding({
+        await confirmedMutation(api().mutations.recordCallbackFinding({
           callbackRequestId,
           finding,
           note: note.trim(),
           photoKey: photoKey ?? undefined,
-        })
+        }))
       );
       setDone(res?.status ?? "recorded");
       await onDone();
@@ -1091,12 +1092,12 @@ function NoAccessCard({
       // was already completed or canceled) changed nothing, and wiping the
       // draft on the way past would throw away the technician's words.
       const res = opResult<{ refused?: string }>(
-        await api().mutations.reportNoAccess({
+        await confirmedMutation(api().mutations.reportNoAccess({
           jobId: job.id,
           reason,
           note: note.trim() || undefined,
           photoKey: photoKey ?? undefined,
-        })
+        }))
       );
       if (res?.refused) throw new Error(res.refused);
       // The visit is over and no report will be filed for it — a lingering
@@ -1461,11 +1462,11 @@ function ReportForm({
     // rewritable after issuance. The mutation creates or updates the draft and
     // refuses once it is FINALIZED.
     const saved = opResult<{ reportId?: string; refused?: string }>(
-      await api().mutations.saveServiceReportDraft({
+      await confirmedMutation(api().mutations.saveServiceReportDraft({
         jobId: job.id,
         reportId: reportId ?? undefined,
         ...fields,
-      })
+      }))
     );
     // A refusal is the server saying "no" in words meant for this screen
     // (finalized record, someone else's draft) — surface it verbatim.
@@ -1524,13 +1525,13 @@ function ReportForm({
       // retried tomorrow morning, the record's end time is still
       // now — while the tech is on site — not whenever the retry
       // lands.
-      const ended = await api().mutations.endApplication({
+      const ended = await confirmedMutation(api().mutations.endApplication({
         jobId: job.id,
-      });
+      }));
       if (ended.errors?.length) {
         throw new Error(ended.errors[0].message);
       }
-      const res = await api().mutations.finalizeServiceReport({ reportId: id });
+      const res = await confirmedMutation(api().mutations.finalizeServiceReport({ reportId: id }));
       if (res.errors?.length) throw new Error(res.errors[0].message);
       // MUST precede markDelivered. Every finalize refusal is a field the
       // technician still has to fill in, and markDelivered CLEARS THE LOCAL

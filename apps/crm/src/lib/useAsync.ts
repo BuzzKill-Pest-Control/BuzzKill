@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   createKeyedSingleFlight,
   createRequestGuard,
   createSingleFlight,
-  runGuarded,
   toMessage,
 } from "./asyncCore";
 import { useResumeRefresh } from "./useResumeRefresh";
+import { queryCache, QUERY_STALE_MS, type CachedQuery, type QueryKey } from "./queryCache";
 
 /**
  * The two hooks every screen in this app was hand-rolling.
@@ -46,7 +46,11 @@ export type AsyncState<T> = {
   refreshSuspended: boolean;
 };
 
-type LoadOptions = { refreshOnResume?: boolean; suspended?: boolean };
+export type LoadOptions = {
+  refreshOnResume?: boolean; suspended?: boolean;
+  /** Stable resource/filter key. Opt-in server reads only, never editable drafts. */
+  cacheKey?: QueryKey; staleTimeMs?: number;
+};
 
 /**
  * Load when `deps` change, with the stale-response guard applied.
@@ -60,77 +64,112 @@ export function useAsync<T>(
   fallbackMessage = "Could not load",
   options: LoadOptions = {}
 ): AsyncState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const scope = useSyncExternalStore(queryCache.subscribe, queryCache.scope, () => "signed-out");
+  const keyText = options.cacheKey ? JSON.stringify(options.cacheKey) : null;
+  const selection = keyText === null ? null : JSON.stringify([scope, keyText]);
+  const cached = keyText && queryCache.identity() ? queryCache.read<T>(JSON.parse(keyText)) : null;
+  const staleTime = options.staleTimeMs ?? QUERY_STALE_MS;
+  const [state, setState] = useState(() => ({
+    data: cached?.data ?? null as T | null, error: null as string | null,
+    loading: !cached || Date.now() - cached.fetchedAt >= staleTime,
+    updated: cached?.fetchedAt ?? null as number | null, selection,
+  }));
   const guardRef = useRef(createRequestGuard());
   const mounted = useRef(false);
   const inFlight = useRef(false);
+  const pendingRefresh = useRef(false);
   const suspended = useRef(options.suspended ?? false);
   suspended.current = options.suspended ?? false;
+  const selectionRef = useRef(selection); selectionRef.current = selection;
+  const keyRef = useRef(keyText); keyRef.current = keyText;
+  const loadRef = useRef(load); loadRef.current = load;
+  const runRef = useRef<(background?: boolean) => Promise<void>>(async () => {});
   useEffect(() => {
-    // React StrictMode replays setup/cleanup with the same refs. Each setup
-    // needs a new live guard; disposed guards keep earlier reads invalid.
     const guard = createRequestGuard();
-    guardRef.current = guard;
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      guard.dispose();
-    };
+    guardRef.current = guard; mounted.current = true;
+    return () => { mounted.current = false; guard.dispose(); };
   }, []);
-
-  // Read from the latest render rather than from `deps`: callers write the
-  // loader inline, so depending on its identity would re-run every render.
-  const loadRef = useRef(load);
-  loadRef.current = load;
 
   const run = useCallback(async (background = false) => {
     if (!mounted.current) return;
-    const isCurrent = guardRef.current.begin();
-    inFlight.current = true;
-    setError(null);
-    setLoading(true);
-    await runGuarded(
-      () => loadRef.current(),
-      isCurrent,
-      {
-        data: (value) => {
-          if (background && suspended.current) return;
-          setData(value);
-          setLastUpdatedAt(Date.now());
-        },
-        error: setError,
-        settled: () => {
-          inFlight.current = false;
-          setLoading(false);
-        },
-      },
-      fallbackMessage
-    );
+    if (keyRef.current && !queryCache.identity()) return;
+    const forSelection = selectionRef.current;
+    const guardCurrent = guardRef.current.begin();
+    const isCurrent = () => guardCurrent() && forSelection === selectionRef.current;
+    const key = keyRef.current;
+    const loader = loadRef.current;
+    const request = key && queryCache.identity() ? queryCache.request<T>(JSON.parse(key), loader) : null;
+    inFlight.current = true; pendingRefresh.current = false;
+    setState((current) => ({ ...current, error: null, loading: true }));
+    try {
+      const result: CachedQuery<T> = request ? await request.promise : { data: await loader(), fetchedAt: Date.now() };
+      if (!isCurrent()) return;
+      if (request && !request.current()) { pendingRefresh.current = true; return; }
+      if (background && suspended.current) { pendingRefresh.current = true; return; }
+      setState({ data: result.data, error: null, loading: false, updated: result.fetchedAt, selection: forSelection });
+    } catch (error) {
+      if (isCurrent() && (!request || request.current())) {
+        setState((current) => ({ ...current, error: toMessage(error, fallbackMessage) }));
+      }
+    } finally {
+      if (isCurrent()) {
+        inFlight.current = false;
+        setState((current) => ({ ...current, loading: false }));
+        if (pendingRefresh.current && !suspended.current && document.visibilityState !== "hidden" && navigator.onLine !== false) {
+          void runRef.current(true);
+        }
+      }
+    }
   }, [fallbackMessage]);
+  runRef.current = run;
 
   const reload = useCallback(() => run(), [run]);
   const refresh = useCallback(() => {
     if (suspended.current || inFlight.current || document.visibilityState === "hidden" || navigator.onLine === false) return;
     void run(true);
   }, [run]);
-  const online = useResumeRefresh(refresh, options.refreshOnResume === true);
+  const resume = useCallback(() => {
+    const key = keyRef.current;
+    const value = key && queryCache.identity() ? queryCache.read(JSON.parse(key)) : null;
+    if (!pendingRefresh.current && value && Date.now() - value.fetchedAt < staleTime) return;
+    refresh();
+  }, [refresh, staleTime]);
+  const online = useResumeRefresh(resume, options.refreshOnResume === true);
+
+  useEffect(() => queryCache.subscribe((event) => {
+    const key = keyRef.current;
+    if (event.kind !== "invalidate" || !key || (event.resources && !event.resources.includes(String(JSON.parse(key)[0])))) return;
+    pendingRefresh.current = true;
+    if (!suspended.current && document.visibilityState !== "hidden" && navigator.onLine !== false) void runRef.current(true);
+  }), []);
+  useEffect(() => {
+    if (!options.suspended && pendingRefresh.current && !inFlight.current) refresh();
+  }, [options.suspended, refresh]);
 
   useEffect(() => {
-    // Clear stale rows so the caller shows its spinner rather than the
-    // previous selection's data while the new one is in flight.
-    setData(null);
-    setLastUpdatedAt(null);
-    void run();
+    guardRef.current.begin();
+    inFlight.current = false;
+    pendingRefresh.current = false;
+    const value = keyText && queryCache.identity() ? queryCache.read<T>(JSON.parse(keyText)) : null;
+    setState({ data: value?.data ?? null, updated: value?.fetchedAt ?? null, error: null,
+      loading: !value || Date.now() - value.fetchedAt >= staleTime, selection });
+    if (!value || Date.now() - value.fetchedAt >= staleTime) {
+      if (value && suspended.current) pendingRefresh.current = true;
+      else void run(Boolean(value));
+    }
+    // Loader closures are deliberately excluded; selection contains the stable key/account.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, selection]);
 
+  // A changed key/account must never display the previous selection even for one render.
+  const selected = state.selection === selection ? state : {
+    data: cached?.data ?? null, error: null, loading: !cached || Date.now() - cached.fetchedAt >= staleTime,
+    updated: cached?.fetchedAt ?? null,
+  };
+  const setData = useCallback((data: T | null) => setState((current) => ({ ...current, data })), []);
   return {
-    data, loading, error, reload, setData, refresh, lastUpdatedAt, online,
-    refreshSuspended: options.suspended ?? false,
+    data: selected.data, loading: selected.loading, error: selected.error, reload, setData, refresh,
+    lastUpdatedAt: selected.updated, online, refreshSuspended: options.suspended ?? false,
   };
 }
 

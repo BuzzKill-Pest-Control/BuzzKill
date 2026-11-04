@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -115,13 +116,13 @@ export default function GroupDetail() {
       // offerReuse marks the one refusal this screen can resolve by re-sending
       // with confirmReuse; any other refusal is shown as-is.
       const res = opResult<{ refused?: string; offerReuse?: boolean }>(
-        await api().mutations.adminCreateUser({
+        await confirmedMutation(api().mutations.adminCreateUser({
           email: group.contactEmail,
           name: group.contactName ?? group.name,
           roles: ["CUSTOMER"],
           groupId: group.id,
           confirmReuse,
-        })
+        }))
       );
       if (res?.refused) {
         if (res.offerReuse) {
@@ -139,10 +140,10 @@ export default function GroupDetail() {
       // Moving a member while another group change is mid-flight is refused in
       // words; without this the row would re-render as moved.
       opResultUnlessRefused(
-        await api().mutations.setCustomerGroup({
+        await confirmedMutation(api().mutations.setCustomerGroup({
           customerId,
           groupId: groupId ?? undefined,
-        })
+        }))
       );
       reload();
     });
@@ -167,14 +168,14 @@ export default function GroupDetail() {
       // OWNER writes the group model directly (same path new groups are created
       // on) — no dedicated mutation. Empty fields clear to null.
       unwrap(
-        await api().models.CustomerGroup.update({
+        await confirmedMutation(api().models.CustomerGroup.update({
           id: group.id,
           name: fName.trim(),
           contactName: fContact.trim() || null,
           contactEmail: fEmail.trim() || null,
           contactPhone: fPhone.trim() || null,
           notes: fNotes.trim() || null,
-        })
+        }))
       );
       setEditing(false);
       reload();
@@ -200,16 +201,16 @@ export default function GroupDetail() {
       // INACTIVE, so an inactive group never implies a live login. No-op when
       // there is no login.
       unwrap(
-        await api().mutations.setPortalAccess({
+        await confirmedMutation(api().mutations.setPortalAccess({
           action: "REVOKE",
           groupId: group.id,
-        })
+        }))
       );
       unwrap(
-        await api().models.CustomerGroup.update({
+        await confirmedMutation(api().models.CustomerGroup.update({
           id: group.id,
           status: "INACTIVE",
-        })
+        }))
       );
       reload();
     });
@@ -218,10 +219,10 @@ export default function GroupDetail() {
     runOn("status", "Could not reactivate the group", async () => {
       if (!group) return;
       unwrap(
-        await api().models.CustomerGroup.update({
+        await confirmedMutation(api().models.CustomerGroup.update({
           id: group.id,
           status: "ACTIVE",
-        })
+        }))
       );
       reload();
     });

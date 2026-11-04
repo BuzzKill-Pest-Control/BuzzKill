@@ -119,7 +119,7 @@ export default function Dashboard() {
       ).catch(() => [] as BookingRequest[]),
     ]);
     return { invoices: inv, customers: cus, plans: pl, jobs: jb, disputes: dp, bookings: bk };
-  }, [], "Could not load dashboard", { refreshOnResume: true, suspended: assigningId !== null || depositingId !== null });
+  }, [], "Could not load dashboard", { cacheKey: ["dashboard"], refreshOnResume: true, suspended: assigningId !== null || depositingId !== null });
   const { data, reload: load } = freshness;
   const invoices = data?.invoices ?? null;
   const customers = data?.customers ?? [];

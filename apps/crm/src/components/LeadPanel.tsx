@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -107,7 +108,7 @@ export default function LeadPanel({
       // office has to fix. Without this it collapses into "the link was not
       // returned", which tells them nothing and sends them nowhere.
       const prepared = opResultUnlessRefused<{ url: string }>(
-        await api().mutations.prepareLeadQuote({ customerId: customer.id })
+        await confirmedMutation(api().mutations.prepareLeadQuote({ customerId: customer.id }))
       );
       if (!prepared?.url) throw new Error("The quote form link was not returned.");
       setPreparedUrl(prepared.url);
@@ -188,11 +189,11 @@ export default function LeadPanel({
               onClick={() =>
                 void act("bookinglink", async () => {
                   const sent = opResult<{ sent: boolean }>(
-                    await api().mutations.sendCustomerEmail({
+                    await confirmedMutation(api().mutations.sendCustomerEmail({
                       customerId: customer.id,
                       kind: "booking-link",
                       idempotencyKey: clientActionId("booking-link"),
-                    })
+                    }))
                   );
                   if (!sent?.sent) throw new Error("The booking link was not sent.");
                 })
