@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button, EmptyState } from "../ui/kit";
+import { captureRenderFailure } from "../lib/monitoring";
 
 /**
  * Keeps one broken screen from taking the whole CRM with it.
@@ -50,6 +51,7 @@ export default class ScreenErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    captureRenderFailure(error, "render.crm_screen");
     // The office reports these by screenshot, so the console is where the
     // detail has to live.
     console.error("CRM screen failed to render", error, info.componentStack);

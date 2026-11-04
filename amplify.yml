@@ -5,6 +5,7 @@ applications:
       phases:
         build:
           commands:
+            - export SENTRY_DEPLOYMENT_BRANCH="$AWS_BRANCH"
             - nvm install 22.23.3 && nvm use 22.23.3
             - npm install --global npm@11.11.0
             - npm ci --cache .npm --prefer-offline
@@ -42,6 +43,7 @@ applications:
             # Hosting env var with the VITE_ prefix is forwarded into a .env
             # file so import.meta.env can see it. Safe no-op when nothing is set.
             - env | grep -E '^VITE_' >> .env || true
+            - node --test ../../monitoring/build.test.mjs
             - npm run build
             # Staging must never compete with www.pestbuzzkill.com in search:
             # non-main branches get a hard noindex (robots.txt + meta).
@@ -53,6 +55,7 @@ applications:
                 # advertise them.
                 rm -f dist/sitemap.xml
               fi
+            - node ../../monitoring/build.mjs --assert-artifacts dist
       artifacts:
         baseDirectory: dist
         files:
@@ -66,6 +69,7 @@ applications:
       phases:
         preBuild:
           commands:
+            - export SENTRY_DEPLOYMENT_BRANCH="$AWS_BRANCH"
             - nvm install 22.23.3 && nvm use 22.23.3
             - npm install --global npm@11.11.0
             - npm ci --cache .npm --prefer-offline
@@ -116,7 +120,9 @@ applications:
             # The office money screens compute revenue. Same rule as the backend:
             # a broken money rule fails the build rather than shipping.
             - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
+            - node --test ../../monitoring/build.test.mjs
             - npm run build
+            - node ../../monitoring/build.mjs --assert-artifacts dist
       artifacts:
         baseDirectory: dist
         files:

@@ -20,6 +20,9 @@ npm run dev        # local dev server
 npx ampx sandbox   # personal cloud sandbox for the Amplify backend
 ```
 
+Browser error reporting and release tracking use the per-business ownership and
+deployment conventions in [the monitoring guide](docs/monitoring.md).
+
 ## Public articles
 
 The marketing site's `/blog` index and `/blog/:slug` pages share the existing header, footer, typography, and black/lime design. The collection starts empty; no demonstration articles are published. Published entries live in `apps/web/src/content/articles/articles.json` and are validated by `src/lib/articles.ts`. Every record needs:

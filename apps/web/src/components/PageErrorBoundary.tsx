@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { OFFICE_EMAIL, OFFICE_MAILTO, OFFICE_PHONE_PRETTY, OFFICE_TEL } from "../lib/contactInfo";
 import { isChunkLoadError } from "../lib/lazyPage";
+import { captureRenderFailure } from "../lib/browserMonitoring";
 
 /**
  * The last thing between a failed page and a blank screen.
@@ -33,6 +34,7 @@ export default class PageErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    captureRenderFailure(error, "render.web_page");
     // Surfaces in the same console/session tooling as any other page error.
     console.error("Page failed to render", error, info.componentStack);
   }
