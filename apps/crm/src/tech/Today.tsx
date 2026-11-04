@@ -3,6 +3,7 @@ import { routingAddress, shortDisplayAddress } from "../lib/serviceAddress";
 import { useNavigate } from "react-router-dom";
 import { technicianDay, type Job, type TechnicianDay } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
+import RefreshStatus from "../components/RefreshStatus";
 import { clearAllDrafts } from "../lib/reportDraft";
 import { addDays, prettyWeekday, todayEastern } from "../lib/format";
 import { formatJobAppointmentTime } from "../lib/jobAppointment";
@@ -49,15 +50,19 @@ export default function TechToday() {
   const [date, setDate] = useState(todayEastern());
   // Office override; null means "the caller's own day" (a TECH is always self).
   const [pickedTechId, setPickedTechId] = useState<string | null>(null);
-  const { data: day, error } = useAsync<TechnicianDay>(
+  const freshness = useAsync<TechnicianDay>(
     () => technicianDay(date, pickedTechId ?? undefined),
     [date, pickedTechId],
-    "Could not load route"
+    "Could not load route",
+    { refreshOnResume: true }
   );
+  const { data: day, error } = freshness;
 
   if (day?.unlinked) {
     return (
       <Page title="My day">
+        <RefreshStatus state={freshness} label="route" />
+        <ErrorNote error={error} />
         <EmptyState
           title="No technician profile linked"
           body="Ask the office to link your login to your technician record (More → Technicians)."
@@ -73,6 +78,8 @@ export default function TechToday() {
     clearAllDrafts();
     return (
       <Page title="My day">
+        <RefreshStatus state={freshness} label="route" />
+        <ErrorNote error={error} />
         <EmptyState
           title="Access has ended"
           body="This login no longer has field access. Talk to the office if you believe this is a mistake."
@@ -84,6 +91,8 @@ export default function TechToday() {
   if (day?.licenseLapsed) {
     return (
       <Page title="My day">
+        <RefreshStatus state={freshness} label="route" />
+        <ErrorNote error={error} />
         <EmptyState
           title="No current applicator licence on file"
           body="You can review your own completed work, but no route or new visits until the office records a current licence."
@@ -109,6 +118,7 @@ export default function TechToday() {
 
   return (
     <Page title="My day">
+      <RefreshStatus state={freshness} label="route" />
       <Card>
         <div className="row-split">
           <Button small variant="ghost" onClick={() => setDate(addDays(date, -1))}>

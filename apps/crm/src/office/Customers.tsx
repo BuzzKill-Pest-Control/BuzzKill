@@ -4,6 +4,7 @@ import { api, listAll, unwrap } from "../lib/api";
 import { useAction, useAsync } from "../lib/useAsync";
 import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
 import { parseCustomersView, type CustomersView } from "../lib/navigationMemory";
+import RefreshStatus from "../components/RefreshStatus";
 import {
   rowsForTab,
   type CustomersLoaded,
@@ -35,11 +36,7 @@ export default function Customers() {
 
   // The stale-response guard this screen used to hand-roll now lives in
   // useAsync, so every list in the app has it.
-  const {
-    data: loaded,
-    error,
-    reload,
-  } = useAsync<CustomersLoaded>(async () => {
+  const freshness = useAsync<CustomersLoaded>(async () => {
     // Captured per run, so the tag records the tab this data was actually
     // fetched for rather than whatever the tab happens to be when it lands.
     const forTab = tab;
@@ -60,7 +57,8 @@ export default function Customers() {
         )
       ),
     };
-  }, [tab]);
+  }, [tab], "Could not load customers", { refreshOnResume: true, suspended: addingGroup });
+  const { data: loaded, error, reload } = freshness;
 
   // Held rows belonging to a different tab are "not loaded yet" for this one,
   // which the existing `!customers` / `!groups` branches already render as a
@@ -92,6 +90,7 @@ export default function Customers() {
         )
       }
     >
+      <RefreshStatus state={freshness} label="customers" />
       <SegControl
         options={[
           { value: "ACTIVE" as Tab, label: "Active" },

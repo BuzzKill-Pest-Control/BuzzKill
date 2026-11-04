@@ -10,6 +10,7 @@ import {
 import { useAsync, useKeyedAction } from "../lib/useAsync";
 import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
 import { parseLeadsView, type LeadsView } from "../lib/navigationMemory";
+import RefreshStatus from "../components/RefreshStatus";
 import { fmtDateTime } from "../lib/format";
 import { useRoles } from "../lib/auth";
 import {
@@ -50,21 +51,6 @@ const initialLeadsView = (): LeadsView => ({ mineOnly: false, stageFilter: "ALL"
 export default function Leads() {
   const navigate = useNavigate();
   const roles = useRoles();
-  const {
-    data: leads,
-    error: loadError,
-    reload,
-  } = useAsync<Customer[]>(
-    () =>
-      listAll((t) =>
-        api().models.Customer.listCustomerByStatusAndDisplayName(
-          { status: "LEAD" },
-          { limit: 500, nextToken: t }
-        )
-      ),
-    [],
-    "Could not load leads"
-  );
   // The duplicate-decision submit still hand-rolls its error; the mutation
   // pass takes it.
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -79,6 +65,20 @@ export default function Leads() {
   // The Merge… arm, keyed by candidate so one merge start in flight cannot
   // swallow a press on another candidate's button.
   const mergeStart = useKeyedAction("Could not start the merge");
+
+  const freshness = useAsync<Customer[]>(
+    () =>
+      listAll((t) =>
+        api().models.Customer.listCustomerByStatusAndDisplayName(
+          { status: "LEAD" },
+          { limit: 500, nextToken: t }
+        )
+      ),
+    [],
+    "Could not load leads",
+    { refreshOnResume: true, suspended: adding || dupe !== null || mergeStart.busyKey !== null }
+  );
+  const { data: leads, error: loadError, reload } = freshness;
 
   // The inbox is not a sales pipeline. It contains only inquiries that still
   // need a human outcome, ordered by business risk: overdue first, then due.
@@ -225,6 +225,7 @@ export default function Leads() {
         </Button>
       }
     >
+      <RefreshStatus state={freshness} label="leads" />
       <ErrorNote error={submitError ?? loadError} />
       <label className="inline-check small" style={{ margin: "8px 0 12px" }}>
         <input

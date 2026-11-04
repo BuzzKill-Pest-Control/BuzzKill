@@ -7,6 +7,7 @@ import WorkQueue from "./Work";
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   list: vi.fn(),
+  bookings: vi.fn(),
   office: true,
   item: {
     id: "recovery-1", kind: "LEAD_LIFECYCLE_RECOVERY", status: "OPEN",
@@ -24,7 +25,7 @@ vi.mock("../lib/api", async (importOriginal) => {
     updateOwnedWork: mocks.update,
     listWorkItems: mocks.list,
     listWorkEvents: async () => ({ data: [], nextToken: null }),
-    api: () => ({ models: { BookingRequest: { list: async () => ({ data: [], nextToken: null }) } } }),
+    api: () => ({ models: { BookingRequest: { list: mocks.bookings } } }),
   };
 });
 let container: HTMLDivElement;
@@ -35,6 +36,7 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
   mocks.office = true;
   mocks.list.mockReset().mockResolvedValue({ data: [mocks.item], nextToken: null });
+  mocks.bookings.mockReset().mockResolvedValue({ data: [], nextToken: null });
   mocks.update.mockReset().mockResolvedValue({ data: JSON.stringify({ workItemId: "recovery-1", status: "RESOLVED" }) });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -46,6 +48,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("saved office job lead recovery", () => {
+  it("keeps core work visible when the optional payment read fails", async () => {
+    mocks.bookings.mockRejectedValue(new Error("Payment data unavailable"));
+    await act(async () => root.render(createElement(WorkQueue)));
+    expect(container.textContent).toContain("Saved job needs lead cleanup");
+    expect(retryButton()).toBeDefined();
+    expect(container.textContent).toContain("Payments in flight: Payment data unavailable");
+  });
   it("retries the existing recovery item and refreshes after confirmed closure", async () => {
     await act(async () => root.render(createElement(WorkQueue)));
     await act(async () => retryButton()!.click());
