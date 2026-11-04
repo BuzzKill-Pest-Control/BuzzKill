@@ -965,7 +965,7 @@ type FinalizeDataClient = {
 
 /**
  * Every customer this booking's email could belong to. A lead the office
- * priced (Thumbtack paste, funnel CONTACT) and then sent to the funnel is
+ * priced (office intake, funnel CONTACT) and then sent to the funnel is
  * the same person who now paid — creating a second record would strand the
  * lead history on a row nobody looks at again. But email alone is a guess:
  * ONE match converts; more than one is ambiguity the caller must not
@@ -1276,7 +1276,7 @@ async function finalizeClaimed(
   const catalogService = (booking.service ? catalogEntry(booking.service) : null) ?? entryForLabel(serviceLabel);
 
   // 1. Customer (ACTIVE — they've paid). A lead already in the CRM with this
-  // email (Thumbtack paste, funnel CONTACT) CONVERTS instead of duplicating:
+  // email (office intake, funnel CONTACT) CONVERTS instead of duplicating:
   // the booking is that lead's win, and its pricing history should say so.
   // Matching is best-effort — any failure in it falls back to creating a
   // fresh customer (flagged in the office alert), because nothing about the

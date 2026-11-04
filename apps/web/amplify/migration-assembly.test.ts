@@ -157,8 +157,8 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
   // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3086);
-  expect(allResources(bootstrap)).toHaveLength(2124);
+  expect(allResources(full)).toHaveLength(3081);
+  expect(allResources(bootstrap)).toHaveLength(2119);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(606);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1818);
@@ -324,7 +324,7 @@ it("deploys a production-configured cutover with every application worker and wr
   const resources = allResources(pausedRelease);
   expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
   const functions = resources.filter((r) => r.Type === "AWS::Lambda::Function");
-  expect(functions.filter((r) => r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(19);
+  expect(functions.filter((r) => r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
   const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
   expect(schedules).toHaveLength(3);
   for (const schedule of schedules) expect(schedule.Properties?.State).toBe("DISABLED");
@@ -361,7 +361,7 @@ it("primes the complete normal API while all execution remains paused", () => {
   assertReferenceClosure(primedRelease);
   const resources = allResources(primedRelease);
   expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
-  expect(resources.filter((r) => r.Type === "AWS::Lambda::Function" && r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(19);
+  expect(resources.filter((r) => r.Type === "AWS::Lambda::Function" && r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
   const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
   expect(schedules).toHaveLength(3);
   for (const r of schedules) expect(r.Properties?.State).toBe("DISABLED");

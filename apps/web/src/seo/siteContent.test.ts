@@ -1,12 +1,15 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StaticRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { COMPANY } from "../../amplify/functions/shared/company";
-import { PUBLIC_REVIEWS, THUMBTACK_RATING } from "../data/reviews";
+import Reviews from "../pages/Reviews";
 
 /**
- * Source-level checks on the public pages: the approved reviews and metrics
- * are present, the unsupported claims stay gone, legal dates are possible,
+ * Checks on the public pages: approved metrics and feedback links
+ * are present, unsupported claims stay gone, legal dates are possible,
  * and the company's identity facts come from the one record.
  */
 const WEB = join(__dirname, "..", "..");
@@ -38,14 +41,16 @@ describe("approved reviews and metrics", () => {
     expect(lp).toContain('num: "#1"');
     expect(lp).toContain("resident complaint category for HOA boards — ahead of parking and noise");
   });
-  it("publish the public reviews on /reviews without saying reviews are still being collected", () => {
-    const page = read("src/pages/Reviews.tsx");
-    expect(page).not.toMatch(/collecting reviews|coming soon/i);
-    expect(page).toContain("PUBLIC_REVIEWS");
-    expect(PUBLIC_REVIEWS).toHaveLength(THUMBTACK_RATING.count);
-    expect(THUMBTACK_RATING.value).toBe("5.0");
-    expect(page).toContain("Leave a Google review");
-    expect(page).not.toMatch(/read (our )?reviews on google/i);
+  it("offers Google review submission and service contact without presenting unsourced testimonials", () => {
+    const html = renderToStaticMarkup(
+      createElement(StaticRouter, { location: "/reviews" }, createElement(Reviews))
+    );
+    expect(html).toContain(`href="${COMPANY.reviewSources.googleReviewSubmission}"`);
+    expect(html).toContain("Leave a Google review");
+    expect(html).toContain('href="/contact"');
+    expect(html).toContain('href="/quote/instant"');
+    expect(html).toContain(`href="${COMPANY.phone.href}"`);
+    expect(html).not.toMatch(/<blockquote|star rating|★★★★★|read (our )?reviews on google/i);
   });
 });
 

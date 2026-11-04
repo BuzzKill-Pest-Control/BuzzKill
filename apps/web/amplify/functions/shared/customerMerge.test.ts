@@ -317,7 +317,7 @@ describe("execute", () => {
       phone: "+15085551234",
       serviceCity: "Marlborough",
       stripeCustomerId: "cus_l",
-      externalRef: "thumbtack#42",
+      externalRef: "legacy#42",
       status: "LEAD",
     });
     stripeCards.cus_l = "amex •••• 0005";
@@ -347,7 +347,7 @@ describe("execute", () => {
     const surv = table("Customer").get("surv")!;
     expect(surv.phone).toBe("+15085551234"); // gap-filled
     expect(surv.email).toBe("kept@x.com"); // never overwritten
-    expect(surv.externalRef).toBe("thumbtack#42"); // thread continuity moved
+    expect(surv.externalRef).toBe("legacy#42"); // prior-system reference preserved
     expect(surv.stripeCustomerId).toBe("cus_l"); // survivor had no card
     expect(String(surv.notes)).toContain("Merged from");
     // LockSets null removes the attribute — falsy either way.
@@ -830,7 +830,7 @@ describe("office-facing copy (the UX review class)", () => {
 
   it("no blocker or warning ever says 'survivor' to the office", async () => {
     seedCustomer("surv", { status: "INACTIVE", portalUserSub: "sub-s" });
-    seedCustomer("dup", { groupId: "g1", externalRef: "tt#1" });
+    seedCustomer("dup", { groupId: "g1", externalRef: "legacy#1" });
     const out = await run("PREVIEW");
     if (out.decision !== "PREVIEW") throw new Error(out.decision);
     const texts = [

@@ -645,7 +645,7 @@ async function computePreview(
   if (loser.externalRef && survivor.externalRef) {
     warnings.push({
       code: "BOTH_EXTERNAL_REFS",
-      detail: `Both records carry a marketplace thread id. The duplicate's thread (${String(loser.externalRef)}) will be orphaned — future messages on it will page sales instead of reaching this customer.`,
+      detail: `Both records carry a prior-system reference. The kept record retains its reference; the duplicate's reference (${String(loser.externalRef)}) remains in the merge audit.`,
     });
   }
   const tokenExpiry = loser.bookingLinkTokenExpiresAt
@@ -1226,7 +1226,7 @@ async function driveStages(
         const decisions = blob.decisions ?? {};
         // The moves must LAND or the merge parks — TOMBSTONE later blanks the
         // loser's copy, so a swallowed LOST here would destroy the only copy
-        // of a thread ref or an emailed link. A lost write whose target
+        // of a prior-system reference or an emailed link. A lost write whose target
         // already holds the value (a prior attempt's landing) is success.
         if (loser.externalRef && !survivor.externalRef) {
           const moved = await casGuardedUpdate(

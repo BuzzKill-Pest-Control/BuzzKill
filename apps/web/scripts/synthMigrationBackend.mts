@@ -24,7 +24,7 @@ globalThis.fetch = noNetwork;
 syncBuiltinESMExports();
 
 for (const key of Object.keys(process.env)) {
-  if (/^(AWS_|CDK_|AMPLIFY_|BUZZKILL_|ANTHROPIC_|GOOGLE_|STRIPE_|THUMBTACK_)/.test(key)) delete process.env[key];
+  if (/^(AWS_|CDK_|AMPLIFY_|BUZZKILL_|ANTHROPIC_|GOOGLE_|STRIPE_)/.test(key)) delete process.env[key];
 }
 const prefix = branch === "codex-buzzkill-account-migration" ? "migration" : "migration-staging";
 Object.assign(process.env, {

@@ -443,7 +443,7 @@ export const STATIC_PAGES: PageMeta[] = [
     path: "/reviews",
     kind: "info",
     title: "Customer Reviews",
-    description: `What customers say about BuzzKill Pest Control, with links to the public review listings for the Marlborough, Massachusetts company serving ${AREA}.`,
+    description: `Share your experience with BuzzKill Pest Control on Google or contact our team about your service in ${AREA}.`,
     breadcrumb: [{ name: "Reviews", url: "/reviews" }],
   }),
   page({

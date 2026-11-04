@@ -2,7 +2,6 @@ import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
 import { crmAdmin } from "../functions/crm-admin/resource";
 import { crmBilling } from "../functions/crm-billing/resource";
 import { stripeWebhook } from "../functions/stripe-webhook/resource";
-import { thumbtackWebhook } from "../functions/thumbtack-webhook/resource";
 import { crmDocs } from "../functions/crm-docs/resource";
 import { dailyReminders } from "../functions/daily-reminders/resource";
 import { postAuth } from "../functions/post-auth/resource";
@@ -398,13 +397,8 @@ export const schema = a.schema({
       leadSource: a.string().authorization(fieldNoTech),
       leadNotes: a.string().authorization(fieldNoTech),
       /**
-       * Stable identity on the marketplace this lead came from, as
-       * `<platform>#<id>` (e.g. `thumbtack#585695115596185614`). Thumbtack
-       * never sends an email address and only sometimes a phone, so name/email
-       * matching cannot re-find the customer when the NEXT message on the same
-       * thread arrives — this is the join key, indexed below. It is also the
-       * evidence that the lead IS reachable (on the platform thread), which is
-       * why `createLead` skips MISSING_CONTACT when it is set.
+       * Prior-system identity retained on imported customer records. Preserve
+       * this reference through merges so historical records remain traceable.
        */
       externalRef: a.string().authorization(fieldNoTech),
       // TCPA evidence: whether this contact opted in to calls/texts, and when.
@@ -4082,7 +4076,6 @@ export const schema = a.schema({
   allow.resource(crmAdmin),
   allow.resource(crmBilling),
   allow.resource(stripeWebhook),
-  allow.resource(thumbtackWebhook),
   allow.resource(crmDocs),
   allow.resource(dailyReminders),
   allow.resource(postAuth),

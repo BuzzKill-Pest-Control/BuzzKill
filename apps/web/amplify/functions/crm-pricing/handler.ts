@@ -580,7 +580,7 @@ async function composeReply(
     .filter(Boolean)
     .flatMap((s) => (s as string).match(/\$[\d,]+(?:\.\d{2})?/g) ?? []);
 
-  const prompt = `Write the paste-ready Thumbtack reply (2–4 sentences) for this quoted lead. Use ONLY these exact prices — never invent, change, or round any dollar amount:
+  const prompt = `Write a customer reply (2–4 sentences) for this quoted service inquiry. Use ONLY these exact prices — never invent, change, or round any dollar amount:
 - Service: ${facts.service}
 - Pest: ${facts.pest}${facts.town ? `\n- Town: ${facts.town}` : ""}
 ${facts.monthly ? `- Plan price: ${facts.monthly}/mo` : ""}
@@ -845,7 +845,7 @@ async function priceLead(args: Args) {
     const run = await persist({
       decision: "NEEDS_INFO",
       reason:
-        "Lead fee is required before quoting — enter the exact Thumbtack lead fee (or 0 for a direct lead) and run again.",
+        "Lead acquisition cost is required before quoting — enter the exact cost (or 0 for a direct lead) and run again.",
     });
     return run;
   }
