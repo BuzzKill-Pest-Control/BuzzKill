@@ -31,4 +31,3 @@ describe("customer contact and service-address search", () => {
     expect(customerMatchesSearch(customer, "  ")).toBe(true);
   });
 });
-

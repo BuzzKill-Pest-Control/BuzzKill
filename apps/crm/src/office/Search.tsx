@@ -1,9 +1,12 @@
+import { useEffect, useRef, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useRoles } from "../lib/auth";
 import {
   normalizeCustomerSearchQuery,
   searchQueryFromHistory,
+  searchResumeFromHistory,
   withSearchQuery,
+  withSearchResume,
 } from "../lib/customerSearch";
 import { displayAddress } from "../lib/serviceAddress";
 import { LEAD_STAGE_LABEL, LEAD_STAGE_TONE } from "../lib/leadStage";
@@ -18,13 +21,32 @@ export default function Search() {
   const location = useLocation();
   const navigate = useNavigate();
   const query = searchQueryFromHistory(location.state, roles.sub);
-  const search = useCustomerSearch(query, roles.sub, roles.office);
+  const resume = searchResumeFromHistory(location.state, roles.sub, query);
+  const search = useCustomerSearch(query, roles.sub, roles.office, resume);
   const { items: matches, error, loading, searched, nextToken } = search;
+  const restoredRow = useRef<HTMLAnchorElement>(null);
+  const focusedResume = useRef<string | null>(null);
+  useEffect(() => {
+    const focusKey = resume ? JSON.stringify([roles.sub, query, resume.cursor, resume.customerId]) : null;
+    if (focusKey && focusedResume.current !== focusKey && searched && !loading && restoredRow.current) {
+      focusedResume.current = focusKey;
+      restoredRow.current.focus({ preventScroll: true });
+      restoredRow.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [searched, loading, roles.sub, query, resume?.cursor, resume?.customerId]);
 
   const setQuery = (value: string) => navigate(
     { pathname: location.pathname, search: location.search, hash: location.hash },
     { replace: true, state: withSearchQuery(location.state, roles.sub, value) }
   );
+
+  const rememberResult = (event: MouseEvent<HTMLAnchorElement>, customerId: string) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.defaultPrevented) return;
+    navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, {
+      replace: true,
+      state: withSearchResume(location.state, roles.sub, query, { customerId, cursor: search.sourceFor(customerId) }),
+    });
+  };
 
   if (!roles.office) {
     return <Page title="Search"><EmptyState title="Office access required" /></Page>;
@@ -34,7 +56,8 @@ export default function Search() {
     <Page
       title="Search"
       back
-      actions={<Button small variant="subtle" disabled={loading || !searched} onClick={() => void search.restart()}>Search again</Button>}
+      actions={<Button small variant="subtle" disabled={loading || !normalizeCustomerSearchQuery(query)}
+        onClick={() => resume ? setQuery(query) : void search.restart()}>Search again</Button>}
     >
       <Field
         label="Search customers and leads"
@@ -51,6 +74,7 @@ export default function Search() {
         />
       </Field>
       <ErrorNote error={error} />
+      {resume ? <p className="muted small">Showing the saved search page. Search again to start from the beginning.</p> : null}
       {!normalizeCustomerSearchQuery(query) ? (
         <EmptyState title="Find a customer or lead"
           body="Enter a name, phone number, email, or any part of their service address." />
@@ -72,6 +96,8 @@ export default function Search() {
                 to={`/customers/${customer.id}`}
                 className="record-search-result"
                 state={{ customerSearchReturn: { ownerSub: roles.sub } }}
+                onClick={(event) => rememberResult(event, customer.id)}
+                ref={customer.id === resume?.customerId ? restoredRow : undefined}
               >
                 <ListRow
                   title={customer.displayName}
