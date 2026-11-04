@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSyncIdentityCognito } from "aws-lambda";
+import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider";
 import {
   CUSTOMER_SEARCH_FIELDS, SEARCH_MAX_EVALUATED, SEARCH_MAX_REQUESTS,
   searchCustomers,
@@ -19,6 +20,7 @@ const row = (id: string, status = "ACTIVE") => ({
 });
 
 beforeEach(() => { mocks.list.mockReset(); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("bounded office customer search", () => {
   it("searches lifecycle partitions and returns only contact/address facts and derived stage", async () => {
@@ -122,8 +124,40 @@ describe("bounded office customer search", () => {
   it("enforces the office boundary through the real resolver handler", async () => {
     const { handler } = await import("../crm-admin/handler");
     await expect(handler({
-      fieldName: "searchCustomers", arguments: { query: "Shared" }, identity: identity("tech", ["TECH"]),
+      fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared" }, identity: identity("tech", ["TECH"]),
     } as never)).rejects.toThrow(/Owner role required/);
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, {}, { lookup: null, query: null, limit: null, nextToken: null }])("preserves the no-argument staff roster contract %o", async (args) => {
+    const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send").mockResolvedValue({ Users: [] } as never);
+    const { handler } = await import("../crm-admin/handler");
+    const result = await handler({ fieldName: "staffRoster", arguments: args, identity: identity() } as never);
+    expect(result).toMatchObject({ staff: [], generatedAt: expect.any(String) });
+    expect(send).toHaveBeenCalled();
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+
+  it("only the explicit customer discriminator dispatches bounded lookup", async () => {
+    const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send");
+    mocks.list.mockImplementation(async ({ status }) => ({ data: [row(status, status)], nextToken: null }));
+    const { handler } = await import("../crm-admin/handler");
+    const result = await handler({
+      fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared", limit: 5 }, identity: identity(),
+    } as never);
+    expect(result).toMatchObject({ items: expect.any(Array), nextToken: null });
+    expect(send).not.toHaveBeenCalled();
+    expect(mocks.list).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { lookup: "OTHER" }, { lookup: "STAFF", query: "Shared" }, { query: "Shared" },
+    { nextToken: "cursor" }, { limit: 25 }, { lookup: "CUSTOMERS" },
+  ])("refuses invalid or mixed lookup args %o instead of returning staff", async (args) => {
+    const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send");
+    const { handler } = await import("../crm-admin/handler");
+    await expect(handler({ fieldName: "staffRoster", arguments: args, identity: identity() } as never)).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
     expect(mocks.list).not.toHaveBeenCalled();
   });
 });

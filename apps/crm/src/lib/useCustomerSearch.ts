@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, opResult } from "./api";
+import { searchCustomers, opResult } from "./api";
 import { normalizeCustomerSearchQuery, type CustomerSearchHit, type CustomerSearchPage } from "./customerSearch";
+import { LEAD_STAGE_LABEL } from "./leadStage";
 
 type SearchState = {
   owner: string;
@@ -39,11 +40,14 @@ export function useCustomerSearch(query: string, owner: string, enabled: boolean
     const isCurrent = () => generation.current === requestGeneration &&
       context.current.owner === owner && context.current.query === query && context.current.enabled;
     try {
-      const result = opResult<CustomerSearchPage>(await api().queries.searchCustomers({
+      const result = opResult<CustomerSearchPage>(await searchCustomers({
         query, limit: 25, nextToken: append ? prior.nextToken : undefined,
       }));
-      if (!result || !Array.isArray(result.items) ||
-          !(result.nextToken === null || typeof result.nextToken === "string")) {
+      if (!result || !Array.isArray(result.items) || result.items.length > 25 ||
+          result.items.some((item) => !item || typeof item.id !== "string" || !item.id ||
+            typeof item.displayName !== "string" || !["ACTIVE", "INACTIVE", "LEAD"].includes(item.status) ||
+            !(item.leadStage === null || Object.prototype.hasOwnProperty.call(LEAD_STAGE_LABEL, item.leadStage))) ||
+          !(result.nextToken === null || (typeof result.nextToken === "string" && result.nextToken.length > 0))) {
         throw new Error("The search did not return a complete result. Please try again.");
       }
       if (!isCurrent()) return;

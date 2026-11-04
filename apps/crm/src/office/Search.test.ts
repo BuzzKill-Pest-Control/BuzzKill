@@ -4,13 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Search from "./Search";
+import { staffRoster } from "../lib/api";
 
 const mocks = vi.hoisted(() => ({ search: vi.fn(), office: true, sub: "owner-1" }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ office: mocks.office, sub: mocks.sub }) }));
-vi.mock("../lib/api", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../lib/api")>(),
-  api: () => ({ queries: { searchCustomers: mocks.search } }),
-}));
+vi.mock("aws-amplify/data", () => ({ generateClient: () => ({ queries: { staffRoster: mocks.search } }) }));
 
 const active = { id: "active", status: "ACTIVE", displayName: "Shared Active", serviceCity: "Boston", leadStage: null };
 const inactive = {
@@ -82,6 +80,11 @@ afterEach(async () => {
 });
 
 describe("bounded office directory search", () => {
+  it("preserves the existing no-argument staff helper without customer lookup mode", async () => {
+    await staffRoster();
+    expect(mocks.search).toHaveBeenCalledExactlyOnceWith({});
+  });
+
   it("debounces typing and renders lifecycle/status/contact matches from one bounded query", async () => {
     await act(async () => root.render(application()));
     await typeQuery("S");
@@ -89,7 +92,7 @@ describe("bounded office directory search", () => {
     await typeQuery("Shared");
     expect(mocks.search).not.toHaveBeenCalled();
     await debounce();
-    expect(mocks.search).toHaveBeenCalledExactlyOnceWith({ query: "Shared", limit: 25, nextToken: undefined });
+    expect(mocks.search).toHaveBeenCalledExactlyOnceWith({ lookup: "CUSTOMERS", query: "Shared", limit: 25, nextToken: undefined });
     expect(rowLinks().map((link) => link.getAttribute("href"))).toEqual([
       "/customers/active", "/customers/closed", "/customers/inactive",
     ]);
@@ -110,7 +113,7 @@ describe("bounded office directory search", () => {
     expect(container.textContent).not.toContain("No matches");
     expect(container.textContent).toContain("More records remain to search");
     await act(async () => button("Search more records").click());
-    expect(mocks.search).toHaveBeenLastCalledWith({ query: "Someone", limit: 25, nextToken: "continue-1" });
+    expect(mocks.search).toHaveBeenLastCalledWith({ lookup: "CUSTOMERS", query: "Someone", limit: 25, nextToken: "continue-1" });
     expect(container.textContent).toContain("No matches");
   });
 
@@ -154,7 +157,7 @@ describe("bounded office directory search", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Directory temporarily unavailable");
     await act(async () => button("Load more").click());
     expect(rowLinks()).toHaveLength(2);
-    expect(mocks.search).toHaveBeenLastCalledWith({ query: "Shared", limit: 25, nextToken: "page-2" });
+    expect(mocks.search).toHaveBeenLastCalledWith({ lookup: "CUSTOMERS", query: "Shared", limit: 25, nextToken: "page-2" });
   });
 
   it("keeps lookup history on record→Back without putting contact details in URLs", async () => {
@@ -190,6 +193,18 @@ describe("bounded office directory search", () => {
     mocks.search.mockRejectedValue(new Error("Directory temporarily unavailable"));
     await act(async () => root.render(application({ customerSearch: { ownerSub: "owner-1", query: "Shared" } })));
     await debounce();
+    expect(container.textContent).not.toContain("No matches");
+    expect(button("Retry")).toBeDefined();
+  });
+
+  it.each([
+    { staff: [{ email: "private-staff@example.com" }] },
+    { items: [{ email: "private-staff@example.com", status: "CONFIRMED" }], nextToken: null },
+  ])("rejects a legacy or invalid staff-roster response rather than rendering customer matches", async (data) => {
+    mocks.search.mockResolvedValue({ data: JSON.stringify(data) });
+    await act(async () => root.render(application({ customerSearch: { ownerSub: "owner-1", query: "Shared" } })));
+    await debounce();
+    expect(container.textContent).not.toContain("private-staff@example.com");
     expect(container.textContent).not.toContain("No matches");
     expect(button("Retry")).toBeDefined();
   });

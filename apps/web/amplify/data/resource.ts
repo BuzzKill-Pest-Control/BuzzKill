@@ -2764,18 +2764,6 @@ export const schema = a.schema({
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
 
-  /** Bounded office lookup across customer and lead lifecycle states. */
-  searchCustomers: a
-    .query()
-    .arguments({
-      query: a.string().required(),
-      limit: a.integer(),
-      nextToken: a.string(),
-    })
-    .returns(a.json())
-    .authorization((allow) => [allow.groups(["OWNER"])])
-    .handler(a.handler.function(crmAdmin)),
-
   /**
    * The office's safe customer edit (GL-09). With raw Customer.update closed to
    * the browser, this is the only screen-driven write to a Customer, and it can
@@ -2983,9 +2971,19 @@ export const schema = a.schema({
    *
    * OWNER-only: the roster exposes who can sign in and with what authority — the
    * same bar that provisions and ends staff logins reviews them.
+   *
+   * Optional CUSTOMERS lookup uses this existing office read operation to stay
+   * under the function-directive stack limit. No arguments preserves the staff
+   * roster contract; customer search is bounded and explicitly selected.
    */
   staffRoster: a
     .query()
+    .arguments({
+      lookup: a.string(),
+      query: a.string(),
+      limit: a.integer(),
+      nextToken: a.string(),
+    })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
