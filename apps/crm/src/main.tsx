@@ -1,9 +1,9 @@
 import "./lib/monitoringBootstrap";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.tsx";
+import AppStartup from "./AppStartup";
+import ScreenErrorBoundary from "./components/ScreenErrorBoundary";
 import "./index.css";
-import { connectBackend } from "./lib/backend";
 
 // PWA: register the service worker (production builds only — the dev server
 // would fight HMR).
@@ -15,15 +15,14 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   });
 }
 
-connectBackend().then((backendReady) => {
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+root.render(
+  <React.StrictMode>
     {import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true" && (
       <div role="status" style={{ background: "#fff3cd", color: "#332701", padding: "12px", textAlign: "center" }}>
         Migration preview — booking, payments, and business actions are disabled. Administrator sign-in is available only when explicitly enabled.
       </div>
     )}
-      <App backendReady={backendReady} />
-    </React.StrictMode>
-  );
-});
+    <ScreenErrorBoundary resetKey="startup"><AppStartup /></ScreenErrorBoundary>
+  </React.StrictMode>
+);

@@ -24,33 +24,61 @@ import {
   subscribeGoogleSignInError,
 } from "./lib/googleSignInStatus";
 
-import Dashboard from "./office/Dashboard";
-import WorkQueue from "./office/Work";
-import Leads from "./office/Leads";
-import Customers from "./office/Customers";
-import Search from "./office/Search";
-import CustomerDetail from "./office/CustomerDetail";
-import GroupDetail from "./office/GroupDetail";
-import PricingLog from "./office/PricingLog";
-import ProductLog from "./office/ProductLog";
-import Inventory from "./office/Inventory";
-import ProductUsage from "./office/ProductUsage";
-import MarketRates from "./office/MarketRates";
-import Catalog from "./office/Catalog";
-import Schedule from "./office/Schedule";
-import Staff from "./office/Staff";
-import PromoCodes from "./office/PromoCodes";
-import VisitChangeHistory from "./pages/VisitChangeHistory";
-import More from "./pages/More";
-import TechToday from "./tech/Today";
-import TechJob from "./tech/JobDetail";
-import PortalHome from "./portal/Home";
-import PortalDocs from "./portal/Docs";
-import PortalBilling from "./portal/Billing";
-import PortalGroup from "./portal/Group";
-import PortalRequests from "./portal/Requests";
-import PortalAddService from "./portal/AddService";
-import Welcome from "./pages/Welcome";
+import { lazyScreen } from "./lib/lazyScreen";
+const DashboardRoute = lazyScreen(() => import("./office/Dashboard"));
+const Dashboard = DashboardRoute.Screen;
+const WorkQueueRoute = lazyScreen(() => import("./office/Work"));
+const WorkQueue = WorkQueueRoute.Screen;
+const LeadsRoute = lazyScreen(() => import("./office/Leads"));
+const Leads = LeadsRoute.Screen;
+const CustomersRoute = lazyScreen(() => import("./office/Customers"));
+const Customers = CustomersRoute.Screen;
+const SearchRoute = lazyScreen(() => import("./office/Search"));
+const Search = SearchRoute.Screen;
+const CustomerDetailRoute = lazyScreen(() => import("./office/CustomerDetail"));
+const CustomerDetail = CustomerDetailRoute.Screen;
+const GroupDetailRoute = lazyScreen(() => import("./office/GroupDetail"));
+const GroupDetail = GroupDetailRoute.Screen;
+const PricingLogRoute = lazyScreen(() => import("./office/PricingLog"));
+const PricingLog = PricingLogRoute.Screen;
+const ProductLogRoute = lazyScreen(() => import("./office/ProductLog"));
+const ProductLog = ProductLogRoute.Screen;
+const InventoryRoute = lazyScreen(() => import("./office/Inventory"));
+const Inventory = InventoryRoute.Screen;
+const ProductUsageRoute = lazyScreen(() => import("./office/ProductUsage"));
+const ProductUsage = ProductUsageRoute.Screen;
+const MarketRatesRoute = lazyScreen(() => import("./office/MarketRates"));
+const MarketRates = MarketRatesRoute.Screen;
+const CatalogRoute = lazyScreen(() => import("./office/Catalog"));
+const Catalog = CatalogRoute.Screen;
+const ScheduleRoute = lazyScreen(() => import("./office/Schedule"));
+const Schedule = ScheduleRoute.Screen;
+const StaffRoute = lazyScreen(() => import("./office/Staff"));
+const Staff = StaffRoute.Screen;
+const PromoCodesRoute = lazyScreen(() => import("./office/PromoCodes"));
+const PromoCodes = PromoCodesRoute.Screen;
+const VisitChangeHistoryRoute = lazyScreen(() => import("./pages/VisitChangeHistory"));
+const VisitChangeHistory = VisitChangeHistoryRoute.Screen;
+const MoreRoute = lazyScreen(() => import("./pages/More"));
+const More = MoreRoute.Screen;
+const TechTodayRoute = lazyScreen(() => import("./tech/Today"));
+const TechToday = TechTodayRoute.Screen;
+const TechJobRoute = lazyScreen(() => import("./tech/JobDetail"));
+const TechJob = TechJobRoute.Screen;
+const PortalHomeRoute = lazyScreen(() => import("./portal/Home"));
+const PortalHome = PortalHomeRoute.Screen;
+const PortalDocsRoute = lazyScreen(() => import("./portal/Docs"));
+const PortalDocs = PortalDocsRoute.Screen;
+const PortalBillingRoute = lazyScreen(() => import("./portal/Billing"));
+const PortalBilling = PortalBillingRoute.Screen;
+const PortalGroupRoute = lazyScreen(() => import("./portal/Group"));
+const PortalGroup = PortalGroupRoute.Screen;
+const PortalRequestsRoute = lazyScreen(() => import("./portal/Requests"));
+const PortalRequests = PortalRequestsRoute.Screen;
+const PortalAddServiceRoute = lazyScreen(() => import("./portal/AddService"));
+const PortalAddService = PortalAddServiceRoute.Screen;
+const WelcomeRoute = lazyScreen(() => import("./pages/Welcome"));
+const Welcome = WelcomeRoute.Screen;
 
 export default function App({ backendReady }: { backendReady: boolean }) {
   if (!backendReady) {
@@ -327,9 +355,16 @@ function Shell() {
   );
 }
 
+const tabPreloads: Record<string, () => Promise<void>> = {
+  "/dashboard": DashboardRoute.preload, "/leads": LeadsRoute.preload, "/customers": CustomersRoute.preload,
+  "/schedule": ScheduleRoute.preload, "/more": MoreRoute.preload, "/work": WorkQueueRoute.preload,
+  "/tech": TechTodayRoute.preload, "/portal": PortalHomeRoute.preload, "/portal/docs": PortalDocsRoute.preload,
+  "/portal/billing": PortalBillingRoute.preload, "/portal/requests": PortalRequestsRoute.preload, "/portal/group": PortalGroupRoute.preload,
+};
+
 function Tab({ to, icon, label }: { to: string; icon: IconName; label: string }) {
   return (
-    <NavLink to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+    <NavLink to={to} onMouseEnter={() => { void tabPreloads[to]?.(); }} onFocus={() => { void tabPreloads[to]?.(); }} onTouchStart={() => { void tabPreloads[to]?.(); }} className={({ isActive }) => (isActive ? "active" : "")}>
       <span className="tab-icon" aria-hidden>
         <Icon name={icon} />
       </span>
