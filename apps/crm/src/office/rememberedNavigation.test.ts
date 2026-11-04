@@ -22,7 +22,7 @@ vi.mock("../lib/api", async (original) => {
   return { ...actual, api: () => ({ models: {
     Customer: { listCustomerByStatusAndDisplayName: mocks.byStatus, list },
     CustomerGroup: { list }, Technician: { list: mocks.technicians }, Route: { listRouteByDate: list },
-    Job: { listJobByScheduledDate: list, list },
+    Job: { listJobByScheduledDate: list, listJobByStatus: list, list },
   } }) };
 });
 
@@ -62,6 +62,8 @@ async function mount(path: string) {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   sessionStorage.clear();
   mocks.owner = "alice";
   mocks.technicians.mockReset().mockResolvedValue({ data: [], nextToken: null });
@@ -161,6 +163,19 @@ describe("remembered office navigation", () => {
     expect(container.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe("2027-03-18");
     await act(async () => button("Next week ›").click());
     expect(scrollY).toBe(0);
+  });
+
+  it("keeps customer filters and scroll while returned-app data refreshes", async () => {
+    await mount("/customers");
+    await act(async () => button("Inactive").click());
+    await input(search(), "dana@example.com");
+    scrollY = 420;
+    const before = mocks.byStatus.mock.calls.length;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(mocks.byStatus).toHaveBeenCalledTimes(before + 1);
+    expect(search().value).toBe("dana@example.com");
+    expect(button("Inactive").className).toContain("seg-on");
+    expect(scrollY).toBe(420);
   });
 
   it("falls back safely for malformed saved filters and dates", async () => {

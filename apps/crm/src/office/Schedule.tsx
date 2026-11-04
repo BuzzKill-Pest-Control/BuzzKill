@@ -70,9 +70,9 @@ export default function Schedule() {
 
   const freshness = useAsync<ScheduleData>(async () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    // Every list is paged to exhaustion: a filtered scan counts the limit
-    // against rows scanned, not rows matched, so a single page can silently
-    // drop stops from the board and the pool past a few hundred jobs. The
+    // Every indexed list is paged to exhaustion so the board and pool cannot
+    // drop stops past the first page. The status-only pool includes jobs
+    // without a date; the status/date index deliberately cannot do that. The
     // week's jobs and routes are each loaded per day (there is no by-week
     // index), so switching the focused day inside the week never refetches.
     const [techList, routesByDay, jobsByDay, unscheduled, customerList] =
@@ -101,11 +101,10 @@ export default function Schedule() {
           )
         ),
         listAll((t) =>
-          api().models.Job.list({
-            filter: { status: { eq: "UNSCHEDULED" } },
-            limit: 500,
-            nextToken: t,
-          })
+          api().models.Job.listJobByStatus(
+            { status: "UNSCHEDULED" },
+            { limit: 500, nextToken: t }
+          )
         ),
         listAll((t) =>
           api().models.Customer.list({ limit: 1000, nextToken: t })

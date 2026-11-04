@@ -1800,6 +1800,9 @@ export const schema = a.schema({
     .secondaryIndexes((index) => [
       index("scheduledDate"),
       index("status").sortKeys(["scheduledDate"]),
+      // Date-less office/rebooked jobs must appear in the scheduling pool.
+      // The status/date index is sparse when scheduledDate is absent.
+      index("status"),
       index("servicePlanId"),
       // Public "On My Way" tracking resolves the opaque token to its one job.
       index("trackToken"),

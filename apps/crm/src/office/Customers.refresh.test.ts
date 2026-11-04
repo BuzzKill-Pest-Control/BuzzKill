@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Customers from "./Customers";
 const mocks = vi.hoisted(() => ({ customers: vi.fn(), groups: vi.fn(), create: vi.fn() }));
-vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("../lib/auth", () => ({ useRoles: () => ({ sub: "refresh-owner", office: true, owner: true }) }));
 vi.mock("../lib/api", () => ({
   api: () => ({ models: { Customer: { listCustomerByStatusAndDisplayName: mocks.customers }, CustomerGroup: { list: mocks.groups, create: mocks.create } } }),
   listAll: async (load: () => Promise<{ data: unknown[] }>) => (await load()).data,
@@ -13,17 +14,19 @@ vi.mock("../lib/api", () => ({
 let container: HTMLDivElement, root: Root;
 const button = (text: string) => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === text)!;
 beforeEach(() => {
+  sessionStorage.clear();
+  vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   mocks.customers.mockReset().mockResolvedValue({ data: [] }); mocks.groups.mockReset().mockResolvedValue({ data: [] }); mocks.create.mockReset();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("customer directory refresh", () => {
   it("refreshes a visible list without replacing a group being drafted", async () => {
-    await act(async () => root.render(createElement(Customers)));
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Customers))));
     expect(mocks.customers).toHaveBeenCalledTimes(1);
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(mocks.customers).toHaveBeenCalledTimes(2);

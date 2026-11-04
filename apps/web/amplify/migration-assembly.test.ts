@@ -157,11 +157,23 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
   // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3081);
+  expect(allResources(full)).toHaveLength(3085);
   expect(allResources(bootstrap)).toHaveLength(2119);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
-  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(606);
-  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1818);
+  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(607);
+  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1821);
+  const job = allResources(full).find((resource) => resource.Type === "Custom::AmplifyDynamoDBTable" &&
+    (resource.Properties?.globalSecondaryIndexes as { indexName: string }[] | undefined)?.some((index) => index.indexName === "jobsByStatus"));
+  expect(job).toBeDefined();
+  expect(job!.Properties?.replaceTableUponGsiUpdate).toBe(false);
+  const indexes = job!.Properties?.globalSecondaryIndexes as { indexName: string; keySchema: unknown }[];
+  expect(indexes.find((index) => index.indexName === "jobsByStatus")?.keySchema).toEqual([
+    { attributeName: "status", keyType: "HASH" },
+  ]);
+  expect(indexes.find((index) => index.indexName === "jobsByStatusAndScheduledDate")?.keySchema).toEqual([
+    { attributeName: "status", keyType: "HASH" },
+    { attributeName: "scheduledDate", keyType: "RANGE" },
+  ]);
 });
 
 it("retains the real schema, tables, auth, IAM and all other non-API resources across bootstrap", () => {
