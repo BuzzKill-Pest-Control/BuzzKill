@@ -5,6 +5,8 @@ import { CUSTOMER_SEARCH_FIELDS, type SearchRow } from "./customerSearchRecords"
 import type { Lookup } from "./customerSearchIndex";
 
 export const SEARCH_MAX_DDB_REQUESTS = 28;
+// Keep the HTTP pool across warm invocations; budgets stay local to directoryStore().
+export const customerSearchDynamoClient = new DynamoDBClient({ maxAttempts: 1 });
 export type SourceKey = { id: string; status: string; displayName: string };
 export type DirectoryStore = {
   lookup: (lookup: Lookup, limit: number) => Promise<string[]>;
@@ -29,7 +31,7 @@ function projection(fields: readonly string[]) {
 export const searchProjection = projection;
 
 /** Native DynamoDB avoids an AppSync/IAM GraphQL round trip for each source page. */
-export function directoryStore(client = new DynamoDBClient({ maxAttempts: 1 })): DirectoryStore {
+export function directoryStore(client = customerSearchDynamoClient): DirectoryStore {
   let requests = 0;
   const send = async <T>(command: object): Promise<T> => {
     if (++requests > SEARCH_MAX_DDB_REQUESTS) throw new Error("Customer search request budget was exhausted");

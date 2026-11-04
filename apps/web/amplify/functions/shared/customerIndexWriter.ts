@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand, type AttributeValue, type TransactWriteItem } from "@aws-sdk/client-dynamodb";
+import { GetItemCommand, TransactWriteItemsCommand, type AttributeValue, type TransactWriteItem } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
-import { customerSourceTable, searchProjection } from "./customerSearchStore";
+import { customerSearchDynamoClient, customerSourceTable, searchProjection } from "./customerSearchStore";
 import { INDEX_MAX_ENTRIES, INDEX_SOURCE_FIELDS, indexEntries, keyId, manifestKey, manifestKeys, type IndexManifest, type IndexSource } from "./customerSearchIndex";
 
 export type IndexSnapshot = { source: IndexSource | null; manifest: IndexManifest | null };
@@ -69,7 +69,7 @@ export async function synchronizeCustomer(id: string, writer: IndexWriter): Prom
   throw new Error("Customer search maintenance conflicted; retry is required");
 }
 
-export function indexWriter(indexTable = process.env.CUSTOMER_SEARCH_TABLE_NAME, client = new DynamoDBClient({ maxAttempts: 1 })): IndexWriter {
+export function indexWriter(indexTable = process.env.CUSTOMER_SEARCH_TABLE_NAME, client = customerSearchDynamoClient): IndexWriter {
   if (!indexTable || !/^[A-Za-z0-9_.-]{3,255}$/.test(indexTable)) throw new Error("Customer search index configuration is unavailable");
   return {
     async snapshot(id) {

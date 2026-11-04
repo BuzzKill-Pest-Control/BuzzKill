@@ -1,13 +1,12 @@
-import { DynamoDBClient, ScanCommand } from "@aws-sdk/client-dynamodb";
+import { ScanCommand } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import type { DynamoDBStreamEvent, DynamoDBBatchResponse } from "aws-lambda";
 import { hash, INDEX_SOURCE_FIELDS } from "../shared/customerSearchIndex";
 import { indexWriter, synchronizeCustomer, type IndexWriter } from "../shared/customerIndexWriter";
-import { customerSourceTable, searchProjection } from "../shared/customerSearchStore";
+import { customerSearchDynamoClient as client, customerSourceTable, searchProjection } from "../shared/customerSearchStore";
 
 type BackfillCursor = { v: 1; binding: string; phase: "customers" | "manifests"; key: Record<string, string> | null };
 type BackfillEvent = { kind: "BACKFILL"; cursor?: string | null };
-const client = new DynamoDBClient({ maxAttempts: 1 });
 
 function readCursor(binding: string, value?: string | null): BackfillCursor {
   if (!value) return { v: 1, binding, phase: "customers", key: null };
