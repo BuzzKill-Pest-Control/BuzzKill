@@ -45,6 +45,8 @@ import {
 import { customerAccessGroups } from "../shared/dynamicGroups";
 import { listAll } from "../shared/pagination";
 import { refusal } from "../shared/refusal";
+import { casGuardedUpdate } from "../shared/atomicLock";
+import { isMidMerge } from "../shared/customerMerge";
 
 type Args = {
   customerId?: string;
@@ -170,6 +172,10 @@ export const handler = async (event: AppSyncResolverEvent<Args>) => {
           event.arguments.customerId!,
           event.arguments.payload
         );
+      }
+      if (event.arguments.action === "REPAIR_PAYMENT_DEFAULT") {
+        assertOffice(event.identity);
+        return repairPaymentDefault(event.arguments.customerId!);
       }
       return createSetupIntent(event.arguments.customerId!);
     }
@@ -412,41 +418,69 @@ async function portalAddServiceBook(customerId: string, payload: unknown) {
 
 async function getPaymentMethodSummary(customerId: string) {
   const client = await dataClient();
-  const { data: customer } = await client.models.Customer.get({
+  const { data: customer, errors } = await client.models.Customer.get({
     id: customerId,
   });
+  if (errors?.length) throw new Error("Customer payment details could not be verified. Try again.");
   if (!customer) throw new Error(`Customer ${customerId} not found`);
   if (!customer.stripeCustomerId) {
     return { hasPaymentMethod: false, label: null, kind: null };
   }
-  let pm = await getDefaultPaymentMethod(customer.stripeCustomerId);
+  const pm = await getDefaultPaymentMethod(customer.stripeCustomerId);
   if (!pm) {
-    // Self-heal: a saved method with no default happens when the
-    // setup_intent.succeeded webhook never arrived (unregistered endpoint,
-    // outage, missed delivery — Stripe does not replay events to endpoints
-    // added later). The method exists on the Stripe customer either way, so
-    // adopt the newest one as the default here rather than telling the office
-    // a collected card/bank is "missing".
-    const saved = await stripeClient().customers.listPaymentMethods(
-      customer.stripeCustomerId,
-      { limit: 10 }
-    );
-    const newest = saved.data.sort((a, b) => b.created - a.created)[0];
-    if (!newest) return { hasPaymentMethod: false, label: null, kind: null };
-    await stripeClient().customers.update(customer.stripeCustomerId, {
-      invoice_settings: { default_payment_method: newest.id },
-    });
-    pm = newest;
+    const saved = await stripeClient().customers.listPaymentMethods(customer.stripeCustomerId, { limit: 10 });
+    // An attached method without a default cannot be used by our billing paths.
+    // Opening a record must never adopt a default or change stored customer facts.
+    return { hasPaymentMethod: false, label: null, kind: null, needsRepair: saved.data.length > 0 };
   }
   const { label, kind } = paymentMethodLabel(pm);
-  if (customer.paymentMethodLabel !== label) {
-    await client.models.Customer.update({
-      id: customerId,
-      paymentMethodLabel: label,
-      paymentMethodKind: kind,
-    });
+  return { hasPaymentMethod: true, label, kind, needsRepair: false, needsLabelSync: customer.paymentMethodLabel !== label };
+}
+
+/** Explicit owner recovery for a missed setup webhook. This never takes money
+ * or starts billing; the ordinary setup webhook remains the durable happy path. */
+async function repairPaymentDefault(customerId: string) {
+  const client = await dataClient();
+  const currentCustomer = async () => {
+    const result = await client.models.Customer.get({ id: customerId });
+    if (result.errors?.length) throw new Error("Customer details could not be verified. Try again.");
+    const customer = result.data;
+    if (!customer || customer.status === "MERGED" || isMidMerge(customer)) {
+      throw new Error("This customer changed or has a merge in progress. Reopen the live record before updating payment details.");
+    }
+    return customer;
+  };
+  const customer = await currentCustomer();
+  const stripeCustomerId = customer.stripeCustomerId;
+  if (!stripeCustomerId) return refusal("No saved payment method is available. Collect payment information first.");
+  let pm = await getDefaultPaymentMethod(stripeCustomerId);
+  if (!pm) {
+    const saved = await stripeClient().customers.listPaymentMethods(stripeCustomerId, { limit: 10 });
+    const newest = saved.data.slice().sort((a, b) => b.created - a.created)[0];
+    if (!newest) return refusal("No saved payment method is available. Collect payment information first.");
+    if ((await currentCustomer()).stripeCustomerId !== stripeCustomerId) {
+      throw new Error("The customer's payment account changed. Reopen the record before continuing.");
+    }
+    // Honor a setup webhook or another owner's default that arrived meanwhile.
+    pm = await getDefaultPaymentMethod(stripeCustomerId);
+    if (!pm) {
+      await stripeClient().customers.update(stripeCustomerId, { invoice_settings: { default_payment_method: newest.id } });
+      // A provider acknowledgement is not enough to claim the default is ready.
+      pm = await getDefaultPaymentMethod(stripeCustomerId);
+      if (!pm) throw new Error("The saved payment method was not confirmed. Refresh and try again; no charge was made.");
+    }
   }
-  return { hasPaymentMethod: true, label, kind };
+  if ((await currentCustomer()).stripeCustomerId !== stripeCustomerId) {
+    throw new Error("The customer's payment account changed. Reopen the record before continuing.");
+  }
+  const { label, kind } = paymentMethodLabel(pm);
+  const saved = await casGuardedUpdate("Customer", customerId, { paymentMethodLabel: label, paymentMethodKind: kind }, [
+    { kind: "fieldEquals", field: "stripeCustomerId", value: stripeCustomerId },
+    { kind: "fieldMissingOrNull", field: "mergeCounterpartId" },
+    { kind: "fieldNotIn", field: "status", values: ["MERGED"] },
+  ]);
+  if (!saved.ok) throw new Error("Payment details need another check. Refresh and retry; no charge was made.");
+  return { hasPaymentMethod: true, label, kind, needsRepair: false, needsLabelSync: false };
 }
 
 /**

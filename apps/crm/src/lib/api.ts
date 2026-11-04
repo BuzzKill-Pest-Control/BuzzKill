@@ -100,13 +100,15 @@ type LeadActivityPage = {
 export async function collectLeadActivityPages(
   customerId: string,
   listPage: (args: {
-    filter: unknown;
+    customerId: string;
+  }, options: {
     limit: number;
     nextToken?: string | null;
+    sortDirection: "DESC";
   }) => Promise<LeadActivityPage>
 ): Promise<LeadActivity[]> {
   return listAll((nextToken) =>
-    listPage({ filter: { customerId: { eq: customerId } }, limit: 500, nextToken })
+    listPage({ customerId }, { limit: 100, nextToken, sortDirection: "DESC" })
   );
 }
 
@@ -183,10 +185,12 @@ export async function listLeadActivity(customerId: string): Promise<{
 }> {
   const models = api().models as unknown as {
     LeadActivity?: {
-      list: (a: {
-        filter?: unknown;
+      listLeadActivityByCustomerIdAndOccurredAt: (a: {
+        customerId: string;
+      }, options: {
         limit?: number;
         nextToken?: string | null;
+        sortDirection?: "DESC";
       }) => Promise<{
         data: LeadActivity[];
         nextToken?: string | null;
@@ -197,7 +201,7 @@ export async function listLeadActivity(customerId: string): Promise<{
   if (!models.LeadActivity) throw new Error("Lead activity is unavailable.");
   const data = await collectLeadActivityPages(
     customerId,
-    models.LeadActivity.list
+    models.LeadActivity.listLeadActivityByCustomerIdAndOccurredAt
   );
   return { data };
 }

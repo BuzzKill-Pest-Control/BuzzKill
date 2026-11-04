@@ -17,7 +17,8 @@ describe("complete lead timeline", () => {
     ]);
     expect(listPage).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ nextToken: "page-2" })
+      { customerId: "lead-1" },
+      expect.objectContaining({ nextToken: "page-2", limit: 100, sortDirection: "DESC" })
     );
   });
 

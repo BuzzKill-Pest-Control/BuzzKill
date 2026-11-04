@@ -1,11 +1,13 @@
-import { confirmedMutation } from "../lib/queryCache";
-import { readPaymentMethodSummary } from "../lib/paymentMethodSummary";
+import { confirmedMutation, queryCache } from "../lib/queryCache";
+import { readCustomerRecord, readCustomerEssentials, readCustomerPage, readCustomerDocuments, readLifecyclePage, readReportAmendments } from "../lib/customerRecordReads";
+import { useRecordSection } from "../lib/useRecordSection";
 import {
   Fragment,
   useCallback,
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -17,8 +19,6 @@ import {
   dueDateForTerms,
   jsonField,
   listAll,
-  listCustomerLifecycleEvents,
-  listLifecycleCommands,
   mergeCustomers,
   previewLifecycleTransition,
   opResult,
@@ -33,9 +33,7 @@ import {
   type MergeOutcome,
   type MergePreview,
   type MergeStateInfo,
-  type CustomerLifecycleEvent,
   type VisitRescheduleOutcome,
-  type Agreement,
   type CallbackRequest,
   type Customer,
   type CustomerGroup,
@@ -45,7 +43,6 @@ import {
   type Job,
   type ServicePlan,
   type ServiceReport,
-  type ServiceReportAmendment,
 } from "../lib/api";
 import { SERVICE_CATALOG } from "../../../web/amplify/functions/shared/serviceCatalog";
 import { fmtDate, fmtDateTime, money, todayEastern } from "../lib/format";
@@ -243,25 +240,39 @@ function RecordSection({
   count,
   defaultOpen = false,
   children,
+  section,
 }: {
   title: string;
-  count: number;
+  count?: number;
   defaultOpen?: boolean;
   children: ReactNode;
+  section?: {
+    open: boolean; setOpen: (open: boolean) => void;
+    data: { nextToken: string | null } | null; error: string | null; moreError: string | null;
+    loading: boolean; moreLoading: boolean; refresh: () => Promise<void>; loadMore: () => Promise<void>;
+  };
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
+  const open = section?.open ?? localOpen;
   return (
     <details
       className="record-section"
       open={open}
-      onToggle={(e) => setOpen(e.currentTarget.open)}
+      onToggle={(e) => section ? section.setOpen(e.currentTarget.open) : setLocalOpen(e.currentTarget.open)}
     >
       <summary>
         <span>{title}</span>
-        <Badge tone={count > 0 ? "info" : "muted"}>{count}</Badge>
+        {(!section || section.data) && count !== undefined ? <Badge tone={count > 0 ? "info" : "muted"}>{count}{section?.data?.nextToken ? "+" : ""}</Badge> : null}
         <span className="record-section-chevron" aria-hidden="true">›</span>
       </summary>
-      <div className="record-section-body">{children}</div>
+      {open ? <div className="record-section-body">
+        {section ? <>
+          <ErrorNote error={section.error ?? section.moreError} />
+          {section.error ? <Button small onClick={() => void section.refresh()}>Retry {title.toLowerCase()}</Button> : null}
+          {!section.data && !section.error ? <Spinner /> : section.data ? children : null}
+          {section.data?.nextToken ? <Button small loading={section.moreLoading} disabled={section.loading} onClick={() => void section.loadMore()}>Load more {title.toLowerCase()}</Button> : null}
+        </> : children}
+      </div> : null}
     </details>
   );
 }
@@ -305,27 +316,77 @@ function deactivateConfirmText(
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
+  const roles = useRoles();
+  const login = useSyncExternalStore(queryCache.subscribe, queryCache.writeScope, queryCache.writeScope);
+  return <CustomerRecord key={`${login}:${roles.sub}:${[...roles.groups].sort().join(",")}:${id}`} />;
+}
+
+function ReportAmendments({ reportId, revision }: { reportId: string; revision: number }) {
+  const history = useAsync(async () => ({ reportId, revision, rows: await readReportAmendments(reportId) }), [reportId, revision], "Report amendments could not be loaded");
+  const current = history.data?.reportId === reportId && history.data.revision === revision && !history.loading && !history.error;
+  return <div style={{ marginLeft: 16 }}>
+    <ErrorNote error={history.error} />
+    {history.error ? <Button small onClick={() => void history.reload()}>Retry amendments</Button> : null}
+    {!current && !history.error ? <span className="muted small">Checking amendments…</span> : null}
+    {current && history.data?.rows.length === 0 ? <span className="muted small">No amendments.</span> : null}
+    {history.data?.rows.map((amendment) => <ListRow key={amendment.id}
+      title={`Amendment — ${fmtDate(amendment.issuedAt ?? "", true)}`} subtitle={amendment.reason}
+      meta={<><DeliveryBadge status={amendment.deliveryStatus} emailedAt={amendment.emailedAt} />{amendment.pdfKey ? <DocButton docKey={amendment.pdfKey} /> : null}</>} />)}
+  </div>;
+}
+
+type RecordResource = "customer" | "plans" | "jobs" | "invoices" | "agreements" | "reports" | "documents" | "lifecycle" | "payment";
+const ESSENTIAL_RESOURCES: RecordResource[] = ["customer", "plans", "jobs", "invoices", "lifecycle"];
+
+/** Instantiated once per record/login. Verified absence is cached; a failed
+ * lookup stays missing. One queue bounds overlapping history-page requests. */
+function createHistoryGroupLookup(read: (id: string) => Promise<CustomerGroup | null>, current: () => boolean, open: () => boolean) {
+  const values = new Map<string, CustomerGroup | null>();
+  const pending = new Map<string, Promise<CustomerGroup | null>>();
+  const queue: (() => Promise<void>)[] = [];
+  let active = 0;
+  const drain = () => { while (active < 4 && queue.length) void queue.shift()!(); };
+  const lookup = (id: string) => {
+    if (values.has(id)) return Promise.resolve(values.get(id)!);
+    const held = pending.get(id); if (held) return held;
+    let resolve!: (value: CustomerGroup | null) => void, reject!: (error: unknown) => void;
+    const promise = new Promise<CustomerGroup | null>((yes, no) => { resolve = yes; reject = no; });
+    pending.set(id, promise);
+    queue.push(async () => {
+      active++;
+      try {
+        if (!current() || !open()) throw new Error("Open this record's history to verify group names.");
+        const row = await read(id);
+        if (!current()) throw new Error("This record changed before group names could be verified.");
+        values.set(id, row); resolve(row);
+      } catch (error) { reject(error); }
+      finally { pending.delete(id); active--; queueMicrotask(drain); }
+    });
+    drain(); return promise;
+  };
+  return async (ids: string[]) => {
+    const rows = await Promise.all(ids.map(lookup));
+    return rows.filter((row): row is CustomerGroup => row !== null);
+  };
+}
+
+function CustomerRecord() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const roles = useRoles();
   const returningToSearch = isSearchReturn(location.state, roles.sub);
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [plans, setPlans] = useState<ServicePlan[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [agreements, setAgreements] = useState<Agreement[]>([]);
-  const [reports, setReports] = useState<ServiceReport[]>([]);
-  const [amendments, setAmendments] = useState<ServiceReportAmendment[]>([]);
   const [amending, setAmending] = useState<ServiceReport | null>(null);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [groups, setGroups] = useState<CustomerGroup[]>([]);
   const [rescheduling, setRescheduling] = useState<Job | null>(null);
   const [cancelingJob, setCancelingJob] = useState<Job | null>(null);
   const [packeting, setPacketing] = useState<Job | null>(null);
-  const [pm, setPm] = useState<{ hasPaymentMethod: boolean; label: string | null } | null>(null);
+  const [pm, setPm] = useState<{ hasPaymentMethod: boolean; label: string | null; needsRepair?: boolean; needsLabelSync?: boolean } | null>(null);
+  const [paymentVersion, setPaymentVersion] = useState(0);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [plansLimit, setPlansLimit] = useState(25), [jobsLimit, setJobsLimit] = useState(25), [invoiceLimit, setInvoiceLimit] = useState(25);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [jobWarning, setJobWarning] = useState<string | null>(null);
-  const [notFound, setNotFound] = useState(false);
   const [refunding, setRefunding] = useState<Invoice | null>(null);
   const [settling, setSettling] = useState<Invoice | null>(null);
   const [sheet, setSheet] = useState<
@@ -352,14 +413,6 @@ export default function CustomerDetail() {
   const [mergedIntoName, setMergedIntoName] = useState<string | null>(null);
   // GL-09 — the lifecycle transition ledger (deactivate/reactivate history) and
   // the reason-picker sheets that gate each transition on a controlled reason.
-  const [lifecycle, setLifecycle] = useState<CustomerLifecycleEvent[]>([]);
-  const [lifecycleReadFailed, setLifecycleReadFailed] = useState(false);
-  const [openLifecycleCommand, setOpenLifecycleCommand] = useState<{
-    id: string;
-    action: string;
-    stage: string;
-    lastError?: string | null;
-  } | null>(null);
   const [lifecyclePreview, setLifecyclePreview] = useState<Record<
     string,
     unknown
@@ -370,72 +423,75 @@ export default function CustomerDetail() {
   const [reasonCode, setReasonCode] = useState<string>("");
   const [reasonNote, setReasonNote] = useState("");
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    setError(null);
-    try {
-      const c = unwrap(await api().models.Customer.get({ id }));
-      if (!c) {
-        setNotFound(true);
-        return;
-      }
-      setCustomer(c);
-      const filter = { customerId: { eq: id } };
-      const [pl, jb, ag, rp, amd, inv, gr] = await Promise.all([
-        listAll((t) => api().models.ServicePlan.list({ filter, limit: 200, nextToken: t })),
-        listAll((t) => api().models.Job.list({ filter, limit: 500, nextToken: t })),
-        listAll((t) => api().models.Agreement.list({ filter, limit: 200, nextToken: t })),
-        listAll((t) => api().models.ServiceReport.list({ filter, limit: 500, nextToken: t })),
-        listAll((t) => api().models.ServiceReportAmendment.list({ filter, limit: 500, nextToken: t })),
-        listAll((t) => api().models.Invoice.list({ filter, limit: 500, nextToken: t })),
-        listAll((t) => api().models.CustomerGroup.list({ limit: 500, nextToken: t })),
-      ]);
-      setPlans(pl);
-      setJobs(
-        jb.sort((a, b) =>
-          (b.scheduledDate ?? "9999").localeCompare(a.scheduledDate ?? "9999")
-        )
-      );
-      setAgreements(ag);
-      setReports(rp.filter((r) => r.status === "FINALIZED"));
-      setAmendments(
-        amd.sort((a, b) =>
-          (a.issuedAt ?? "").localeCompare(b.issuedAt ?? "")
-        )
-      );
-      setInvoices(
-        inv.sort((a, b) =>
-          (b.issuedAt ?? "").localeCompare(a.issuedAt ?? "")
-        )
-      );
-      setGroups(gr);
-      // The lifecycle ledger is OWNER/OFFICE/FINANCE-readable; load it for those
-      // roles so the transition history refreshes after every deactivate/reactivate.
-      if (roles.office || roles.finance) {
-        const lc = await listCustomerLifecycleEvents(id);
-        // GL-09/X1: a read failure is a FAILURE, never an empty timeline.
-        setLifecycleReadFailed(lc.readFailed);
-        setLifecycle(
-          (lc.data ?? [])
-            .slice()
-            .sort((a, b) =>
-              String(b.occurredAt ?? "").localeCompare(String(a.occurredAt ?? ""))
-            )
-        );
-        // GL-09: a non-terminal lifecycle command = "Transition needs recovery".
-        const cmds = await listLifecycleCommands(id);
-        setOpenLifecycleCommand(
-          cmds.find((c) => c.stage !== "COMPLETE" && c.stage !== "FAILED") ?? null
-        );
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load customer");
-    }
-  }, [id, roles.office, roles.finance]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const recordKey = `${roles.sub}:${id}`;
+  const alive = useRef(true);
+  const loginScope = useRef(queryCache.writeScope()).current;
+  const isCurrent = useCallback(() => alive.current && queryCache.writeScope() === loginScope, [loginScope]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const customerRead = useAsync(() => id ? readCustomerRecord(id) : Promise.resolve(null), [recordKey], "Could not load customer");
+  const customer = customerRead.data;
+  const notFound = !customerRead.loading && !customerRead.error && customer === null;
+  const plansRead = useAsync(() => readCustomerEssentials(id!, "servicePlans"), [recordKey], "Service plans could not be loaded");
+  const jobsRead = useAsync(async () => (await readCustomerEssentials(id!, "jobs")).sort((a, b) => (b.scheduledDate ?? "9999").localeCompare(a.scheduledDate ?? "9999")), [recordKey], "Jobs could not be loaded");
+  const invoicesRead = useAsync(async () => (await readCustomerEssentials(id!, "invoices")).sort((a, b) => (b.issuedAt ?? "").localeCompare(a.issuedAt ?? "")), [recordKey], "Invoices could not be loaded");
+  const plans = plansRead.data ?? [], jobs = jobsRead.data ?? [], invoices = invoicesRead.data ?? [];
+  const customerCurrent = customerRead.data !== null && !customerRead.loading && !customerRead.error;
+  const plansCurrent = plansRead.data !== null && !plansRead.loading && !plansRead.error;
+  const jobsCurrent = jobsRead.data !== null && !jobsRead.loading && !jobsRead.error;
+  const invoicesCurrent = invoicesRead.data !== null && !invoicesRead.loading && !invoicesRead.error;
+  const essentialsReady = customerCurrent && plansCurrent && jobsCurrent && invoicesCurrent;
+  const agreementsRead = useRecordSection(`${recordKey}:agreements`, (token) => readCustomerPage(id!, "agreements", token));
+  const reportsRead = useRecordSection(`${recordKey}:reports`, (token) => readCustomerPage(id!, "serviceReports", token));
+  const documentsRead = useRecordSection(`${recordKey}:documents`, async () => ({ items: [{ id: id!, documents: await readCustomerDocuments(id!) }], nextToken: null }));
+  const lifecycleRead = useRecordSection(`${recordKey}:lifecycle`, (token) => readLifecyclePage(id!, token));
+  const agreements = agreementsRead.data?.items ?? [];
+  const reports = reportsRead.data?.items.filter((report) => report.status === "FINALIZED") ?? [];
+  const lifecycle = lifecycleRead.data?.items ?? [];
+  const lifecycleReadFailed = Boolean(lifecycleRead.error || lifecycleRead.moreError);
+  // Recovery commands are essential, independent of (and never behind) history.
+  const commandsRead = useAsync(async () => {
+    if (!roles.office && !roles.finance) return [];
+    return listAll((nextToken) => api().models.CustomerLifecycleCommand.listCustomerLifecycleCommandByCustomerIdAndRequestedAt(
+      { customerId: id! }, { limit: 100, nextToken }
+    ));
+  }, [recordKey, roles.office, roles.finance], "Transition recovery status could not be verified");
+  const openLifecycleCommand = commandsRead.data?.find((command) => command.stage !== "COMPLETE" && command.stage !== "FAILED") ?? null;
+  const transitionReady = commandsRead.data !== null && !commandsRead.loading && !commandsRead.error && !openLifecycleCommand;
+  const groupRead = useAsync(async () => customer?.groupId ? unwrap(await api().models.CustomerGroup.get({ id: customer.groupId })) : null,
+    [recordKey, customer?.groupId], "Customer group could not be loaded");
+  const rosterRead = useAsync(async () => sheet === "group" ? listAll((nextToken) => api().models.CustomerGroup.list({ limit: 100, nextToken })) : null,
+    [recordKey, sheet === "group"], "Customer groups could not be loaded");
+  const historyGroupIds = [...new Set(lifecycle.flatMap((event) => {
+    if (event.action !== "GROUP_CHANGE") return [];
+    const match = /^group:\s*(.*?)\s*→\s*(.*?)$/i.exec(event.effects ?? "");
+    return match ? match.slice(1).filter((value) => value && value.toLowerCase() !== "none") : [];
+  }))].sort().join("\n");
+  const lifecycleOpen = useRef(lifecycleRead.open); lifecycleOpen.current = lifecycleRead.open;
+  const historyGroupLookup = useRef<ReturnType<typeof createHistoryGroupLookup> | null>(null);
+  if (!historyGroupLookup.current) historyGroupLookup.current = createHistoryGroupLookup(
+    async (groupId) => unwrap(await api().models.CustomerGroup.get({ id: groupId })), isCurrent, () => lifecycleOpen.current
+  );
+  const historyGroupsRead = useAsync(async () => {
+    if (!lifecycleRead.open || !historyGroupIds) return { ids: historyGroupIds, verified: lifecycleRead.open, rows: [] as CustomerGroup[] };
+    const rows = await historyGroupLookup.current!(historyGroupIds.split("\n"));
+    return { ids: historyGroupIds, verified: true, rows };
+  }, [recordKey, lifecycleRead.open, historyGroupIds], "Historical customer group names could not be verified");
+  const historyGroupsCurrent = historyGroupsRead.data?.verified === true && historyGroupsRead.data.ids === historyGroupIds && !historyGroupsRead.loading && !historyGroupsRead.error;
+  const groups = [...new Map([...(groupRead.data ? [groupRead.data] : []), ...(historyGroupsCurrent ? historyGroupsRead.data!.rows : []), ...(rosterRead.data ?? [])].map((group) => [group.id, group])).values()];
+  const load = useCallback(async (resources: RecordResource[] = ESSENTIAL_RESOURCES) => {
+    if (!isCurrent()) return;
+    const tasks: Promise<unknown>[] = [];
+    if (resources.includes("customer")) tasks.push(customerRead.reload());
+    if (resources.includes("plans")) tasks.push(plansRead.reload());
+    if (resources.includes("jobs")) tasks.push(jobsRead.reload());
+    if (resources.includes("invoices")) tasks.push(invoicesRead.reload());
+    if (resources.includes("agreements")) tasks.push(agreementsRead.refresh());
+    if (resources.includes("reports")) tasks.push(reportsRead.refresh());
+    if (resources.includes("documents")) tasks.push(documentsRead.refresh());
+    if (resources.includes("lifecycle")) tasks.push(commandsRead.reload(), lifecycleRead.refresh());
+    if (resources.includes("payment")) setPaymentVersion((version) => version + 1);
+    await Promise.all(tasks);
+  }, [isCurrent, customerRead.reload, plansRead.reload, jobsRead.reload, invoicesRead.reload, agreementsRead.refresh, reportsRead.refresh, documentsRead.refresh, lifecycleRead.refresh, commandsRead.reload]);
 
   useEffect(() => {
     setJobWarning(null);
@@ -474,22 +530,32 @@ export default function CustomerDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lifecycleSheet, reasonCode, customer?.id]);
 
-  // Payment summary is a live Stripe lookup — load after the record.
+  // Display is read-only and independent of unrelated record reloads.
   useEffect(() => {
     if (!customer || !roles.office) return;
-    readPaymentMethodSummary(
-      api().queries.getPaymentMethodSummary({ customerId: customer.id }),
-      customer.paymentMethodLabel
-    )
+    let current = true;
+    setPm(null); setPaymentError(null);
+    api().queries.getPaymentMethodSummary({ customerId: customer.id })
       .then((res) => {
-        if (!res.errors?.length) {
-          setPm(
-            opResult<{ hasPaymentMethod: boolean; label: string | null }>(res)
-          );
-        }
+        const summary = opResult<{ hasPaymentMethod: boolean; label: string | null; needsRepair?: boolean; needsLabelSync?: boolean }>(res);
+        if (!summary || typeof summary.hasPaymentMethod !== "boolean") throw new Error("Payment details could not be verified.");
+        if (current) setPm(summary.needsRepair ? { ...summary, hasPaymentMethod: false, label: null } : summary);
       })
-      .catch(() => undefined);
-  }, [customer, roles.office]);
+      .catch((error) => { if (current) setPaymentError(toMessage(error, "Payment details could not be verified.")); });
+    return () => { current = false; };
+    // A contact edit must not repeat a provider read; payment changes are explicit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.id, roles.office, paymentVersion]);
+  const repairPayment = useAction(async () => {
+    if (!customer || !roles.owner || !window.confirm("Use the current saved payment details for future billing? This does not charge the customer or start a subscription.")) return;
+    const summary = opResultUnlessRefused<{ hasPaymentMethod?: boolean; label?: string | null; needsRepair?: boolean }>(await confirmedMutation(
+      api().mutations.createSetupIntent({ customerId: customer.id, action: "REPAIR_PAYMENT_DEFAULT" }), ["customers"]
+    ));
+    if (!summary?.hasPaymentMethod || summary.needsRepair || typeof summary.label !== "string") throw new Error("The payment method was not confirmed. Refresh and retry; no charge was made.");
+    if (!isCurrent()) return;
+    setPm({ hasPaymentMethod: true, label: summary.label, needsRepair: false, needsLabelSync: false });
+    await load(["customer"]);
+  }, "Saved payment details could not be updated");
 
   // Nav-state arrivals, consumed exactly once and then cleared (replace
   // navigation) so a reload or back/forward never replays them:
@@ -615,14 +681,16 @@ export default function CustomerDetail() {
       })
     );
     if (res?.decision === "MERGED") {
+      if (!isCurrent()) return;
       if (res.survivorId === customer.id) {
         setNotice(
           "The merge finished — the duplicate is absorbed into this record."
         );
-        await load();
+        await load([...ESSENTIAL_RESOURCES, "agreements", "reports", "documents", "payment"]);
       } else {
         // This page was the absorbed side — follow the survivor, and tell
         // the landing page what just happened.
+        if (!isCurrent()) return;
         navigate(`/customers/${res.survivorId}`, {
           state: { mergedFrom: customer.displayName },
         });
@@ -656,8 +724,8 @@ export default function CustomerDetail() {
   if (!customer) {
     return (
       <Page title="Customer" back={returningToSearch ? true : "/customers"}>
-        <ErrorNote error={error} />
-        <Spinner />
+        <ErrorNote error={error ?? customerRead.error} />
+        {customerRead.loading ? <Spinner /> : <Button onClick={() => void customerRead.reload()}>Retry customer</Button>}
       </Page>
     );
   }
@@ -721,7 +789,7 @@ export default function CustomerDetail() {
   const isLead = customer.status === "LEAD";
   const group = groups.find((g) => g.id === customer.groupId);
   const documentCount = (() => {
-    const raw = (customer as { documents?: unknown }).documents;
+    const raw = documentsRead.data?.items[0]?.documents;
     let v: unknown = raw;
     if (typeof raw === "string") {
       try {
@@ -737,7 +805,7 @@ export default function CustomerDetail() {
     (j) => j.status === "SCHEDULED" && (j.scheduledDate ?? "") >= todayEastern()
   );
   const needsAttention =
-    customer.status === "ACTIVE" && !activePlan && !upcomingJob;
+    essentialsReady && customer.status === "ACTIVE" && !activePlan && !upcomingJob;
 
   const run = async (
     name: string,
@@ -748,7 +816,15 @@ export default function CustomerDetail() {
     await perform.run(name, async () => {
       setNotice(null);
       await fn();
-      await load();
+      // Email/invite actions do not change every historical resource. Known
+      // billing/status actions refresh only the essential facts they affect.
+      const resources: RecordResource[] = /^(payreq|remind|invoice-link)/.test(name) ? []
+        : /^(portal)/.test(name) ? ["customer"]
+        : name === "resume-lifecycle" ? ESSENTIAL_RESOURCES
+        : /^(charge|settle|void)/.test(name) ? ["jobs", "invoices", "plans"]
+        : /^(cancel-|pause-|resume-|start-|complete-)/.test(name) ? ["plans", "jobs", "invoices", "lifecycle"]
+        : ESSENTIAL_RESOURCES;
+      await load(resources);
       if (successMsg) {
         setNotice(successMsg);
         window.setTimeout(
@@ -774,6 +850,7 @@ export default function CustomerDetail() {
         <Button
           small
           variant="danger"
+          disabled={!essentialsReady || !transitionReady}
           loading={perform.busyKey === "deactivate"}
           onClick={() => {
             setReasonCode(DEACTIVATION_REASONS[0]);
@@ -787,6 +864,7 @@ export default function CustomerDetail() {
         <Button
           small
           variant="subtle"
+          disabled={!customerCurrent || !transitionReady}
           loading={perform.busyKey === "reactivate"}
           onClick={() => {
             setReasonCode(REACTIVATION_REASONS[0]);
@@ -853,6 +931,8 @@ export default function CustomerDetail() {
       }
     >
       <ErrorNote error={error ?? perform.error} />
+      <ErrorNote error={customerRead.error} />
+      {customerRead.error ? <Button small onClick={() => void customerRead.reload()}>Retry customer</Button> : null}
       <SuccessNote message={notice} />
       {jobWarning ? (
         <div className="attention-note" role="alert">
@@ -980,7 +1060,7 @@ export default function CustomerDetail() {
                     {group.name}
                   </button>
                 ) : (
-                  <span className="muted">No group assigned</span>
+                  <span className="muted">{customer.groupId ? groupRead.error ? "Group unavailable" : groupRead.loading ? "Checking group…" : "Archived group" : "No group assigned"}</span>
                 )}
                 {roles.office ? (
                   <button
@@ -988,10 +1068,11 @@ export default function CustomerDetail() {
                     className="text-action customer-group-action"
                     onClick={() => setSheet("group")}
                   >
-                    {group ? "Change" : "Add group"}
+                    {customer.groupId ? "Change" : "Add group"}
                   </button>
                 ) : null}
               </span>
+              {groupRead.error ? <><ErrorNote error={groupRead.error} /><Button small onClick={() => void groupRead.reload()}>Retry group</Button></> : null}
             </div>
           </div>
         </div>
@@ -1000,7 +1081,8 @@ export default function CustomerDetail() {
       {isLead && roles.office ? (
         <LeadPanel
           customer={customer}
-          onChanged={() => void load()}
+          canAddJob={essentialsReady}
+          onChanged={() => void load(["customer", "plans", "jobs"])}
           onAddJob={() => setSheet("job")}
         />
       ) : null}
@@ -1010,9 +1092,9 @@ export default function CustomerDetail() {
           so the history disappeared the moment a lead converted, even though
           the quotes still existed. "What did we quote them?" is asked most
           often after they become a customer. */}
-      {roles.office ? <QuoteHistory customer={customer} /> : null}
+      {roles.office ? <RecordSection key={`${recordKey}:quotes`} title="Quote history"><QuoteHistory customer={customer} onChanged={() => void load(["customer"])} /></RecordSection> : null}
 
-      {roles.office && !isLead ? (
+      {roles.office && (!isLead || pm?.needsRepair || pm?.needsLabelSync) ? (
         <Card
           title="Payment method"
           // While the summary is still loading we know nothing — showing the
@@ -1020,7 +1102,7 @@ export default function CustomerDetail() {
           actions={
             pm === null ? null : (
               <Badge tone={pm.hasPaymentMethod ? "ok" : "warn"}>
-                {pm.hasPaymentMethod ? "on file" : "missing"}
+                {pm.hasPaymentMethod ? "on file" : pm.needsRepair ? "needs attention" : "missing"}
               </Badge>
             )
           }
@@ -1030,13 +1112,18 @@ export default function CustomerDetail() {
               buttons on it would strip staff of "Collect now" entirely. */}
           {pm === null ? (
             <p className="muted small" style={{ marginBottom: 10 }}>
-              Checking…
+              {paymentError ? "Payment details are unavailable." : "Checking…"}
             </p>
           ) : (
             <p style={{ marginBottom: 10 }}>
-              {pm.hasPaymentMethod ? pm.label : "No payment method saved — collect before the first treatment."}
+              {pm.hasPaymentMethod ? pm.label : pm.needsRepair ? "A saved method needs to be selected for billing. No default is ready to charge." : "No payment method saved — collect before the first treatment."}
             </p>
           )}
+          <ErrorNote error={paymentError ?? repairPayment.error} />
+          {paymentError ? <Button small onClick={() => setPaymentVersion((version) => version + 1)}>Retry payment details</Button> : null}
+          {roles.owner && (pm?.needsRepair || pm?.needsLabelSync) ? <Button small disabled={!customerCurrent} loading={repairPayment.busy} onClick={() => void repairPayment.run()}>
+            {pm.needsRepair ? "Use saved payment method" : "Update saved payment details"}
+          </Button> : null}
           <div className="row-split">
             <Button small variant="subtle" onClick={() => setSheet("collect")}>
               {pm === null
@@ -1075,10 +1162,10 @@ export default function CustomerDetail() {
               card but never take payment. */}
           {roles.finance ? (
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button small variant="ghost" onClick={() => setSheet("charge")}>
+              <Button small variant="ghost" disabled={!essentialsReady} onClick={() => setSheet("charge")}>
                 Charge the card
               </Button>
-              <Button small variant="ghost" onClick={() => setSheet("record")}>
+              <Button small variant="ghost" disabled={!essentialsReady} onClick={() => setSheet("record")}>
                 Record a payment
               </Button>
             </div>
@@ -1184,14 +1271,16 @@ export default function CustomerDetail() {
           webhook. No "+ Plan" here — a hand-typed price can never enter a
           subscription, because there is no path for one. */}
       <Card title="Service plans">
-        {plans.length === 0 ? (
+        <ErrorNote error={plansRead.error} />
+        {plansRead.error ? <Button small onClick={() => void plansRead.reload()}>Retry service plans</Button> : null}
+        {!plansRead.data && !plansRead.error ? <Spinner /> : plansRead.data && plans.length === 0 ? (
           <p className="muted small">
             {isLead
               ? "No service plans — the plan is created when the lead books and pays online."
               : "No service plans."}
           </p>
         ) : (
-          plans.map((p) => (
+          plans.slice(0, plansLimit).map((p) => (
             <ListRow
               key={p.id}
               title={p.planName}
@@ -1203,7 +1292,7 @@ export default function CustomerDetail() {
                   ) : (
                     <StatusBadge status={p.status} />
                   )}
-                  {roles.finance && p.status === "ACTIVE" ? (
+                  {roles.finance && customerCurrent && plansCurrent && p.status === "ACTIVE" ? (
                     <>
                       {p.stripeSubscriptionId ? (
                         <Button
@@ -1278,7 +1367,7 @@ export default function CustomerDetail() {
                       </Button>
                     </>
                   ) : null}
-                  {roles.finance && p.status === "PAUSED" ? (
+                  {roles.finance && customerCurrent && plansCurrent && p.status === "PAUSED" ? (
                     <Button
                       small
                       variant="subtle"
@@ -1301,6 +1390,7 @@ export default function CustomerDetail() {
             />
           ))
         )}
+        {plans.length > plansLimit ? <Button small onClick={() => setPlansLimit((limit) => limit + 25)}>Show more service plans</Button> : null}
       </Card>
 
       {/* Jobs agreed offline stay linked to the same lead/customer record. */}
@@ -1308,19 +1398,21 @@ export default function CustomerDetail() {
         title="Jobs"
         actions={
           roles.office && (customer.status === "ACTIVE" || isLead) ? (
-            <Button small variant="subtle" onClick={() => setSheet("job")}>
+            <Button small variant="subtle" disabled={!essentialsReady} onClick={() => setSheet("job")}>
               {activePlan && !upcomingJob ? "Schedule visit" : "Add job"}
             </Button>
           ) : undefined
         }
       >
-        {activePlan && !upcomingJob && roles.office && customer.status === "ACTIVE" ? (
+        {essentialsReady && activePlan && !upcomingJob && roles.office && customer.status === "ACTIVE" ? (
           <div className="attention-note" style={{ marginBottom: 8 }}>
             <Badge tone="warn">schedule needed</Badge>
             <span>Plan is active but nothing is on the schedule.</span>
           </div>
         ) : null}
-        {jobs.length === 0 ? (
+        <ErrorNote error={jobsRead.error} />
+        {jobsRead.error ? <Button small onClick={() => void jobsRead.reload()}>Retry jobs</Button> : null}
+        {!jobsRead.data && !jobsRead.error ? <Spinner /> : jobsRead.data && jobs.length === 0 ? (
           <p className="muted small">
             {isLead
               ? "No jobs yet. Add a job to record an agreed appointment and price."
@@ -1340,12 +1432,12 @@ export default function CustomerDetail() {
                   inv.status !== "VOID"
               );
               const reschedulable =
-                roles.office &&
+                roles.office && customerCurrent && jobsCurrent &&
                 (j.status === "SCHEDULED" || j.status === "UNSCHEDULED");
               // GL-12: the dispatch packet is editable while the visit is live
               // (not yet a closed record). Same statuses the server allows.
               const packetEditable =
-                roles.office &&
+                roles.office && customerCurrent && jobsCurrent &&
                 (j.status === "SCHEDULED" ||
                   j.status === "UNSCHEDULED" ||
                   j.status === "IN_PROGRESS");
@@ -1368,7 +1460,7 @@ export default function CustomerDetail() {
                               report <DocButton docKey={report.pdfKey} label="view" />
                             </>
                           ) : (
-                            "report pending"
+                            <Button small variant="ghost" onClick={() => reportsRead.setOpen(true)}>View reports</Button>
                           )}
                           {invoice
                             ? ` · invoice ${invoice.status?.toLowerCase()}`
@@ -1419,7 +1511,7 @@ export default function CustomerDetail() {
                           technician's finalized report — the legal application
                           record — so it never gets an office "Complete" button;
                           the server refuses it too. */}
-                      {roles.office &&
+                      {roles.office && essentialsReady &&
                       (j.status === "SCHEDULED" || j.status === "IN_PROGRESS") &&
                       isOfficeCompletableServiceType(j.serviceType) ? (
                         <Button
@@ -1453,7 +1545,7 @@ export default function CustomerDetail() {
                       j.status === "COMPLETED" &&
                       j.priceCents &&
                       !j.paidAt &&
-                      !invoice ? (
+                      essentialsReady && !invoice ? (
                         <Button
                           small
                           variant="subtle"
@@ -1527,18 +1619,19 @@ export default function CustomerDetail() {
                 />
               );
             };
+            const visibleJobs = jobs.slice(0, jobsLimit);
             const planned = plans.filter((p) =>
-              jobs.some((j) => j.servicePlanId === p.id)
+              visibleJobs.some((j) => j.servicePlanId === p.id)
             );
-            const oneTime = jobs.filter((j) => !j.servicePlanId);
+            const ungrouped = visibleJobs.filter((j) => j.servicePlanId && !plans.some((p) => p.id === j.servicePlanId));
+            const oneTime = visibleJobs.filter((j) => !j.servicePlanId);
             return (
               <>
                 {planned.map((p) => (
                   <div key={p.id} className="job-group">
                     <p className="group-label">{p.planName}</p>
-                    {jobs
+                    {visibleJobs
                       .filter((j) => j.servicePlanId === p.id)
-                      .slice(0, 6)
                       .map(renderJob)}
                   </div>
                 ))}
@@ -1547,13 +1640,15 @@ export default function CustomerDetail() {
                     {planned.length ? (
                       <p className="group-label">One-time jobs</p>
                     ) : null}
-                    {oneTime.slice(0, 8).map(renderJob)}
+                    {oneTime.map(renderJob)}
                   </div>
                 ) : null}
+                {ungrouped.map(renderJob)}
               </>
             );
           })()
         )}
+        {jobs.length > jobsLimit ? <Button small onClick={() => setJobsLimit((limit) => limit + 25)}>Show more jobs</Button> : null}
       </Card>
 
       {/* Low-activity records share one compact area. Empty sections are one
@@ -1563,10 +1658,10 @@ export default function CustomerDetail() {
         <RecordSection
           title="Agreements"
           count={agreements.length}
-          defaultOpen={agreements.length > 0}
+          section={agreementsRead}
         >
           {agreements.length === 0 ? (
-            <p className="muted small records-empty">No agreements.</p>
+            <p className="muted small records-empty">{agreementsRead.data?.nextToken ? "No agreements in these records. More records are available." : "No agreements."}</p>
           ) : (
             agreements.map((a) => (
               <ListRow
@@ -1591,23 +1686,20 @@ export default function CustomerDetail() {
         <RecordSection
           title="Documents"
           count={documentCount}
-          defaultOpen={documentCount > 0}
+          section={documentsRead}
         >
-          <CustomerDocuments customer={customer} onChanged={() => load()} />
+          <CustomerDocuments customer={{ ...customer, documents: documentsRead.data?.items[0]?.documents } as Customer} onChanged={() => load(["documents"])} />
         </RecordSection>
 
         <RecordSection
           title="Service reports"
           count={reports.length}
-          defaultOpen={reports.length > 0}
+          section={reportsRead}
         >
         {reports.length === 0 ? (
-          <p className="muted small records-empty">No completed service reports.</p>
+          <p className="muted small records-empty">{reportsRead.data?.nextToken ? "No completed reports in these records. More records are available." : "No completed service reports."}</p>
         ) : (
           reports.map((r) => {
-            const reportAmendments = amendments.filter(
-              (a) => a.originalReportId === r.id
-            );
             const undelivered =
               r.deliveryStatus === "BOUNCED" ||
               r.deliveryStatus === "COMPLAINED" ||
@@ -1658,27 +1750,13 @@ export default function CustomerDetail() {
                   <div style={{ marginLeft: 16, marginBottom: 8 }}>
                     <ReportDeliveryRecovery
                       reportId={r.id}
-                      onDone={load}
+                      onDone={() => load(["reports"])}
                     />
                   </div>
                 ) : null}
-                {reportAmendments.map((a) => (
-                  <div key={a.id} style={{ marginLeft: 16 }}>
-                    <ListRow
-                      title={`Amendment — ${fmtDate(a.issuedAt ?? "", true)}`}
-                      subtitle={a.reason ?? undefined}
-                      meta={
-                        <>
-                          <DeliveryBadge
-                            status={a.deliveryStatus}
-                            emailedAt={a.emailedAt}
-                          />
-                          {a.pdfKey ? <DocButton docKey={a.pdfKey} /> : null}
-                        </>
-                      }
-                    />
-                  </div>
-                ))}
+                <RecordSection title="Amendment history">
+                  <ReportAmendments reportId={r.id} revision={reportsRead.data?.revision ?? 0} />
+                </RecordSection>
               </div>
             );
           })
@@ -1688,8 +1766,10 @@ export default function CustomerDetail() {
         <RecordSection
           title="Lifecycle history"
           count={lifecycle.length}
-          defaultOpen={lifecycleReadFailed}
+          section={lifecycleRead}
         >
+          <ErrorNote error={historyGroupsRead.error} />
+          {historyGroupsRead.error ? <Button small onClick={() => void historyGroupsRead.reload()}>Retry historical group names</Button> : null}
           {lifecycleReadFailed ? (
             <p className="small records-read-error">
               Some history could not be read. Try again before relying on this
@@ -1697,12 +1777,12 @@ export default function CustomerDetail() {
             </p>
           ) : null}
           {lifecycle.length === 0 && !lifecycleReadFailed ? (
-            <p className="muted small records-empty">No lifecycle changes.</p>
+            <p className="muted small records-empty">{lifecycleRead.data?.nextToken ? "No changes in these records. More records are available." : "No lifecycle changes."}</p>
           ) : null}
           {lifecycle.map((e) => {
             const groupSummary =
               e.action === "GROUP_CHANGE"
-                ? groupChangeSummary(e.effects, groups)
+                ? !historyGroupsCurrent ? "Group names are not yet verified." : groupChangeSummary(e.effects, groups)
                 : null;
             const statusSummary =
               e.priorStatus && e.newStatus
@@ -1756,10 +1836,12 @@ export default function CustomerDetail() {
 
       {roles.office ? (
         <Card title="Invoices">
-          {invoices.length === 0 ? (
+          <ErrorNote error={invoicesRead.error} />
+          {invoicesRead.error ? <Button small onClick={() => void invoicesRead.reload()}>Retry invoices</Button> : null}
+          {!invoicesRead.data && !invoicesRead.error ? <Spinner /> : invoicesRead.data && invoices.length === 0 ? (
             <p className="muted small">No invoices yet.</p>
           ) : (
-            invoices.slice(0, 10).map((inv) => {
+            invoices.slice(0, invoiceLimit).map((inv) => {
               const job = inv.jobId ? jobs.find((j) => j.id === inv.jobId) : null;
               const plan = inv.servicePlanId
                 ? plans.find((p) => p.id === inv.servicePlanId)
@@ -1772,13 +1854,13 @@ export default function CustomerDetail() {
               const refundedCents = inv.refundedAmountCents ?? 0;
               const refundable = Math.max(0, inv.amountCents - refundedCents);
               const canRefund =
-                roles.finance &&
+                roles.finance && customerCurrent && invoicesCurrent &&
                 (inv.status === "PAID" || inv.status === "REFUNDED") &&
                 refundable > 0;
               // Money that moved gets refunded; an invoice that should never
               // have existed gets voided. There is no third option and no delete.
               const canVoid =
-                roles.finance && (inv.status === "OPEN" || inv.status === "FAILED");
+                roles.finance && customerCurrent && invoicesCurrent && (inv.status === "OPEN" || inv.status === "FAILED");
               // Recovery: an OPEN/FAILED invoice is a bill still owed. Finance
               // can settle it (mark an offline payment, or charge the card);
               // office can email the customer a link to pay it.
@@ -1786,8 +1868,8 @@ export default function CustomerDetail() {
               const today = todayEastern();
               const overdue = isOverdue(inv, today);
               const daysLate = daysPastDue(inv, today);
-              const canSettle = roles.finance && owed;
-              const canSendLink = roles.office && owed && Boolean(customer.email);
+              const canSettle = roles.finance && customerCurrent && invoicesCurrent && owed;
+              const canSendLink = roles.office && customerCurrent && invoicesCurrent && owed && Boolean(customer.email);
               return (
                 <ListRow
                   key={inv.id}
@@ -1956,8 +2038,11 @@ export default function CustomerDetail() {
               );
             })
           )}
+          {invoices.length > invoiceLimit ? <Button small onClick={() => setInvoiceLimit((limit) => limit + 25)}>Show more invoices</Button> : null}
         </Card>
       ) : null}
+
+      {commandsRead.error ? <Card><ErrorNote error={commandsRead.error} /><Button small onClick={() => void commandsRead.reload()}>Retry transition status</Button></Card> : null}
 
       {/* GL-09: a customer mid-transition is a THIRD state, not active or
           inactive — the next employee sees one safe resume action. */}
@@ -2111,8 +2196,9 @@ export default function CustomerDetail() {
             block
             variant="danger"
             loading={perform.busyKey === "deactivate"}
-            disabled={reasonCode === "OTHER" && !reasonNote.trim()}
+            disabled={!essentialsReady || !transitionReady || (reasonCode === "OTHER" && !reasonNote.trim())}
             onClick={() => {
+              if (!essentialsReady || !transitionReady) return;
               if (reasonCode === "OTHER" && !reasonNote.trim()) return;
               const rc = reasonCode;
               const note = reasonNote.trim() || null;
@@ -2209,8 +2295,9 @@ export default function CustomerDetail() {
             block
             variant="subtle"
             loading={perform.busyKey === "reactivate"}
-            disabled={reasonCode === "OTHER" && !reasonNote.trim()}
+            disabled={!customerCurrent || !transitionReady || (reasonCode === "OTHER" && !reasonNote.trim())}
             onClick={() => {
+              if (!customerCurrent || !transitionReady) return;
               if (reasonCode === "OTHER" && !reasonNote.trim()) return;
               const rc = reasonCode;
               const note = reasonNote.trim() || null;
@@ -2294,7 +2381,7 @@ export default function CustomerDetail() {
               }))
             );
             setSheet(null);
-            await load();
+            await load(["customer"]);
           }}
         />
       </Sheet>
@@ -2316,7 +2403,7 @@ export default function CustomerDetail() {
                     ? "Amendment issued — the customer has no email on file, so delivery is now owned office work."
                     : "Amendment issued — the email did NOT go out; delivery is now owned office work."
               );
-              await load();
+              await load(["reports"]);
             }}
           />
         ) : null}
@@ -2332,7 +2419,7 @@ export default function CustomerDetail() {
             job={rescheduling}
             onDone={async () => {
               setRescheduling(null);
-              await load();
+              await load(["jobs"]);
             }}
           />
         ) : null}
@@ -2342,7 +2429,7 @@ export default function CustomerDetail() {
         jobId={cancelingJob?.id ?? null}
         open={cancelingJob !== null}
         onClose={() => setCancelingJob(null)}
-        onDone={() => void load()}
+        onDone={() => void load(["jobs", "invoices", "plans", "lifecycle"])}
       />
 
       <Sheet
@@ -2355,14 +2442,14 @@ export default function CustomerDetail() {
             job={packeting}
             onDone={async () => {
               setPacketing(null);
-              await load();
+              await load(["jobs"]);
             }}
           />
         ) : null}
       </Sheet>
 
-      <CallbacksSection customerId={customer.id} onChanged={load} />
-      <PortalRequestsSection customerId={customer.id} />
+      <RecordSection key={`${recordKey}:callbacks`} title="Guarantee callbacks"><CallbacksSection customerId={customer.id} onChanged={() => load(["jobs"])} /></RecordSection>
+      <RecordSection key={`${recordKey}:requests`} title="Portal requests"><PortalRequestsSection customerId={customer.id} /></RecordSection>
 
       <Sheet open={sheet === "job"} onClose={() => setSheet(null)} title="Add job">
         <JobForm
@@ -2438,7 +2525,7 @@ export default function CustomerDetail() {
             }
             setSheet(null);
             setJobWarning(warnings.length ? warnings.join(" ") : null);
-            await load();
+            await load(["customer", "plans", "jobs"]);
             if (result?.jobId) {
               setNotice("Job added. Assign a technician from the Schedule page when ready.");
             }
@@ -2447,7 +2534,9 @@ export default function CustomerDetail() {
       </Sheet>
 
       <Sheet open={sheet === "group"} onClose={() => setSheet(null)} title="Customer group">
-        <GroupPicker
+        <ErrorNote error={rosterRead.error} />
+        {rosterRead.error ? <Button small onClick={() => void rosterRead.reload()}>Retry customer groups</Button> : null}
+        {!rosterRead.data && !rosterRead.error ? <Spinner /> : rosterRead.data ? <GroupPicker
           groups={groups}
           currentGroupId={customer.groupId}
           onPick={async (groupId, reason) => {
@@ -2461,22 +2550,26 @@ export default function CustomerDetail() {
               }))
             );
             setSheet(null);
-            await load();
+            await load(["customer", "lifecycle"]);
           }}
-        />
+        /> : null}
       </Sheet>
 
-      <CollectPaymentSheet
+      {sheet === "collect" ? <CollectPaymentSheet
         customerId={customer.id}
         open={sheet === "collect"}
         onClose={() => setSheet(null)}
         onSaved={() => {
           setSheet(null);
           setPm(null);
-          // Webhook updates the label asynchronously; refresh shortly after.
-          setTimeout(() => void load(), 1500);
+          // The setup webhook can start plans and create their first invoice.
+          setTimeout(() => {
+            if (!isCurrent()) return;
+            queryCache.invalidate(["customers"]);
+            void load(["customer", "payment", "plans", "invoices"]);
+          }, 1500);
         }}
-      />
+      /> : null}
 
       <Sheet
         open={Boolean(refunding)}
@@ -2491,7 +2584,7 @@ export default function CustomerDetail() {
               setRefunding(null);
               setNotice(msg);
               window.setTimeout(() => setNotice(null), 6000);
-              await load();
+              await load(["invoices", "jobs", "plans"]);
             }}
           />
         ) : null}
@@ -2510,7 +2603,7 @@ export default function CustomerDetail() {
               setSettling(null);
               setNotice(msg);
               window.setTimeout(() => setNotice(null), 6000);
-              await load();
+              await load(["invoices", "jobs", "plans"]);
             }}
           />
         ) : null}
@@ -2529,7 +2622,7 @@ export default function CustomerDetail() {
             setSheet(null);
             setNotice(msg);
             window.setTimeout(() => setNotice(null), 6000);
-            await load();
+            await load(["invoices", "jobs", "plans"]);
           }}
         />
       </Sheet>
@@ -2545,7 +2638,7 @@ export default function CustomerDetail() {
             setSheet(null);
             setNotice(msg);
             window.setTimeout(() => setNotice(null), 6000);
-            await load();
+            await load(["invoices", "jobs", "plans"]);
           }}
         />
       </Sheet>
@@ -2573,6 +2666,7 @@ export default function CustomerDetail() {
               setInfoNote("Already merged — nothing to do.");
             }}
             onDone={async (msg, survivorId, loserName) => {
+              if (!isCurrent()) return;
               setMerging(false);
               setMergePrefill(null);
               setMergeBusy(false);
@@ -2582,7 +2676,7 @@ export default function CustomerDetail() {
                   () => setNotice((n) => (n === msg ? null : n)),
                   12000
                 );
-                await load();
+                await load([...ESSENTIAL_RESOURCES, "agreements", "reports", "documents", "payment"]);
               } else {
                 // The record on this page was absorbed — follow the survivor,
                 // and tell the landing page what just happened.
