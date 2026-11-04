@@ -40,10 +40,10 @@ function button(text: string, scope: ParentNode = container) {
   const result = [...scope.querySelectorAll("button")].find((row) => row.textContent?.trim() === text);
   if (!result) throw new Error(`Missing ${text}`); return result;
 }
-async function open(title: string) {
+async function open(title: string, value = true) {
   const element = [...container.querySelectorAll("details")].find((row) => row.querySelector("summary")?.textContent?.startsWith(title));
   if (!element) throw new Error(`Missing ${title}`);
-  await act(async () => { element.open = true; element.dispatchEvent(new Event("toggle", { bubbles: false })); });
+  await act(async () => { element.open = value; element.dispatchEvent(new Event("toggle", { bubbles: false })); });
 }
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -105,6 +105,18 @@ describe("independent customer essentials and explicit history", () => {
     mocks.page.mockResolvedValueOnce({ items: [], nextToken: "later" }).mockResolvedValueOnce({ items: [{ id: "a", title: "Signed agreement", status: "SIGNED" }], nextToken: null });
     await mount(); await open("Agreements"); expect(container.textContent).toContain("More records are available."); expect(container.textContent).not.toContain("No agreements.");
     await act(async () => button("Load more agreements").click()); expect(container.textContent).toContain("Signed agreement");
+  });
+  it("does not classify referenced groups as archived while a reopened history is verifying their names", async () => {
+    const summaries = vi.spyOn(await import("../lib/customerPresentation"), "groupChangeSummary");
+    mocks.history.mockResolvedValue({ items: [{ id: "event", action: "GROUP_CHANGE", effects: "group: old → new", occurredAt: "2026-10-01T12:00:00Z" }], nextToken: null });
+    await mount(); await open("Lifecycle history"); expect(container.textContent).toContain("Changed from Group old to Group new");
+    await open("Lifecycle history", false); summaries.mockClear();
+    const pending = deferred<void>();
+    mocks.group.mockImplementation(async ({ id }) => { await pending.promise; return { data: { id, name: `Recovered ${id}` } }; });
+    await open("Lifecycle history"); expect(container.textContent).toContain("Group names are not yet verified.");
+    // Observe every attempted summary, including the first commit before passive effects.
+    expect(summaries.mock.results.some((result) => String(result.value).includes("archived"))).toBe(false);
+    await act(async () => pending.resolve()); expect(container.textContent).toContain("Changed from Recovered old to Recovered new");
   });
   it("does not infer an unassigned group while its independent reference is pending or unreadable", async () => {
     const pending = deferred<{ data: unknown; errors?: { message: string }[] }>();

@@ -433,11 +433,11 @@ function CustomerRecord() {
     return match ? match.slice(1).filter((value) => value && value.toLowerCase() !== "none") : [];
   }))].sort().join("\n");
   const historyGroupsRead = useAsync(async () => {
-    if (!lifecycleRead.open || !historyGroupIds) return { ids: historyGroupIds, rows: [] as CustomerGroup[] };
+    if (!lifecycleRead.open || !historyGroupIds) return { ids: historyGroupIds, verified: lifecycleRead.open, rows: [] as CustomerGroup[] };
     const rows = await Promise.all(historyGroupIds.split("\n").map(async (groupId) => unwrap(await api().models.CustomerGroup.get({ id: groupId }))));
-    return { ids: historyGroupIds, rows: rows.filter((row) => row !== null) };
+    return { ids: historyGroupIds, verified: true, rows: rows.filter((row) => row !== null) };
   }, [recordKey, lifecycleRead.open, historyGroupIds], "Historical customer group names could not be verified");
-  const historyGroupsCurrent = historyGroupsRead.data?.ids === historyGroupIds && !historyGroupsRead.loading && !historyGroupsRead.error;
+  const historyGroupsCurrent = historyGroupsRead.data?.verified === true && historyGroupsRead.data.ids === historyGroupIds && !historyGroupsRead.loading && !historyGroupsRead.error;
   const groups = [...new Map([...(groupRead.data ? [groupRead.data] : []), ...(historyGroupsCurrent ? historyGroupsRead.data!.rows : []), ...(rosterRead.data ?? [])].map((group) => [group.id, group])).values()];
   const load = useCallback(async (resources: RecordResource[] = ESSENTIAL_RESOURCES) => {
     if (!isCurrent()) return;
