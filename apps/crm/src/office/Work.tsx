@@ -3,19 +3,19 @@ import { useNavigate } from "react-router-dom";
 import {
   api,
   listAll,
-  listWorkEvents,
-  listWorkItems,
   opResult,
   opResultUnlessRefused,
   updateOwnedWork,
   type BookingRequest,
-  type WorkEvent,
   type WorkItem,
   liftEmailSuppression,
   recordNoticeAlternateDelivery,
 } from "../lib/api";
 import { toMessage, useAsync, useKeyedAction } from "../lib/useAsync";
 import RefreshStatus from "../components/RefreshStatus";
+import WorkHistory from "../components/WorkHistory";
+import { useWorkQueue } from "../lib/useWorkQueue";
+import { WORK_PAGE_SIZE } from "../lib/workQueueReads";
 import { useRoles } from "../lib/auth";
 import { fmtDateTime, money, todayUtc } from "../lib/format";
 import {
@@ -49,6 +49,7 @@ export default function WorkQueue() {
   const roles = useRoles();
   const [tab, setTab] = useState<Tab>("OPEN");
   const [overridesOnly, setOverridesOnly] = useState(false);
+  const [archiveLimit, setArchiveLimit] = useState(WORK_PAGE_SIZE);
   // The owner-only "manager override" sheet — a close with no verified outcome.
   const [override, setOverride] = useState<WorkItem | null>(null);
   const [reasonCode, setReasonCode] = useState("");
@@ -71,18 +72,7 @@ export default function WorkQueue() {
     [runKeyed]
   );
 
-  const freshness = useAsync<{ items: WorkItem[]; events: WorkEvent[] }>(
-    async () => {
-      const [work, history] = await Promise.all([
-        listAll((t) => listWorkItems({ limit: 1000, nextToken: t })),
-        listAll((t) => listWorkEvents({ limit: 1000, nextToken: t })),
-      ]);
-      return { items: work, events: history };
-    },
-    [],
-    "Could not load work queue",
-    { refreshOnResume: true, suspended: override !== null || perform.busyKey !== null }
-  );
+  const freshness = useWorkQueue(tab, override !== null || perform.busyKey !== null);
   // Payments are an independent read: their provider/model failure must never
   // hide the owned tasks the office needs to resolve it.
   const paymentFreshness = useAsync(loadPaymentsInFlight, [], "Could not load payments in flight", {
@@ -98,10 +88,9 @@ export default function WorkQueue() {
     freshness.refresh();
     paymentFreshness.refresh();
   };
-  // A failed load used to fall through to the empty state beside its error,
-  // rather than spinning forever — keep that.
+  // A failed first read still exposes Refresh and the independent payments;
+  // it must not spin forever or claim the queue is empty.
   const items = data?.items ?? (loadError ? [] : null);
-  const events = data?.events ?? [];
   const error = perform.error ?? loadError;
 
   const shown = useMemo(() => {
@@ -400,15 +389,6 @@ export default function WorkQueue() {
     [load, runOn]
   );
 
-  if (!items) {
-    return (
-      <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
-        <ErrorNote error={error} />
-        <Spinner />
-      </Page>
-    );
-  }
-
   return (
     <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
       <RefreshStatus state={{ ...freshness, refresh: refreshAll }} label="owned work" />
@@ -416,25 +396,32 @@ export default function WorkQueue() {
       <PaymentsInFlight rows={paymentFreshness.data ?? []} />
       <SegControl
         options={[
-          { value: "OPEN" as Tab, label: `Open (${items.filter((i) => i.status === "OPEN").length})` },
+          { value: "OPEN" as Tab, label: tab === "OPEN" && data ? `Open (${shown.length}${data.nextToken ? "+" : ""})` : "Open" },
           { value: "RESOLVED" as Tab, label: "Resolved history" },
         ]}
         value={tab}
-        onChange={setTab}
+        onChange={(value) => { setTab(value); setArchiveLimit(WORK_PAGE_SIZE); }}
       />
       {tab === "RESOLVED" ? (
         <label className="inline-check small" style={{ margin: "8px 0" }}>
           <input
             type="checkbox"
             checked={overridesOnly}
-            onChange={(e) => setOverridesOnly(e.target.checked)}
+            onChange={(e) => { setOverridesOnly(e.target.checked); setArchiveLimit(WORK_PAGE_SIZE); }}
           />{" "}
-          Manager overrides only ({overrideCount})
+          Manager overrides only{data ? ` (${overrideCount})` : ""}
         </label>
       ) : null}
       <ErrorNote error={error} />
+      {data ? (
+        <p className="muted small" role="status">
+          {tab === "OPEN"
+            ? `${shown.length} open case${shown.length === 1 ? "" : "s"} shown${data.nextToken ? " · more available" : ""}. Earliest deadline first.`
+            : `${Math.min(archiveLimit, shown.length)} of ${shown.length} resolved case${shown.length === 1 ? "" : "s"} shown. Most recently resolved first.`}
+        </p>
+      ) : null}
 
-      {shown.length === 0 ? (
+      {!items ? <Spinner /> : shown.length === 0 && !data?.nextToken ? data ? (
         <EmptyState
           title={
             tab === "OPEN"
@@ -449,13 +436,10 @@ export default function WorkQueue() {
               : "Resolved work remains here permanently with its full history."
           }
         />
-      ) : (
-        shown.map((item) => {
+      ) : null : (
+        shown.slice(0, tab === "RESOLVED" ? archiveLimit : undefined).map((item) => {
           const overdue = item.status === "OPEN" && item.dueAt < new Date().toISOString();
           const policy = workPolicy(item.kind);
-          const history = events
-            .filter((event) => event.workItemId === item.id)
-            .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
           const mine = item.ownerSub === roles.sub;
           return (
             <Card
@@ -670,19 +654,19 @@ export default function WorkQueue() {
                   the real-world outcome is done.
                 </p>
               ) : null}
-              <details style={{ marginTop: 12 }}>
-                <summary className="small">Permanent history ({history.length})</summary>
-                {history.map((event) => (
-                  <p className="muted small" key={event.id} style={{ marginTop: 6 }}>
-                    {fmtDateTime(event.occurredAt)} · {event.eventType?.toLowerCase().replace(/_/g, " ")} · {event.actorEmail}
-                    <span className="nested-line">{event.note}</span>
-                  </p>
-                ))}
-              </details>
+              <WorkHistory workItemId={item.id} revision={data?.revision ?? 0} />
             </Card>
           );
         })
       )}
+      <ErrorNote error={freshness.moreError} />
+      {tab === "OPEN" && data?.nextToken ? (
+        <Button loading={freshness.moreLoading} disabled={freshness.loading || freshness.refreshSuspended} onClick={() => void freshness.loadMore()}>
+          Load more open cases
+        </Button>
+      ) : tab === "RESOLVED" && shown.length > archiveLimit ? (
+        <Button onClick={() => setArchiveLimit((limit) => limit + WORK_PAGE_SIZE)}>Load more resolved cases</Button>
+      ) : null}
 
       <Sheet
         open={Boolean(override)}

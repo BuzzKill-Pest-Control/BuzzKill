@@ -23,11 +23,19 @@ vi.mock("../lib/api", async (importOriginal) => {
   return {
     ...actual,
     updateOwnedWork: mocks.update,
-    listWorkItems: mocks.list,
-    listWorkEvents: async () => ({ data: [], nextToken: null }),
     api: () => ({ models: { BookingRequest: { listBookingRequestByStatus: mocks.bookings } } }),
   };
 });
+vi.mock("../lib/workQueueReads", () => ({
+  WORK_PAGE_SIZE: 50,
+  readWorkPage: async (...args: unknown[]) => {
+    const page = await mocks.list(...args);
+    return { items: page.data, nextToken: page.nextToken };
+  },
+  readResolvedWork: async () => [],
+  readWorkHistory: async () => [],
+  mergeWorkPages: (prior: unknown[], next: unknown[]) => [...prior, ...next],
+}));
 let container: HTMLDivElement;
 let root: Root;
 const retryButton = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Finish lead cleanup");
