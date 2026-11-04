@@ -322,13 +322,14 @@ export default function CustomerDetail() {
 }
 
 function ReportAmendments({ reportId, revision }: { reportId: string; revision: number }) {
-  const history = useAsync(() => readReportAmendments(reportId), [reportId, revision], "Report amendments could not be loaded");
+  const history = useAsync(async () => ({ reportId, revision, rows: await readReportAmendments(reportId) }), [reportId, revision], "Report amendments could not be loaded");
+  const current = history.data?.reportId === reportId && history.data.revision === revision && !history.loading && !history.error;
   return <div style={{ marginLeft: 16 }}>
     <ErrorNote error={history.error} />
     {history.error ? <Button small onClick={() => void history.reload()}>Retry amendments</Button> : null}
-    {history.data === null && !history.error ? <span className="muted small">Checking amendments…</span> : null}
-    {history.data?.length === 0 ? <span className="muted small">No amendments.</span> : null}
-    {history.data?.map((amendment) => <ListRow key={amendment.id}
+    {!current && !history.error ? <span className="muted small">Checking amendments…</span> : null}
+    {current && history.data?.rows.length === 0 ? <span className="muted small">No amendments.</span> : null}
+    {history.data?.rows.map((amendment) => <ListRow key={amendment.id}
       title={`Amendment — ${fmtDate(amendment.issuedAt ?? "", true)}`} subtitle={amendment.reason}
       meta={<><DeliveryBadge status={amendment.deliveryStatus} emailedAt={amendment.emailedAt} />{amendment.pdfKey ? <DocButton docKey={amendment.pdfKey} /> : null}</>} />)}
   </div>;
@@ -2524,8 +2525,12 @@ function CustomerRecord() {
         onSaved={() => {
           setSheet(null);
           setPm(null);
-          // The setup webhook updates the label and can start active plans.
-          setTimeout(() => void load(["customer", "payment", "plans"]), 1500);
+          // The setup webhook can start plans and create their first invoice.
+          setTimeout(() => {
+            if (!isCurrent()) return;
+            queryCache.invalidate(["customers"]);
+            void load(["customer", "payment", "plans", "invoices"]);
+          }, 1500);
         }}
       /> : null}
 

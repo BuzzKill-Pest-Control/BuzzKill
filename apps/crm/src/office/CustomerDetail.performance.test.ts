@@ -8,7 +8,7 @@ import PortalBilling from "../portal/Billing";
 import { queryCache } from "../lib/queryCache";
 const mocks = vi.hoisted(() => ({
   record: vi.fn(), essentials: vi.fn(), page: vi.fn(), documents: vi.fn(), history: vi.fn(), amendments: vi.fn(),
-  summary: vi.fn(), repair: vi.fn(), contact: vi.fn(), charge: vi.fn(), roster: vi.fn(), group: vi.fn(), commands: vi.fn(), leadHistory: vi.fn(),
+  summary: vi.fn(), repair: vi.fn(), contact: vi.fn(), charge: vi.fn(), delivery: vi.fn(), roster: vi.fn(), group: vi.fn(), commands: vi.fn(), leadHistory: vi.fn(),
   params: { id: "customer" },
   customer: { id: "customer", displayName: "Example Home", status: "ACTIVE", paymentMethodLabel: "Visa ••1111" },
   roles: { sub: "owner", owner: true, office: true, finance: true, loading: false, groups: ["OWNER"] },
@@ -29,7 +29,7 @@ vi.mock("../lib/api", async (original) => {
       CustomerGroup: { list: mocks.roster, get: mocks.group }, CustomerLifecycleCommand: { listCustomerLifecycleCommandByCustomerIdAndRequestedAt: mocks.commands },
       BookingRequest: { listBookingRequestByLeadCustomerId: list } },
     queries: { getPaymentMethodSummary: mocks.summary },
-    mutations: { createSetupIntent: mocks.repair, updateCustomerContact: mocks.contact, chargeOneTimeJob: mocks.charge },
+    mutations: { createSetupIntent: mocks.repair, updateCustomerContact: mocks.contact, chargeOneTimeJob: mocks.charge, recordReportDelivery: mocks.delivery },
   }), listLeadActivity: mocks.leadHistory };
 });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -57,6 +57,7 @@ beforeEach(async () => {
   mocks.roster.mockResolvedValue({ data: [], nextToken: null }); mocks.commands.mockResolvedValue({ data: [], nextToken: null });
   mocks.group.mockImplementation(async ({ id }) => ({ data: { id, name: `Group ${id}` } }));
   mocks.leadHistory.mockResolvedValue({ data: [] }); mocks.contact.mockResolvedValue({ data: "{}" });
+  mocks.delivery.mockResolvedValue({ data: "{}" });
   mocks.summary.mockResolvedValue({ data: JSON.stringify({ hasPaymentMethod: true, label: "Visa ••4242" }) });
   queryCache.activate(null); queryCache.activate("owner", ["OWNER"]);
   await queryCache.request(key, async () => [{ ...mocks.customer }]).promise;
@@ -121,6 +122,15 @@ describe("independent customer essentials and explicit history", () => {
     await act(async () => button("Retry amendments").click()); expect(mocks.amendments).toHaveBeenCalledTimes(2);
     expect(mocks.amendments).toHaveBeenLastCalledWith("report-0"); expect(container.textContent).toContain("First immutable correction"); expect(container.textContent).toContain("Last immutable correction");
   });
+  it("does not reuse an empty amendment result as proof of absence during a revision refresh or failure", async () => {
+    mocks.page.mockResolvedValue({ items: [{ id: "report", status: "FINALIZED", serviceDate: "2026-10-01", deliveryStatus: "FAILED" }], nextToken: null });
+    const pending = deferred<unknown[]>(); mocks.amendments.mockResolvedValueOnce([]).mockReturnValueOnce(pending.promise);
+    await mount(); await open("Service reports"); await open("Amendment history"); expect(container.textContent).toContain("No amendments.");
+    await act(async () => button("Re-send report").click()); expect(mocks.amendments).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Checking amendments…"); expect(container.textContent).not.toContain("No amendments.");
+    await act(async () => pending.reject(new Error("Amendment refresh unavailable")));
+    expect(container.textContent).toContain("Amendment refresh unavailable"); expect(container.textContent).not.toContain("No amendments.");
+  });
   it("does not classify referenced groups as archived while a reopened history is verifying their names", async () => {
     const summaries = vi.spyOn(await import("../lib/customerPresentation"), "groupChangeSummary");
     mocks.history.mockResolvedValue({ items: [{ id: "event", action: "GROUP_CHANGE", effects: "group: old → new", occurredAt: "2026-10-01T12:00:00Z" }], nextToken: null });
@@ -162,18 +172,28 @@ describe("independent customer essentials and explicit history", () => {
   });
 });
 describe("read-only payment display and explicit owner recovery", () => {
-  it("refreshes plans after payment setup starts their subscription through the webhook", async () => {
+  it("refreshes subscribed plans, immediate invoices and directory facts after a confirmed payment setup", async () => {
     vi.useFakeTimers(); let saved = false;
     mocks.essentials.mockImplementation(async (_id, connection) => connection === "servicePlans" ? [{
       id: "plan", planName: "Monthly protection", status: "ACTIVE", priceCents: 5000, serviceFrequency: "MONTHLY", stripeSubscriptionId: saved ? "subscription" : null,
-    }] : []);
-    await mount(); expect(container.textContent).toContain("Start billing");
+    }] : connection === "invoices" && saved ? [{ id: "first-invoice", amountCents: 5000, status: "PAID", issuedAt: "2026-10-01T12:00:00Z", description: "First subscription invoice" }] : []);
+    const before = queryCache.read(key); await mount(); expect(container.textContent).toContain("Start billing"); expect(queryCache.read(key)).toEqual(before);
     await act(async () => button("Update card / bank").click()); saved = true;
-    await act(async () => button("Confirm payment setup").click());
+    await act(async () => button("Confirm payment setup").click()); expect(queryCache.read(key)).toEqual(before);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(container.textContent).not.toContain("Start billing"); expect(button("Cancel")).toBeDefined();
-    expect(mocks.essentials).toHaveBeenCalledTimes(4); expect(mocks.essentials).toHaveBeenLastCalledWith("customer", "servicePlans");
+    expect(container.textContent).toContain("First subscription invoice"); expect(queryCache.read(key)).toBeNull();
+    expect(mocks.essentials).toHaveBeenCalledTimes(5); expect(mocks.essentials.mock.calls.slice(3).map((call) => call[1])).toEqual(["servicePlans", "invoices"]);
     expect(mocks.record).toHaveBeenCalledTimes(2); expect(mocks.summary).toHaveBeenCalledTimes(2); expect(mocks.page).not.toHaveBeenCalled();
+  });
+  it("does not let a previous login's delayed payment-save refresh invalidate the new same-user login", async () => {
+    vi.useFakeTimers(); await mount(); await act(async () => button("Update card / bank").click());
+    await act(async () => button("Confirm payment setup").click());
+    await act(async () => { queryCache.activate(null); queryCache.activate("owner", ["OWNER"]); });
+    await queryCache.request(key, async () => [{ id: "new-login" }]).promise; const current = queryCache.read(key);
+    const calls = mocks.record.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(queryCache.read(key)).toEqual(current); expect(mocks.record).toHaveBeenCalledTimes(calls);
   });
   it.each([false, true])("does not invalidate cached customer facts for different display labels or failed reads (portal=%s)", async (portal) => {
     const before = queryCache.read(key); await mount(portal); expect(queryCache.read(key)).toEqual(before); expect(container.textContent).toContain("Visa ••4242");
