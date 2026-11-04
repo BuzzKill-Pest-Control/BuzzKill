@@ -14,7 +14,6 @@ corrections that cannot be made in this repository.
 | State credentials, with holder and evidence status | `apps/web/amplify/functions/shared/credentials.ts` |
 | The guarantee sentence (plan callback policy) | `apps/web/amplify/functions/shared/callbackPolicy.ts` |
 | Checkout terms, built per offer, and their version | `apps/web/amplify/functions/shared/bookingTerms.ts` |
-| Public reviews and rating, quoted from Thumbtack | `apps/web/src/data/reviews.ts` |
 | Contact constants for React components | `apps/web/src/lib/contactInfo.ts` |
 | Canonical URL rules | `apps/web/src/seo/canonical.ts` |
 | Every published route: title, description, breadcrumb, Service node, FAQ, index state | `apps/web/src/seo/pages.ts` |
@@ -231,7 +230,7 @@ until that rule is replaced. Prove the files first, then switch the rules.
 7. `curl -sI https://www.pestbuzzkill.com/no-such-page | head -1` -> `404`.
 8. `curl -s https://www.pestbuzzkill.com/track/example | grep -o '<meta name="robots"[^>]*>'` -> `noindex, nofollow`; the response contains no token.
 9. Google Search Console: submit the sitemap; URL Inspection on `/`, `/about`, `/services/termite`, `/reviews`; confirm "User-declared canonical" equals "Google-selected canonical".
-10. Google Business Profile, Thumbtack, Facebook, Instagram, LinkedIn: name "BuzzKill Pest Control", address 420 Lakeside Ave, Suite 104, Marlborough, MA 01752, phone (508) 258-9294, website `https://www.pestbuzzkill.com`.
+10. Google Business Profile, Facebook, Instagram, LinkedIn: name "BuzzKill Pest Control", address 420 Lakeside Ave, Suite 104, Marlborough, MA 01752, phone (508) 258-9294, website `https://www.pestbuzzkill.com`.
 
 ## External work this repository cannot do
 
@@ -241,13 +240,6 @@ until that rule is replaced. Prove the files first, then switch the rules.
   Marlborough"); the site uses descriptive titles only.
 * **Massachusetts state-record address** amendment from the Framingham mailing
   address to 420 Lakeside Ave, Suite 104.
-* **Thumbtack profile** (https://www.thumbtack.com/ma/marlborough/exterminators/buzzkill-pest-control/service/583778090572914694) corrections:
-  remove the unqualified "safe" language; rewrite "100% satisfaction guarantee"
-  to the active-plan callback policy or remove it; remove "30 employees";
-  remove "1 year in business"; remove the published hours (Mon to Fri 8am to
-  5pm) unless confirmed; make clear the Massachusetts commercial certification
-  is held by Jacob Greasley, not by the company. Keep the four authentic
-  reviews, the 5.0 rating, and completed-job counts.
 * **Google Business Profile and citations**: name, Suite 104 address, phone,
   www host; the Google URL `https://g.page/r/CYyHi3DH59WEEAI/review` is a
   review-submission link only.

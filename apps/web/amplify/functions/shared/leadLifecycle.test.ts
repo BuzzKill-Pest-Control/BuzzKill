@@ -220,6 +220,19 @@ describe("createLead — dedup gate (GL-02 R3)", () => {
     expect(openMissingContactWork).toHaveBeenCalledOnce();
   });
 
+  it("does not treat an unrelated external reference as a usable contact method", async () => {
+    const input = { displayName: "No Contact", externalRef: "legacy#17" };
+    const res = await createLead(input, actor);
+
+    expect(res.decision).toBe("CREATED");
+    if (res.decision !== "CREATED") throw new Error("unreachable");
+    expect(customers.get(res.id)).toMatchObject({
+      nextAction: "Obtain a usable contact method",
+    });
+    expect(customers.get(res.id)?.externalRef).toBeUndefined();
+    expect(openMissingContactWork).toHaveBeenCalledOnce();
+  });
+
   it("a retry with the same intake id converges on one lead and one intake activity", async () => {
     const input = {
       displayName: "Retry Dana",
@@ -393,6 +406,16 @@ describe("logLeadTouch (GL-02 R6)", () => {
         actor
       )
     ).rejects.toThrow(/selected contact channel/i);
+  });
+
+  it("rejects unsupported contact channels without recording an outreach attempt", async () => {
+    await expect(
+      logLeadTouch(
+        { customerId: "l1", channel: "UNSUPPORTED", outcome: "SENT" },
+        actor
+      )
+    ).rejects.toThrow(/unknown contact channel/i);
+    expect(activities).toHaveLength(0);
   });
 
   it("fails closed when call consent is absent", async () => {

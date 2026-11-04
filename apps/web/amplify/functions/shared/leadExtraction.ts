@@ -15,7 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
  * and `eligibility`, whose non-"ok" values are honest hard exits (bed bugs,
  * food service, fumigation, wildlife, out of area) rather than a guess.
  *
- * Shared by the CRM's Thumbtack lead pricing and the public quote form, so both
+ * Shared by the CRM's staff-assisted lead pricing and the public quote form, so both
  * read the same policy and cannot drift apart.
  */
 
@@ -96,7 +96,7 @@ export const EXTRACTION_SCHEMA = {
   },
 } as const;
 
-export const EXTRACTION_SYSTEM = `You are the intake extractor for BuzzKill Pest Control's lead-pricing engine (technicians are dispatched from their own home bases across eastern and central MA, not a single office; licensed in MA and RI only). You read a pasted Thumbtack lead (text and/or screenshot) and extract structured facts. You NEVER compute prices — a deterministic rate-card engine does that.
+export const EXTRACTION_SYSTEM = `You are the intake extractor for BuzzKill Pest Control's lead-pricing engine (technicians are dispatched from their own home bases across eastern and central MA, not a single office; licensed in MA and RI only). You read a service inquiry (text and/or screenshot) and extract structured facts. You NEVER compute prices — a deterministic rate-card engine does that.
 
 Eligibility (hard passes):
 - "bed_bugs": any bed bug work.
@@ -113,7 +113,7 @@ Extraction rules:
 - nestCount: how many wasp/hornet nests the lead mentions; null when not stated (the engine assumes one and states the assumption).
 - animalCount: for wildlife work, how many animals need removed; null when not stated (the engine assumes one and states the assumption).
 - halfAcres: yard size in half-acre increments for mosquito/tick leads; null when unknown (engine assumes up to ½ acre).
-- leadFeeCents: the Thumbtack lead fee, in CENTS, when visible in the text/screenshot; null otherwise.
+- leadFeeCents: the paid acquisition cost for this lead, in CENTS, when explicitly stated in the text/screenshot; null otherwise.
 - frequencyInterest: only when the lead stated one.
 - rodentInterest: true when mice/rats are mentioned at all.
 - multiProperty: investor/property-manager portfolios across multiple properties.
@@ -143,7 +143,7 @@ export async function extractLead(
   }
   content.push({
     type: "text",
-    text: `Extract the lead facts from this Thumbtack lead:\n\n${inputText ?? "(screenshot only)"}`,
+    text: `Extract the lead facts from this service inquiry:\n\n${inputText ?? "(screenshot only)"}`,
   });
 
   const response = await anthropic.messages.create({

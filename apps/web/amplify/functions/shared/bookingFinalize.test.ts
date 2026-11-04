@@ -8,7 +8,7 @@ import { STOPS_PER_TECH } from "./capacity";
  *
  * The funnel is the only conversion path, so the webhook's finalization is
  * where a CRM lead becomes an ACTIVE customer. A lead the office priced
- * (Thumbtack paste, funnel CONTACT) and then sent to /quote is the same
+ * (office intake, funnel CONTACT) and then sent to /quote is the same
  * person who now paid — finalization must CONVERT that record, not mint a
  * duplicate beside it, and must flip the lead's PENDING pricing runs to WON
  * (R73). And because the customer has already paid, nothing about the
@@ -314,7 +314,7 @@ const finalize = () =>
 const customerRow = (id: string): Row =>
   existingCustomers.find((c) => c.id === id)!;
 
-/** A lead the office already has — sparse, the way a Thumbtack paste lands. */
+/** A lead the office already has — sparse, before the office has all contact details. */
 const seedLead = (over: Partial<Row> = {}): Row => {
   const lead: Row = {
     id: "lead-1",
@@ -327,7 +327,7 @@ const seedLead = (over: Partial<Row> = {}): Row => {
     serviceCity: null,
     serviceState: null,
     serviceZip: null,
-    leadSource: "Thumbtack",
+    leadSource: "Referral",
     leadNotes: "Pasted lead: mice in the basement",
     stripeCustomerId: null,
     convertedAt: null,
@@ -466,7 +466,7 @@ describe("an existing lead converts instead of duplicating", () => {
     await finalize();
 
     const lead = customerRow("lead-1");
-    expect(lead.leadSource).toBe("Thumbtack"); // stays
+    expect(lead.leadSource).toBe("Referral"); // stays
     expect(String(lead.leadNotes)).toContain(
       "Pasted lead: mice in the basement"
     );

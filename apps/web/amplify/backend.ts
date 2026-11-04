@@ -45,7 +45,6 @@ import { leadIntake } from "./functions/lead-intake/resource";
 import { crmAdmin } from "./functions/crm-admin/resource";
 import { crmBilling } from "./functions/crm-billing/resource";
 import { stripeWebhook } from "./functions/stripe-webhook/resource";
-import { thumbtackWebhook } from "./functions/thumbtack-webhook/resource";
 import { crmDocs } from "./functions/crm-docs/resource";
 import { dailyReminders } from "./functions/daily-reminders/resource";
 import {
@@ -75,7 +74,6 @@ const backend = defineBackend({
   crmAdmin,
   crmBilling,
   stripeWebhook,
-  thumbtackWebhook,
   crmDocs,
   dailyReminders,
   createChallenge,
@@ -271,9 +269,6 @@ for (const fn of [
   backend.pricingRefresh,
   backend.leadIntake,
   backend.leadSweep,
-  // The Thumbtack receiver creates leads and appends thread activity, so it
-  // needs the same data-API + lock-table access as the website intake.
-  backend.thumbtackWebhook,
 ]) {
   fn.resources.lambda.addToRolePolicy(lockTablePolicy);
   fn.resources.lambda.addToRolePolicy(dataApiIdParamPolicy);
@@ -307,16 +302,6 @@ const stripeWebhookUrl = backend.stripeWebhook.resources.lambda.addFunctionUrl({
   authType: publicFunctionUrlAuthType(),
   invokeMode: InvokeMode.BUFFERED,
 });
-
-// Thumbtack webhook receiver. Deliberately NO cors block: Thumbtack posts
-// server-to-server and sends no Origin header, so an origin allowlist would
-// protect nothing. The shared secret is checked in constant time inside the
-// handler, exactly like the Stripe signature above.
-const thumbtackWebhookUrl =
-  backend.thumbtackWebhook.resources.lambda.addFunctionUrl({
-    authType: publicFunctionUrlAuthType(),
-    invokeMode: InvokeMode.BUFFERED,
-  });
 
 // Documents bucket + SES wiring for the functions that produce PDFs and
 // send mail. Grants are explicit CDK (rather than storage/access rules) so
@@ -378,9 +363,6 @@ for (const fn of [
   // alarm turns a background failure into owned work; SES_NOTIFY_EMAIL stays
   // for the unconfigured-inbox fallback path inside shared/email.
   backend.opsAlerts,
-  // Pages the office when a Thumbtack delivery fails or arrives for a thread
-  // we have no lead for — those emails are the only copy of the message.
-  backend.thumbtackWebhook,
 ]) {
   if (!migrationPreview) fn.resources.lambda.addToRolePolicy(sesPolicy);
   // The From stays info@ on every branch: it is the verified SES sender
@@ -579,29 +561,6 @@ backend.pricingRefresh.resources.lambda.addToRolePolicy(
   })
 );
 
-// Thumbtack auto-quote: the webhook receiver prices an inbound marketplace
-// lead through the SAME booking-public engine the website funnel uses, so a
-// Thumbtack customer and a web visitor can never be quoted differently. Same
-// token-free param as above; no second StringParameter (construct-id collision).
-backend.thumbtackWebhook.addEnvironment(
-  "BOOKING_PUBLIC_FUNCTION_PARAM",
-  bookingPublicNameParam
-);
-backend.thumbtackWebhook.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions: ["ssm:GetParameter"],
-    resources: [`arn:aws:ssm:us-east-1:*:parameter${bookingPublicNameParam}`],
-  })
-);
-backend.thumbtackWebhook.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions: ["lambda:InvokeFunction"],
-    resources: [
-      `arn:aws:lambda:us-east-1:*:function:amplify-${lockAppId}-*bookingpublic*`,
-    ],
-  })
-);
-
 // Portal add-service: crm-billing (data-backed, holds the verified Cognito
 // identity) invokes booking-public to run the add-service quote + saved-card
 // booking, reusing the whole booking engine. It reads the SAME token-free
@@ -782,7 +741,6 @@ for (const fn of [
   backend.crmBilling,
   backend.pricingRefresh,
   backend.stripeWebhook,
-  backend.thumbtackWebhook,
 ]) {
   fn.addEnvironment("SES_CONFIGURATION_SET", sesConfigurationSetName);
 }
@@ -798,9 +756,6 @@ backend.addOutput({
   custom: {
     leadIntakeUrl: leadIntakeUrl.url,
     stripeWebhookUrl: stripeWebhookUrl.url,
-    // Paste this into Thumbtack → Services → Apps → Webhooks (and give the
-    // Partner Platform the same base when the integration is approved).
-    thumbtackWebhookUrl: thumbtackWebhookUrl.url,
     bookingApiUrl: bookingApiUrl.url,
   },
 });

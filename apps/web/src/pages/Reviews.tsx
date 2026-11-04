@@ -1,72 +1,38 @@
 import { Link } from "react-router-dom";
 import { COMPANY } from "../../amplify/functions/shared/company";
 import { OFFICE_PHONE, OFFICE_TEL } from "../lib/contactInfo";
-import { PUBLIC_REVIEWS, REVIEW_LINKS, THUMBTACK_RATING } from "../data/reviews";
-
-/**
- * The public reviews, quoted from the listing where they were published, with
- * links to read them at the source and to leave a Google review. Visible to
- * visitors; kept out of Organization review markup on purpose.
- */
 export default function Reviews() {
   return (
     <>
       <section className="bk-section bk-section-cream">
         <div className="bk-container bk-narrow">
           <div className="bk-eyebrow">Reviews</div>
-          <h1 className="bk-h1-lower">What Our Customers Say</h1>
+          <h1 className="bk-h1-lower">Share Your Experience</h1>
           <p className="bk-body-lead">
-            {COMPANY.serviceDisplayName} is rated {THUMBTACK_RATING.value} on
-            Thumbtack from {THUMBTACK_RATING.count} reviews. The reviews below
-            are quoted from that public listing, where you can read them at the
-            source.
-          </p>
-          <p className="bk-p">
-            <span className="bk-announce-stars" aria-label={`${THUMBTACK_RATING.value} star rating`}>
-              ★★★★★
-            </span>{" "}
-            <strong>{THUMBTACK_RATING.value}</strong> on Thumbtack ({THUMBTACK_RATING.count} reviews)
+            Have you used {COMPANY.serviceDisplayName}? We'd appreciate your
+            feedback about your service.
           </p>
         </div>
       </section>
 
       <section className="bk-section bk-section-light">
         <div className="bk-container bk-narrow">
-          <ul className="bk-bullets bk-review-list">
-            {PUBLIC_REVIEWS.map((r) => (
-              <li key={`${r.author}-${r.date}`}>
-                <blockquote className="bk-review">
-                  <p className="bk-p">&ldquo;{r.text}&rdquo;</p>
-                  <footer className="bk-p">
-                    <strong>{r.author}</strong>, {r.source},{" "}
-                    {new Date(`${r.date}T12:00:00Z`).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                      timeZone: "UTC",
-                    })}
-                  </footer>
-                </blockquote>
-              </li>
-            ))}
-          </ul>
+          <h2 className="bk-h2">Leave a Google Review</h2>
+          <p className="bk-p">
+            Share your experience on Google to help other local customers learn
+            about our service. If you have a question about a recent visit, you
+            can also contact our team.
+          </p>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 28 }}>
             <a
-              href={REVIEW_LINKS.thumbtack}
+              href={COMPANY.reviewSources.googleReviewSubmission}
               target="_blank"
               rel="noopener noreferrer"
               className="bk-btn bk-btn-primary"
             >
-              Read our reviews on Thumbtack
-            </a>
-            <a
-              href={REVIEW_LINKS.leaveGoogleReview}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bk-btn bk-btn-outline"
-            >
               Leave a Google review
             </a>
+            <Link to="/contact" className="bk-btn bk-btn-outline">Contact our team</Link>
           </div>
         </div>
       </section>

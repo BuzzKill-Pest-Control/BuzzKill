@@ -163,7 +163,7 @@ export default function CustomerForm({
       </Field>
       {showLeadSource ? (
         <Field label="Lead source">
-          <input value={values.leadSource} onChange={set("leadSource")} placeholder="Website, referral, Thumbtack…" />
+          <input value={values.leadSource} onChange={set("leadSource")} placeholder="Website, referral…" />
         </Field>
       ) : null}
       {showLeadConsent ? (

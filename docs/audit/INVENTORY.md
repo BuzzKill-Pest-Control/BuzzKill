@@ -192,25 +192,24 @@ Most correct: `QuotePage` — it separates terminal HTTP statuses (`:311`, stops
 
 `crm-admin/handler.ts:2186`, `:2209`, `:3155`. These page `ListUsersInGroup`/`ListUsers` (capital-`N` `NextToken`), which `PageResult<T>` does not fit, so they are justified. `countOtherUsableOwners` (`:2186`) and `countUsableOwners` (`:2209`) differ only by an `exceptUsername` filter (`:2190` vs `:2213`) and should be one helper.
 
-**C. Cross-Lambda invoke — 5 name resolvers, 4 wire shapes**
+**C. Cross-Lambda invoke — 4 name resolvers, 4 wire shapes**
 
 | # | Location | Import | Memoized | On unresolved |
 |---|---|---|---|---|
 | 1 | `crm-billing/handler.ts:345` | dynamic `:349` | no | **throws** a user-facing string `:359` |
 | 2 | `pricing-refresh/handler.ts:322` | static | **yes** (`:313`) | `null` |
-| 3 | `thumbtack-webhook/autoQuote.ts:71` | static | no | `null` |
-| 4 | `daily-reminders/handler.ts:2312` (inline) | dynamic `:2316` | no | logs + `continue` `:2371` |
-| 5 | `booking-public/handler.ts:924`, `:1103` | `process.env` only, no SSM | n/a | logs + skip |
+| 3 | `daily-reminders/handler.ts:2312` (inline) | dynamic `:2316` | no | logs + `continue` `:2371` |
+| 4 | `booking-public/handler.ts:924`, `:1103` | `process.env` only, no SSM | n/a | logs + skip |
 
-#1, #2 and #3 resolve the same function from the same SSM parameter with three different signatures.
+#1 and #2 resolve the same function from the same SSM parameter with different signatures.
 
 Wire shapes:
-1. `{ internalOp: {...} }` — receivers `booking-public/handler.ts:363`, `crm-pricing/handler.ts:94`; senders `crm-billing:368`, `autoQuote:104`, `booking-public:935`.
+1. `{ internalOp: {...} }` — receivers `booking-public/handler.ts:363`, `crm-pricing/handler.ts:94`; senders `crm-billing:368`, `booking-public:935`.
 2. Synthetic AppSync event `{ info:{fieldName}, arguments, identity:null }` — `daily-reminders/handler.ts:2375` → crm-admin. See §2.4.
 3. Synthetic API-Gateway-v2 event — `pricing-refresh/handler.ts:362` → booking-public `/quote-status`.
 4. Bare `{ rateKey, source }` — `booking-public:935`, `crm-pricing:151` → pricing-refresh.
 
-Most correct: #2, the only memoized resolver; #1/#3/#4 hit SSM on every invocation. The throw-vs-null split means the same failure is a 500 in crm-billing and a silent no-op in thumbtack.
+Most correct: #2, the only memoized resolver; #1/#3 hit SSM on every invocation. Unresolved names have inconsistent outcomes: crm-billing throws, pricing-refresh returns `null`, and daily-reminders logs and continues.
 
 Canonical: `shared/invokeFunction.ts` exporting a memoized `resolveFunctionName(envVar, paramVar)` and `invokeInternalOp(name, op)` returning the `{ok}` envelope.
 
@@ -233,7 +232,7 @@ The shared client reads only `secret("STRIPE_SECRET_KEY")`, which is branch-scop
 
 `booking-public/handler.ts:103` · `pricing-refresh/handler.ts:127` (comment at `:126`: "same lookup as booking-public") · `crm-pricing/handler.ts:383`.
 
-All three hardcode the app id `"d26qpsjewk0bee"` (`:107`, `:131`, `:388`), the branch default `"staging"`, both SSM paths, and the sentinel `"placeholder-set-me"`. The sentinel also appears at `backend.ts:556` and `thumbtack-webhook/handler.ts:439` — 5 copies of one magic string. The app id appears a fourth time at `apps/crm/src/lib/bookingLink.ts:37`.
+All three hardcode the app id `"d26qpsjewk0bee"` (`:107`, `:131`, `:388`), the branch default `"staging"`, both SSM paths, and the sentinel `"placeholder-set-me"`. The sentinel also appears at `backend.ts:556` — 4 copies of one magic string. The app id appears a fourth time at `apps/crm/src/lib/bookingLink.ts:37`.
 
 Most correct: `crm-pricing`, whose `Map<string, string|null>` and comment at `:405-407` explain hits-only caching. Canonical: `shared/secrets.ts`; drop the hardcoded app id and fail loudly when `AMPLIFY_APP_ID` is unset — it currently makes the backend non-portable across AWS accounts.
 
@@ -294,7 +293,7 @@ Most used: `todayEastern()` 39 sites, `todayUtc()` 9, `easternPlusDays()` 4; 13 
 | Anchor | Sites |
 |---|---|
 | `T12:00:00` (runtime-local) | `crm/lib/format.ts:9,39,46,51`; `crm/portal/AddService.tsx:475`; `daily-reminders/handler.ts:113` |
-| `T12:00:00Z` (UTC) | `shared/recurring.ts:342`; `shared/receipts.ts:28`; `shared/businessDays.ts:75`; `thumbtack-webhook/autoQuote.ts:138` |
+| `T12:00:00Z` (UTC) | `shared/recurring.ts:342`; `shared/receipts.ts:28`; `shared/businessDays.ts:75` |
 | `T00:00:00Z` + `timeZone:"UTC"` | `shared/planCancellationPolicy.ts:181` |
 
 **Disagreements:**
@@ -317,7 +316,7 @@ Canonical: `shared/dates.ts` for calendar days, `shared/businessHours.ts` for in
 |---|---|
 | `throw new Error(...)` (AppSync) | `crm-docs/handler.ts` (206), `crm-admin/handler.ts` (69), `shared/leadLifecycle.ts` (62), `crm-billing/handler.ts` (51), `shared/visitChange.ts` (28), `crm-pricing/handler.ts` (28), `shared/bookingFinalize.ts` (22), `shared/callbacks.ts` (21), `shared/compliance.ts` (18), ~30 more |
 | `HttpError(status, payload)` | class `booking-public/handler.ts:451`, caught `:338`, `:439`; ~20 throws, that file only |
-| Raw `{statusCode, body}` | `stripe-webhook/handler.ts:46,61,186,189`; `thumbtack-webhook/handler.ts:103`; `lead-intake/handler.ts:62`; `booking-public/handler.ts:371` |
+| Raw `{statusCode, body}` | `stripe-webhook/handler.ts:46,61,186,189`; `lead-intake/handler.ts:62`; `booking-public/handler.ts:371` |
 | Result union `{ok:true,data} \| {ok:false,status,error}` | `booking-public/handler.ts:320` |
 | `Promise<void>` | `ops-alerts/handler.ts:60`, `ses-events/handler.ts:357`, `post-auth/handler.ts:35`, `pre-token/handler.ts:17`, `lead-sweep/handler.ts:3`, `daily-reminders/handler.ts:119` |
 
@@ -394,7 +393,7 @@ The only gap: no sortable/paginated variant exists, so screens needing sort re-i
 
 ### 2.1 Mechanism inventory
 
-Twenty distinct ways a caller is authorised. Schema rules: 141 `allow.groups`, 13 `allow.groupsDefinedIn("accessGroups")`, 15 `allow.resource` in `data/resource.ts`.
+Nineteen distinct ways a caller is authorised. Schema rules in this audit snapshot: 141 `allow.groups`, 13 `allow.groupsDefinedIn("accessGroups")`, 14 `allow.resource` in `data/resource.ts`.
 
 | Mechanism | Definition | Sites |
 |---|---|---|
@@ -409,7 +408,6 @@ Twenty distinct ways a caller is authorised. Schema rules: 141 `allow.groups`, 1
 | `assertOfficeFieldAccess` (handler-local) | `crm-docs/handler.ts:2411` | 6 |
 | **Inline raw group check** | `crm-docs/handler.ts:5811,5826` | 1 — the only raw group-string test outside `authz.ts` |
 | `assertOwnerRemains` | `shared/staffRoles.ts:125` | 2 |
-| Thumbtack shared secret | `thumbtack-webhook/handler.ts:110`, gate `:438` | 1 |
 | Stripe signature | `stripe-webhook/handler.ts:43` | 1 |
 | Magic-link token | `auth-challenge/verify.ts:52` | 1 |
 | CORS allowlist (self-declared not a boundary, `:157-159`) | `booking-public/handler.ts:155` | 1 |
@@ -653,7 +651,7 @@ The 78 break down as:
 - `labelRulesJson` (`:1847`, `:2977`) — three independent reads: `office/ProductLog.tsx:149` (local shape), `tech/JobDetail.tsx:166` (inline cast), `crm-docs/handler.ts:2075` (`parseLabelRules`).
 - `extracted` (`:1543`) — bare `as Extraction` + truthiness check at `crm-pricing/handler.ts:728-731`.
 - `inventoryJson` (`:969`) — typed `unknown` at `lifecycleCommand.ts:50` but `string` at `:244`; written stringified at `deactivation.ts:337`, forwarded unparsed at `:256`, `:274`.
-- `priceBreakdown` (`:1550`) — three producers with three line shapes (`thumbtack-webhook/handler.ts:327`, `booking-public/handler.ts:2017`, `crm-pricing/handler.ts:1387,1477`). No declared consumer type.
+- `priceBreakdown` (`:1550`) — two producers with different line shapes (`booking-public/handler.ts:2017`, `crm-pricing/handler.ts:1387,1477`). No declared consumer type.
 
 **The unstringified-write hazard is handled by convention, not by type.** `crm-docs/handler.ts:168-181` (`toAwsJson`) documents that an `a.json()` mutation *argument* arrives already parsed, so forwarding it into a model write is rejected by AppSync. Mirrored by explicit `JSON.stringify` at `tech/JobDetail.tsx:1404` and `office/ProductLog.tsx:250`, and by `asObject` at `crm-billing/handler.ts:385-396`. Nothing prevents a new write path from omitting it.
 
@@ -694,13 +692,13 @@ Two disagreements: hyphenation splits the customer's dropdown choice (`"Every-2-
 
 The missing abstraction is now `shared/postalCode.ts`, consumed by `validateQuoteForm`, `booking-public/handler.ts` and `dispatchReadiness.ts`. It exports the shape rule and the territory rule as separate predicates, because the funnel and dispatch are asking different questions. See §1.7.
 
-### 5.3 ⚠ `escapeHtml(s)` — 8 copies
+### 5.3 ⚠ `escapeHtml(s)` — 7 copies
 
 Should move from `shared/receipts.ts:35` (already exported, nobody outside imports it) to `shared/html.ts`.
 
-`shared/receipts.ts:35` (`escapeHtml`) · `shared/bookingPaymentFailure.ts:21` (`esc`) · `booking-public/handler.ts:3722` · `lead-intake/handler.ts:162` · `daily-reminders/handler.ts:3004` (`escapeHtmlLite`) · `thumbtack-webhook/handler.ts:422` · `pricing-refresh/handler.ts:587` (`esc`) · `crm-docs/handler.ts:5076-5080` (inline `.replace`, applied to `techFirst` only).
+`shared/receipts.ts:35` (`escapeHtml`) · `shared/bookingPaymentFailure.ts:21` (`esc`) · `booking-public/handler.ts:3722` · `lead-intake/handler.ts:162` · `daily-reminders/handler.ts:3004` (`escapeHtmlLite`) · `pricing-refresh/handler.ts:587` (`esc`) · `crm-docs/handler.ts:5076-5080` (inline `.replace`, applied to `techFirst` only).
 
-Bodies agree (`& < > "`, no `'`). The divergence is **coverage**: `crm-docs` escapes exactly one interpolated variable in that email; the other seven are module-level helpers callers may or may not reach for. Any new email path forks a ninth copy.
+Bodies agree (`& < > "`, no `'`). The divergence is **coverage**: `crm-docs` escapes exactly one interpolated variable in that email; the other six are module-level helpers callers may or may not reach for. Any new email path forks an eighth copy.
 
 ### 5.4 ⚠ `CRM_APP_URL` — one variable, two fallbacks
 
@@ -711,7 +709,7 @@ Should be `shared/appUrls.ts` exporting `crmAppUrl()` / `marketingUrl()` / `port
 
 If the variable is ever unset on a function, the first group emits `href="/customers/abc"` — a dead link in a staff email — while the second emits a working absolute URL. The two staff-facing emails that fail are the lead-intake notification and the pricing-refresh digest.
 
-`MARKETING_URL` has the same shape across 9 sites (`thumbtack-webhook/autoQuote.ts:247`, `crm-docs/handler.ts:156`, `:5026`, `shared/bookingFinalize.ts:2193`, `:2444`, `shared/email.ts:38`, `shared/bookingPaymentFailure.ts:88`, `pricing-refresh/handler.ts:491`, `crm-pricing/handler.ts:70`) but all 9 agree.
+`MARKETING_URL` has the same shape across 8 sites (`crm-docs/handler.ts:156`, `:5026`, `shared/bookingFinalize.ts:2193`, `:2444`, `shared/email.ts:38`, `shared/bookingPaymentFailure.ts:88`, `pricing-refresh/handler.ts:491`, `crm-pricing/handler.ts:70`) but all 8 agree.
 
 ### 5.5 Environment → URL derivation — 3 encodings, 9 bare app ids
 
@@ -719,7 +717,7 @@ If the variable is ever unset on a function, the first group emits `href="/custo
 
 Two Amplify app ids appear as bare literals in 9 places: `backend.ts:204,369,537,549`, `booking-public/handler.ts:107`, `crm-pricing/handler.ts:388`, `pricing-refresh/handler.ts:131`, `crm/src/lib/bookingLink.ts:18,37`. They agree today; combined with §1.3's `getSecret` copies this is what makes the backend non-portable across AWS accounts.
 
-### 5.6 ⚠ `prettyDate(isoDate)` — 6 encodings
+### 5.6 ⚠ `prettyDate(isoDate)` — 5 encodings
 
 Half-built already: `shared/recurring.ts:349` exports one and `crm-docs/handler.ts:53` imports it. Home should be `shared/dates.ts`.
 
@@ -728,11 +726,10 @@ Half-built already: `shared/recurring.ts:349` exports one and `crm-docs/handler.
 | `shared/recurring.ts:341` (exported) | `T12:00:00Z`, UTC | `"Monday, July 21"` |
 | `daily-reminders/handler.ts:112` (own copy) | `T12:00:00`, **no zone** | `"Monday, July 21"` |
 | `shared/receipts.ts:27` (own copy) | `T12:00:00Z`, UTC | `"July 21, 2026"` |
-| `thumbtack-webhook/autoQuote.ts:138` | `T12:00:00Z`, Eastern | `"Monday, Jul 21"` |
 | `apps/crm/src/lib/format.ts:50` (`prettyWeekday`) | `T12:00:00` local | `"Monday, July 21"` |
 | `apps/web/src/lib/bookingFunnel.ts:154` (`formatDay`) | local date parts | `"Mon, Jul 21"` |
 
-The same visit date renders three ways: `"Monday, July 21"` in the reminder email, `"Monday, Jul 21"` in the Thumbtack auto-quote, `"July 21, 2026"` on the receipt.
+The same visit date renders as `"Monday, July 21"` in the reminder email and `"July 21, 2026"` on the receipt.
 
 ### 5.7 ⚠ Service-area state gate — 2 copies that disagree
 
@@ -837,9 +834,9 @@ Plus `isStaff` / `STAFF_GROUPS` (`shared/authz.ts:95-99`) — see §2.3.
 
 `shared/fieldRoutesImport.ts` — 236 lines. No file anywhere imports it (`grep fieldRoutesImport` returns only the file itself). Its sibling `shared/agreementImport.ts` **is** imported by `crm-admin/handler.ts`, so this reads as a superseded migration adapter.
 
-### 6.3 Test-only exports — 80, dead in production
+### 6.3 Test-only exports — 76, dead in production
 
-Referenced outside their defining file solely by a `.test.ts`. By file: `web/src/lib/bookingFunnel.ts` 6 · `crm/src/lib/recovery.ts` 5 · `thumbtack-webhook/leadMapping.ts` 4 · `shared/marketRate.ts` 4 · `pricing-refresh/handler.ts` 4 · `daily-reminders/handler.ts` 4 · `crm/src/lib/workQueues.ts` 4 · `shared/serviceCatalog.ts` 3 · `shared/inventory.ts` 3 · `shared/atomicLock.ts` 3 · `crm/src/lib/reportDraft.ts` 3 · `crm/src/lib/marketRates.ts` 3 · `shared/units.ts`, `shared/capacity.ts`, `crm-pricing/handler.ts`, `booking-public/handler.ts`, `crm/lib/bookingLink.ts`, `crm/lib/billingDisclosure.ts` 2 each · 22 further files 1 each.
+Referenced outside their defining file solely by a `.test.ts`. By file: `web/src/lib/bookingFunnel.ts` 6 · `crm/src/lib/recovery.ts` 5 · `shared/marketRate.ts` 4 · `pricing-refresh/handler.ts` 4 · `daily-reminders/handler.ts` 4 · `crm/src/lib/workQueues.ts` 4 · `shared/serviceCatalog.ts` 3 · `shared/inventory.ts` 3 · `shared/atomicLock.ts` 3 · `crm/src/lib/reportDraft.ts` 3 · `crm/src/lib/marketRates.ts` 3 · `shared/units.ts`, `shared/capacity.ts`, `crm-pricing/handler.ts`, `booking-public/handler.ts`, `crm/lib/bookingLink.ts`, `crm/lib/billingDisclosure.ts` 2 each · 22 further files 1 each.
 
 Six of these are deliberate test seams, not accidents: `_setLockStoreForTests` (`shared/atomicLock.ts:351`), `_resolveTableSuffix` (`:112`), `_classifyLockError` (`:334`), `_setS3ClientForTests` (`shared/photoVerify.ts:58`), `_resetBookingPublicNameCacheForTests` (`pricing-refresh/handler.ts:317`), and all of `shared/capacityTestFixture.ts:12`.
 

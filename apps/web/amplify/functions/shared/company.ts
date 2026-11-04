@@ -134,11 +134,8 @@ export const COMPANY = {
     "https://www.facebook.com/people/BuzzKill-Pest-Control/61584954290487/",
     "https://www.linkedin.com/company/buzzkill-pest-control/",
   ],
-  /** Public review sources. Read-only listings; the Google URL is a
-   *  "leave a review" destination, not a page that displays reviews. */
+  /** The Google URL opens the review submission form. */
   reviewSources: {
-    thumbtackProfile:
-      "https://www.thumbtack.com/ma/marlborough/exterminators/buzzkill-pest-control/service/583778090572914694",
     googleReviewSubmission: "https://g.page/r/CYyHi3DH59WEEAI/review",
   },
   logo: {

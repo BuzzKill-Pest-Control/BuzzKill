@@ -1871,7 +1871,7 @@ describe("staff-assisted lead prefill", () => {
       serviceCity: "Cambridge",
       serviceState: "MA",
       serviceZip: "02139",
-      leadSource: "Thumbtack",
+      leadSource: "Partner campaign",
       leadNotes: "Internal note must not leak",
     };
 
@@ -1889,7 +1889,7 @@ describe("staff-assisted lead prefill", () => {
         zip: "02139",
       },
     });
-    expect(JSON.stringify(result.body)).not.toMatch(/Thumbtack|Internal note/i);
+    expect(JSON.stringify(result.body)).not.toMatch(/Partner campaign|Internal note/i);
   });
 
   it("does not reveal whether an invalid, closed, suppressed, or ambiguous token exists", async () => {

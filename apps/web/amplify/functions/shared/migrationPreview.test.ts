@@ -5,7 +5,7 @@ const handlers = [
   () => import("../lead-intake/handler"), () => import("../crm-admin/handler"),
   () => import("../crm-billing/handler"), () => import("../crm-docs/handler"),
   () => import("../crm-pricing/handler"), () => import("../booking-public/handler"),
-  () => import("../stripe-webhook/handler"), () => import("../thumbtack-webhook/handler"),
+  () => import("../stripe-webhook/handler"),
   () => import("../daily-reminders/handler"), () => import("../lead-sweep/handler"),
   () => import("../pricing-refresh/handler"), () => import("../ses-events/handler"),
   () => import("../ops-alerts/handler"), () => import("../auth-challenge/verify"),
