@@ -157,8 +157,8 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
   // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3085);
-  expect(allResources(bootstrap)).toHaveLength(2119);
+  expect(allResources(full)).toHaveLength(3094);
+  expect(allResources(bootstrap)).toHaveLength(2128);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(607);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1821);
@@ -184,6 +184,37 @@ it("retains the real schema, tables, auth, IAM and all other non-API resources a
     }
   }
   expect(allResources(bootstrap).filter((r) => r.Type === "Custom::AmplifyDynamoDBTable")).toHaveLength(55);
+});
+
+it("retains and backs up the private projection, reuses Customer's stream and alarms on indexing lag", () => {
+  for (const assembly of [full, bootstrap, released, pausedRelease, primedRelease]) {
+    const resources = allResources(assembly);
+    const table = resources.find((r) => r.Type === "AWS::DynamoDB::Table" && String(r.Properties?.TableName).startsWith("CustomerSearch-"))!;
+    expect(table).toMatchObject({ DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain", Properties: {
+      DeletionProtectionEnabled: true, PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+    } });
+    expect(table.Properties).not.toHaveProperty("GlobalSecondaryIndexes");
+    const tableEntry = Object.values(assembly.templates).flatMap((t) => Object.entries(t.Resources)).find(([, r]) => r === table)!;
+    const backup = resources.find((r) => r.Type === "AWS::Backup::BackupSelection")!;
+    expect(JSON.stringify(backup)).toContain(tableEntry[0]);
+    const customer = resources.find((r) => r.Type === "Custom::AmplifyDynamoDBTable" && JSON.stringify(r.Properties?.tableName).includes('"Customer-"'))!;
+    expect(customer.Properties?.streamSpecification).toEqual({ streamViewType: "NEW_AND_OLD_IMAGES" });
+    expect((customer.Properties?.globalSecondaryIndexes as unknown[])).toHaveLength(5);
+    const mappings = resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping");
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0].Properties).toMatchObject({ Enabled: assembly === released, BatchSize: 10, StartingPosition: "TRIM_HORIZON", FunctionResponseTypes: ["ReportBatchItemFailures"] });
+    const alarms = resources.filter((r) => r.Type === "AWS::CloudWatch::Alarm" && String(r.Properties?.AlarmName).includes("customer-search-indexer"));
+    expect(alarms.map((r) => r.Properties?.MetricName).sort()).toEqual(["Errors", "IteratorAge", "RecordFailures", "Throttles"]);
+    const recordFailures = alarms.find((r) => r.Properties?.MetricName === "RecordFailures")!;
+    expect(recordFailures.Properties).toMatchObject({ Namespace: "BuzzKill/CustomerSearch", Threshold: 1, EvaluationPeriods: 1, Period: 300, Statistic: "Sum", TreatMissingData: "notBreaching" });
+    const indexer = Object.values(assembly.templates).flatMap((t) => Object.entries(t.Resources)).find(([, r]) => r.Type === "AWS::Lambda::Function" && JSON.stringify(r.Properties?.Environment ?? {}).includes('"CUSTOMER_SEARCH_WORKER_ENABLED"'))!;
+    expect(recordFailures.Properties?.Dimensions).toEqual([{ Name: "FunctionName", Value: { Ref: indexer[0] } }]);
+    expect(alarms.find((r) => r.Properties?.MetricName === "IteratorAge")?.Properties).toMatchObject({ Threshold: 600000, EvaluationPeriods: 2, TreatMissingData: "notBreaching" });
+    if (assembly === released) for (const alarm of alarms) {
+      expect(alarm.Properties?.AlarmActions).toBeDefined();
+      expect(alarm.Properties?.OKActions).toEqual(alarm.Properties?.AlarmActions);
+    }
+  }
 });
 
 it("refuses every real mutation in both phases, including retained PromoCode and Route writes", () => {
@@ -267,7 +298,7 @@ it("grants only the expiring administrator test-mail capability while retaining 
 
 it("keeps destination stateful identities and properties when the retained backend becomes live", () => {
   assertReferenceClosure(released);
-  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
+  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
   let checked = 0;
   for (const [name, template] of Object.entries(full.templates)) {
     for (const [id, before] of Object.entries(template.Resources)) {
@@ -285,7 +316,7 @@ it("keeps destination stateful identities and properties when the retained backe
       checked++;
     }
   }
-  expect(checked).toBe(62);
+  expect(checked).toBe(63);
 });
 
 
@@ -334,9 +365,11 @@ it("detects a Cognito trigger referring back to its own pool before deployment",
 it("deploys a production-configured cutover with every application worker and writer paused", () => {
   assertReferenceClosure(pausedRelease);
   const resources = allResources(pausedRelease);
-  expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
+  const mappings = resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping");
+  expect(mappings).toHaveLength(1);
+  expect(mappings[0].Properties).toMatchObject({ Enabled: false, BatchSize: 10, StartingPosition: "TRIM_HORIZON" });
   const functions = resources.filter((r) => r.Type === "AWS::Lambda::Function");
-  expect(functions.filter((r) => r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
+  expect(functions.filter((r) => r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(19);
   const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
   expect(schedules).toHaveLength(3);
   for (const schedule of schedules) expect(schedule.Properties?.State).toBe("DISABLED");
@@ -352,7 +385,7 @@ it("deploys a production-configured cutover with every application worker and wr
   expect(mutations.length).toBeGreaterThan(0);
   expect(mutations).toHaveLength(allResources(released).filter((r) => r.Type === "AWS::AppSync::Resolver" && r.Properties?.TypeName === "Mutation").length);
   for (const resolver of mutations) expect(resolver.Properties?.RequestMappingTemplate).toBe(PREVIEW_MUTATION_REFUSAL);
-  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
+  const stateful = new Set(["Custom::AmplifyDynamoDBTable", "AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"]);
   let checked = 0, functionCount = 0;
   for (const [name, template] of Object.entries(released.templates)) {
     for (const [id, before] of Object.entries(template.Resources)) {
@@ -365,15 +398,17 @@ it("deploys a production-configured cutover with every application worker and wr
       functionCount++;
     }
   }
-  expect(checked).toBe(62);
+  expect(checked).toBe(63);
   expect(functionCount).toBe(functions.length);
 });
 
 it("primes the complete normal API while all execution remains paused", () => {
   assertReferenceClosure(primedRelease);
   const resources = allResources(primedRelease);
-  expect(resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping")).toHaveLength(0);
-  expect(resources.filter((r) => r.Type === "AWS::Lambda::Function" && r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(18);
+  const mappings = resources.filter((r) => r.Type === "AWS::Lambda::EventSourceMapping");
+  expect(mappings).toHaveLength(1);
+  expect(mappings[0].Properties).toMatchObject({ Enabled: false, BatchSize: 10, StartingPosition: "TRIM_HORIZON" });
+  expect(resources.filter((r) => r.Type === "AWS::Lambda::Function" && r.Properties?.ReservedConcurrentExecutions === 0)).toHaveLength(19);
   const schedules = resources.filter((r) => r.Type === "AWS::Scheduler::Schedule");
   expect(schedules).toHaveLength(3);
   for (const r of schedules) expect(r.Properties?.State).toBe("DISABLED");
@@ -391,7 +426,7 @@ it("primes the complete normal API while all execution remains paused", () => {
     // public output, stateful declaration or application code/environment.
     if (!name.endsWith(".nested.template.json")) expect(primedRelease.templates[name]?.Outputs).toEqual(template.Outputs);
     for (const [id, before] of Object.entries(template.Resources)) {
-      if (["AWS::AppSync::Resolver", "AWS::AppSync::FunctionConfiguration", "Custom::AmplifyDynamoDBTable", "AWS::S3::Bucket", "AWS::S3::BucketPolicy", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"].includes(before.Type)) {
+      if (["AWS::AppSync::Resolver", "AWS::AppSync::FunctionConfiguration", "Custom::AmplifyDynamoDBTable", "AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::S3::BucketPolicy", "AWS::Cognito::UserPool", "AWS::Cognito::UserPoolClient", "AWS::Cognito::IdentityPool", "AWS::Backup::BackupVault"].includes(before.Type)) {
         expect(primedRelease.templates[name]?.Resources[id], `${name}:${id}`).toEqual(before);
       }
       if (before.Type === "AWS::AppSync::Resolver" && before.Properties?.TypeName === "Mutation") {

@@ -1,5 +1,5 @@
 import { CfnResource, Stack } from "aws-cdk-lib";
-import { CfnFunction } from "aws-cdk-lib/aws-lambda";
+import { CfnEventSourceMapping, CfnFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnSchedule } from "aws-cdk-lib/aws-scheduler";
 import { businessEnvironment, assertDestinationDeploymentIdentity } from "./deployment-environment";
 
@@ -35,17 +35,23 @@ export function areWorkersPaused(env = process.env): boolean {
 }
 
 /** Keep an externally established fence explicit throughout CloudFormation updates.
- * Framework providers stay runnable so deployment can finish. No stream cursor is
- * introduced; new mappings require a separately reviewed replay strategy.
+ * Framework providers stay runnable so deployment can finish. Only the reviewed
+ * derived customer-search mapping may remain, disabled. Its bounded full backfill
+ * reconciles source rows AND orphan manifests after pauses beyond stream retention.
  */
 export function applyWorkerPause(stack: Stack, preTokenFunction: CfnFunction): void {
   if (!areWorkersPaused()) return;
   let root = stack;
   while (root.nestedStackParent) root = root.nestedStackParent;
-  let functions = 0, schedules = 0;
+  let functions = 0, schedules = 0, mappings = 0;
   for (const resource of root.node.findAll().filter(CfnResource.isCfnResource)) {
     if (resource.cfnResourceType === "AWS::Lambda::EventSourceMapping") {
-      throw new Error("Cutover pause requires explicit review before introducing a stream/event mapping.");
+      const mapping = resource as CfnEventSourceMapping;
+      if (resource.node.id !== "CustomerSearchStream" || mapping.batchSize !== 10 || mapping.startingPosition !== "TRIM_HORIZON") {
+        throw new Error("Cutover pause requires explicit review before introducing a stream/event mapping.");
+      }
+      mapping.enabled = false;
+      mappings++;
     }
     if (resource.cfnResourceType === "AWS::Lambda::Function") {
       const fn = resource as CfnFunction;
@@ -61,7 +67,7 @@ export function applyWorkerPause(stack: Stack, preTokenFunction: CfnFunction): v
   }
   // Includes the Google account-linking trigger: a cutover pause must also
   // prevent it from changing copied Cognito identities.
-  if (functions !== 18 || schedules !== 3) {
-    throw new Error(`Cutover pause coverage changed: ${functions} application functions, ${schedules} schedules.`);
+  if (functions !== 19 || schedules !== 3 || mappings !== 1) {
+    throw new Error(`Cutover pause coverage changed: ${functions} application functions, ${schedules} schedules, ${mappings} mappings.`);
   }
 }
