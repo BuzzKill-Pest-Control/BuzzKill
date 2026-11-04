@@ -239,6 +239,20 @@ backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
   actions: ["dynamodb:ConditionCheckItem"],
   resources: ["arn:aws:dynamodb:us-east-1:*:table/Job-*"],
 }));
+// Technician reads use existing relationship GSIs, then strongly verify the
+// current source rows. Runtime resolves only this backend's API-ID SSM binding.
+const technicianReadStack = Stack.of(backend.crmDocs.resources.lambda);
+const technicianReadArn = (model: string) => technicianReadStack.formatArn({ service: "dynamodb", resource: "table", resourceName: `${model}-*` });
+backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:GetItem", "dynamodb:BatchGetItem"], resources: [technicianReadArn("Job"), technicianReadArn("Technician"), technicianReadArn("ServiceReport")],
+}));
+backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:Query"], resources: [
+    `${technicianReadArn("Job")}/index/gsi-Route.jobs`, `${technicianReadArn("Job")}/index/gsi-Customer.jobs`,
+    `${technicianReadArn("Technician")}/index/techniciansByUserSub`,
+    `${technicianReadArn("ServiceReport")}/index/serviceReportsByJobId`,
+  ],
+}));
 // The table names end `-<apiId>-NONE`, and the apiId is NOT derivable at
 // runtime (the GraphQL endpoint hostname is a separate DNS id — deriving
 // from it made every deployed CAS write miss its table). The data stack

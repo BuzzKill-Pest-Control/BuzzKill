@@ -4055,7 +4055,7 @@ export const schema = a.schema({
 
   technicianJob: a
     .query()
-    .arguments({ jobId: a.string().required() })
+    .arguments({ jobId: a.string().required(), view: a.string(), historyToken: a.string(), historyLimit: a.integer(), reportId: a.string() })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER", "TECH"])])
     .handler(a.handler.function(crmDocs)),
