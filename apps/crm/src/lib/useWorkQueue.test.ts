@@ -59,6 +59,21 @@ describe("work continuation lifecycle", () => {
     await act(async () => pending.resolve(page("second"))); expect(container.textContent).toBe("first,second");
   });
 
+  it("refreshes only the loaded page budget through empty continuations and resets depth on partition re-entry", async () => {
+    mocks.page.mockResolvedValueOnce(page("first", "page-2"))
+      .mockResolvedValueOnce({ items: [], nextToken: "page-3" })
+      .mockResolvedValueOnce(page("refreshed", "new-page-2"))
+      .mockResolvedValueOnce({ items: [], nextToken: "new-page-3" })
+      .mockResolvedValueOnce(page("reentered", "reset-page-2"));
+    await render(); await act(async () => latest.loadMore());
+    await act(async () => latest.reload());
+    expect(container.textContent).toBe("refreshed"); expect(latest.data?.nextToken).toBe("new-page-3");
+    expect(mocks.page).toHaveBeenCalledTimes(4);
+    await render({ status: "RESOLVED" }); await render({ status: "OPEN" });
+    expect(mocks.page).toHaveBeenCalledTimes(5); expect(container.textContent).toBe("reentered");
+    expect(latest.data?.nextToken).toBe("reset-page-2");
+  });
+
   it("survives StrictMode replay and ignores pending completions or requests after unmount", async () => {
     const abandoned = deferred<WorkPage>(), pending = deferred<WorkPage>();
     mocks.page.mockReturnValueOnce(abandoned.promise).mockResolvedValueOnce(page("active", "page-2")).mockReturnValueOnce(pending.promise);

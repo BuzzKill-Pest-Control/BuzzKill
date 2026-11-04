@@ -130,6 +130,39 @@ describe("bounded owned work reads", () => {
     expect(container.textContent).toContain("New claim recorded"); expect(container.textContent).toContain("Permanent history (2)");
   });
 
+  it("preserves explicitly loaded queue depth when a page-two case is claimed", async () => {
+    let claimed = false;
+    mocks.work.mockImplementation(async (_keys: unknown, { nextToken }: { nextToken?: string }) => nextToken
+      ? { data: [item("page-two", { ownerSub: claimed ? "owner" : null })], nextToken: null }
+      : { data: [item("first", { ownerSub: "owner" })], nextToken: "open-2" });
+    mocks.update.mockImplementation(async () => {
+      claimed = true;
+      return { data: JSON.stringify({ workItemId: "page-two" }) };
+    });
+    await render(); await click("Load more open cases"); await click("Assign to me");
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith({ workItemId: "page-two", action: "CLAIM" });
+    expect(mocks.work).toHaveBeenCalledTimes(4);
+    const card = [...container.querySelectorAll("section.card")].find((node) => node.textContent?.includes("Case page-two"));
+    expect(card?.textContent).toContain("Owner: you");
+    expect(container.textContent).toContain("2 open cases shown.");
+    expect(mocks.events).not.toHaveBeenCalled();
+  });
+
+  it("keeps payments and tabs usable while an archive is pending, including a switch back before it finishes", async () => {
+    const archive = deferred<{ data: ReturnType<typeof item>[]; nextToken: null }>();
+    mocks.work.mockImplementation(async ({ status }: { status: string }) => status === "OPEN"
+      ? { data: [item("one")], nextToken: null } : archive.promise);
+    mocks.bookings.mockImplementation(async ({ status }: { status: string }) => ({
+      data: status === "PROCESSING" ? [{ id: "payment", name: "Independent payment", status }] : [], nextToken: null,
+    }));
+    await render(); await click("Resolved history");
+    expect(container.textContent).toContain("Independent payment"); expect(button("Open")).toBeDefined();
+    expect(container.querySelector('[aria-label="Refresh owned work"]')).not.toBeNull();
+    await click("Open"); expect(container.textContent).toContain("Case one");
+    await act(async () => archive.resolve({ data: [item("late-archive", { status: "RESOLVED" })], nextToken: null }));
+    expect(container.textContent).toContain("Case one"); expect(container.textContent).not.toContain("Case late-archive");
+  });
+
   it("shows a history failure instead of an empty ledger and retries only that case", async () => {
     mocks.events.mockResolvedValueOnce({ data: [], errors: [{ message: "History unavailable" }] })
       .mockResolvedValueOnce({ data: [event("first")], nextToken: null });

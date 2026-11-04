@@ -389,15 +389,6 @@ export default function WorkQueue() {
     [load, runOn]
   );
 
-  if (!items) {
-    return (
-      <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
-        <ErrorNote error={error} />
-        <Spinner />
-      </Page>
-    );
-  }
-
   return (
     <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
       <RefreshStatus state={{ ...freshness, refresh: refreshAll }} label="owned work" />
@@ -430,7 +421,7 @@ export default function WorkQueue() {
         </p>
       ) : null}
 
-      {shown.length === 0 && !data?.nextToken ? data ? (
+      {!items ? <Spinner /> : shown.length === 0 && !data?.nextToken ? data ? (
         <EmptyState
           title={
             tab === "OPEN"
