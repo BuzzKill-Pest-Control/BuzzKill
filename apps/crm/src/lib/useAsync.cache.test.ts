@@ -98,6 +98,19 @@ describe("cached operational reads", () => {
     await act(async () => pending.resolve("arrived during edit")); expect(rows()).toBe("old"); expect(latest().lastUpdatedAt).toBe(at);
     await render({ load, suspended: false }); expect(rows()).toBe("after edit");
   });
+  it.each(["hidden", "offline"])("reconciles a deferred edit update after unsuspending while %s, even with a fresh cache entry", async (reason) => {
+    const pending = deferred<string>(); const load = vi.fn().mockResolvedValueOnce("old").mockReturnValueOnce(pending.promise).mockResolvedValueOnce("after return");
+    await render({ load }); await act(async () => latest().refresh()); await render({ load, suspended: true });
+    await act(async () => pending.resolve("arrived during edit"));
+    expect(rows()).toBe("old"); expect(queryCache.read(["customers", "active"])?.data).toBe("arrived during edit");
+    if (reason === "hidden") Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    else Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    await render({ load, suspended: false }); expect(load).toHaveBeenCalledTimes(2); expect(rows()).toBe("old");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    await act(async () => reason === "hidden" ? document.dispatchEvent(new Event("visibilitychange")) : window.dispatchEvent(new Event("online")));
+    expect(load).toHaveBeenCalledTimes(3); expect(rows()).toBe("after return");
+  });
   it("keeps the old rows while a failed action reconciles uncertain effects, without inventing success", async () => {
     const reconcile = deferred<string>(); const load = vi.fn().mockResolvedValueOnce("unpaid").mockReturnValueOnce(reconcile.promise);
     await render({ load }); const at = latest().lastUpdatedAt;

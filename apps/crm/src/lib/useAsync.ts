@@ -131,7 +131,7 @@ export function useAsync<T>(
   const resume = useCallback(() => {
     const key = keyRef.current;
     const value = key && queryCache.identity() ? queryCache.read(JSON.parse(key)) : null;
-    if (value && Date.now() - value.fetchedAt < staleTime) return;
+    if (!pendingRefresh.current && value && Date.now() - value.fetchedAt < staleTime) return;
     refresh();
   }, [refresh, staleTime]);
   const online = useResumeRefresh(resume, options.refreshOnResume === true);
