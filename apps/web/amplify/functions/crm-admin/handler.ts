@@ -1,4 +1,5 @@
 import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
+import { searchCustomers } from "../shared/customerDirectory";
 import type { AppSyncResolverEvent } from "aws-lambda";
 import {
   AdminDisableUserCommand,
@@ -493,8 +494,21 @@ export const handler = async (event: AppSyncResolverEvent<AdminArgs>) => {
         sub: callerSub(event.identity),
         email: callerEmail(event.identity),
       });
-    case "staffRoster":
+    case "staffRoster": {
+      const args = (event.arguments ?? {}) as {
+        lookup?: string | null;
+        query?: string | null;
+        limit?: number | null;
+        nextToken?: string | null;
+      };
+      if (args.lookup === "CUSTOMERS") {
+        return searchCustomers({ query: args.query ?? "", limit: args.limit, nextToken: args.nextToken }, event.identity);
+      }
+      if (args.lookup != null || args.query != null || args.limit != null || args.nextToken != null) {
+        throw new Error("Choose the CUSTOMERS lookup explicitly when searching customer records.");
+      }
       return staffRoster();
+    }
     default:
       throw new Error(`Unknown field ${opFieldName(event)}`);
   }

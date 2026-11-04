@@ -47,6 +47,11 @@ export default function More() {
 
       {roles.office ? (
         <Card title="Office tools">
+          <ListRow
+            title="Search customers and leads"
+            subtitle="Find any account by name, phone, email, or address"
+            onClick={() => navigate("/search")}
+          />
           {roles.tech ? (
             <ListRow title="My day (technician view)" onClick={() => navigate("/tech")} />
           ) : null}

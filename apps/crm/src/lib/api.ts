@@ -753,7 +753,18 @@ export type StaffRosterRow = {
 };
 
 export function staffRoster(): OpResult {
-  return api().queries.staffRoster();
+  return api().queries.staffRoster({});
+}
+
+/** Bounded customer lookup shares the existing owner-only directory operation. */
+export function searchCustomers(args: {
+  query: string;
+  limit?: number;
+  nextToken?: string | null;
+}): OpResult {
+  return api().queries.staffRoster({
+    lookup: "CUSTOMERS", query: args.query, limit: args.limit, nextToken: args.nextToken,
+  });
 }
 
 /** The controlled reason codes for a staff-access change (GL-14). Re-exported
