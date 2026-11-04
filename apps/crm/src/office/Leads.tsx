@@ -8,6 +8,8 @@ import {
   type Customer,
 } from "../lib/api";
 import { useAsync, useKeyedAction } from "../lib/useAsync";
+import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
+import { parseLeadsView, type LeadsView } from "../lib/navigationMemory";
 import { fmtDateTime } from "../lib/format";
 import { useRoles } from "../lib/auth";
 import {
@@ -43,6 +45,8 @@ type DupeCandidate = {
   matchedOn: string;
 };
 
+const initialLeadsView = (): LeadsView => ({ mineOnly: false, stageFilter: "ALL" });
+
 export default function Leads() {
   const navigate = useNavigate();
   const roles = useRoles();
@@ -65,10 +69,8 @@ export default function Leads() {
   // pass takes it.
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [mineOnly, setMineOnly] = useState(false);
-  // Narrow the inbox to one derived stage. The stage is computed from facts
-  // (deriveLeadStage), never stored — so this filter can't go stale.
-  const [stageFilter, setStageFilter] = useState<LeadStage | "ALL">("ALL");
+  // Only the selected filter is remembered; lead stages still derive from live facts.
+  const [{ mineOnly, stageFilter }, setView] = useRememberedView("leads", parseLeadsView, initialLeadsView);
   // The duplicate decision: candidates + the exact form values to re-submit.
   const [dupe, setDupe] = useState<{
     candidates: DupeCandidate[];
@@ -115,6 +117,8 @@ export default function Leads() {
     [openRows, stageFilter]
   );
 
+  useRememberedScroll("leads", leads !== null, JSON.stringify([mineOnly, stageFilter]));
+
   const submitLead = async (
     values: Parameters<typeof createLead>[0]
   ): Promise<void> => {
@@ -144,7 +148,7 @@ export default function Leads() {
       <Button
         small
         variant={stageFilter === "ALL" ? undefined : "subtle"}
-        onClick={() => setStageFilter("ALL")}
+        onClick={() => setView((current) => ({ ...current, stageFilter: "ALL" }))}
       >
         All ({openRows.length})
       </Button>
@@ -153,7 +157,7 @@ export default function Leads() {
           key={s}
           small
           variant={stageFilter === s ? undefined : "subtle"}
-          onClick={() => setStageFilter((cur) => (cur === s ? "ALL" : s))}
+          onClick={() => setView((current) => ({ ...current, stageFilter: current.stageFilter === s ? "ALL" : s }))}
         >
           {LEAD_STAGE_LABEL[s]} ({stageCounts.get(s)})
         </Button>
@@ -226,7 +230,7 @@ export default function Leads() {
         <input
           type="checkbox"
           checked={mineOnly}
-          onChange={(e) => setMineOnly(e.target.checked)}
+          onChange={(e) => setView((current) => ({ ...current, mineOnly: e.target.checked }))}
         />{" "}
         My leads only
       </label>
