@@ -35,6 +35,17 @@ describe("scoped bounded read cache", () => {
     old.resolve("old session"); await request.promise;
     expect(request.current()).toBe(false); expect(cache.read(["leads"])?.data).toBe("new session");
   });
+  it("renews read generations while preserving the continuing account's write epoch", async () => {
+    const cache = createQueryCache(); cache.activate("a", ["OWNER"]);
+    const scope = cache.writeScope(), before = cache.scope();
+    const old = deferred<string>(), request = cache.request(["leads"], () => old.promise);
+    cache.renew(); expect(cache.identity()).toBeNull(); expect(cache.scope()).not.toBe(before); expect(cache.writeScope()).toBe(scope);
+    cache.activate("a", ["TECH"]); expect(cache.writeScope()).toBe(scope);
+    await cache.request(["leads"], async () => "renewed").promise; old.resolve("old claims"); await request.promise;
+    expect(request.current()).toBe(false); expect(cache.read(["leads"])?.data).toBe("renewed");
+    cache.renew(); cache.activate(null); cache.activate("a", ["TECH"]);
+    expect(cache.writeScope()).not.toBe(scope);
+  });
   it("bounds retained and pending entries and expires idle data", async () => {
     let time = 0; const cache = createQueryCache(() => time); cache.activate("a");
     for (let i = 0; i < 21; i++) { time++; await cache.request(["schedule", i], async () => i).promise; }
@@ -86,6 +97,25 @@ describe("explicit write invalidation", () => {
   });
   it("does not let an old write clear a new login with the same subject", async () => {
     const pending = deferred<{ data: null }>(), write = confirmedMutation(pending.promise);
+    queryCache.activate(null); queryCache.activate("owner", ["OWNER"]); await seed();
+    pending.resolve({ data: null }); await write;
+    expect(queryCache.read(["customers"])?.data).toBe("server rows");
+  });
+  it.each(["success", "graphql", "network", "ambiguous"])("invalidates a post-renewal pre-write read after the pending write's %s response", async (outcome) => {
+    const pending = deferred<{ data: unknown; errors?: { message: string }[] }>();
+    const write = confirmedMutation(pending.promise).then((value) => ({ value }), (error) => ({ error }));
+    queryCache.renew(); queryCache.activate("owner", ["TECH"]); await seed();
+    expect(queryCache.read(["customers"])?.data).toBe("server rows");
+    if (outcome === "network") pending.reject(new Error("connection lost"));
+    else pending.resolve(outcome === "graphql" ? { data: { id: "partial" }, errors: [{ message: "partial failure" }] }
+      : { data: outcome === "ambiguous" ? null : { id: "saved" } });
+    const result = await write;
+    expect("error" in result).toBe(outcome === "network" || outcome === "graphql");
+    expect(queryCache.read(["customers"])).toBeNull();
+  });
+  it("fences logout while the read scope is already paused for renewal", async () => {
+    const pending = deferred<{ data: null }>(), write = confirmedMutation(pending.promise);
+    queryCache.renew(); expect(queryCache.identity()).toBeNull();
     queryCache.activate(null); queryCache.activate("owner", ["OWNER"]); await seed();
     pending.resolve({ data: null }); await write;
     expect(queryCache.read(["customers"])?.data).toBe("server rows");

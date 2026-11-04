@@ -84,6 +84,21 @@ describe("cached operational reads", () => {
     expect(load).toHaveBeenCalledTimes(2); await act(async () => current.resolve("saved server rows"));
     await act(async () => old.resolve("pre-write rows")); expect(rows()).toBe("saved server rows"); expect(latest().loading).toBe(false);
   });
+  it.each(["success", "graphql", "network", "ambiguous"])("reconciles a pending write's %s outcome after same-account token renewal cached pre-write rows", async (outcome) => {
+    const pending = deferred<{ data: unknown; errors?: { message: string }[] }>();
+    const load = vi.fn().mockResolvedValueOnce("before renewal").mockResolvedValueOnce("pre-write rows").mockResolvedValueOnce("authoritative post-write rows");
+    await render({ load }); const write = confirmedMutation(pending.promise).then(() => null, (error) => error);
+    await act(async () => queryCache.renew()); expect(rows()).toBe("empty"); expect(load).toHaveBeenCalledTimes(1);
+    await act(async () => queryCache.activate("alice", ["OWNER"])); expect(rows()).toBe("pre-write rows");
+    await act(async () => {
+      if (outcome === "network") pending.reject(new Error("connection lost"));
+      else pending.resolve(outcome === "graphql" ? { data: { id: "partial" }, errors: [{ message: "partial failure" }] }
+        : { data: outcome === "ambiguous" ? { ok: false } : { id: "saved" } });
+      await write;
+    });
+    expect(load).toHaveBeenCalledTimes(3); expect(rows()).toBe("authoritative post-write rows");
+    expect(queryCache.read(["customers", "active"])?.data).toBe("authoritative post-write rows");
+  });
   it("defers invalidation during an edit and retains draft input while fetching authoritative rows afterward", async () => {
     const load = vi.fn().mockResolvedValueOnce("old").mockResolvedValueOnce("saved"); await render({ load, suspended: true });
     const input = container.querySelector("input")!;

@@ -13,7 +13,8 @@ import { queryCache } from "./queryCache";
 
 // All sign-out paths, including Authenticator and magic-link account changes.
 Hub.listen("auth", ({ payload }) => {
-  if (["signedOut", "signedIn", "tokenRefresh", "tokenRefresh_failure"].includes(payload.event)) queryCache.activate(null);
+  if (payload.event === "tokenRefresh") queryCache.renew();
+  if (["signedOut", "signedIn", "tokenRefresh_failure"].includes(payload.event)) queryCache.activate(null);
 });
 
 export type Roles = {
@@ -77,7 +78,8 @@ export function RolesProvider({ children }: { children: ReactNode }) {
       });
     } catch {
       if (current !== request.current) return;
-      queryCache.activate(null);
+      // A lookup failure pauses reads; only verified account changes or auth events end the login.
+      queryCache.renew();
       setState((s) => ({ ...s, loading: false }));
     }
   }, []);

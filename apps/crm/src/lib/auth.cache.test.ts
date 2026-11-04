@@ -8,7 +8,7 @@ vi.mock("aws-amplify/utils", () => ({ Hub: { listen: (_: string, listener: (even
   mocks.listeners.add(listener); return () => mocks.listeners.delete(listener);
 } } }));
 import { RolesProvider, useRoles, type Roles } from "./auth";
-import { queryCache } from "./queryCache";
+import { confirmedMutation, queryCache } from "./queryCache";
 import { useAsync } from "./useAsync";
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((yes) => { resolve = yes; }); return { promise, resolve }; }
 const session = (sub: string, groups: string[]) => ({ tokens: { accessToken: { payload: { sub, "cognito:groups": groups } } } });
@@ -51,5 +51,37 @@ describe("authenticated read cache lifecycle", () => {
     mocks.session.mockReturnValueOnce(old.promise).mockResolvedValueOnce(session("bob", ["TECH"])); await mount();
     await act(async () => emit("signedIn")); await act(async () => old.resolve(session("alice", ["OWNER"])));
     expect(roles.sub).toBe("bob"); expect(roles.owner).toBe(false); expect(queryCache.identity()).toContain("bob"); expect(read).toHaveBeenCalledTimes(1);
+  });
+  it("keeps an in-flight write invalidating the continuing login through real Hub token refresh", async () => {
+    const refreshed = deferred<ReturnType<typeof session>>(), pending = deferred<{ data: null }>();
+    mocks.session.mockResolvedValueOnce(session("alice", ["OWNER"])).mockReturnValueOnce(refreshed.promise);
+    read.mockResolvedValueOnce("initial").mockResolvedValueOnce("pre-write").mockResolvedValueOnce("post-write"); await mount();
+    const write = confirmedMutation(pending.promise);
+    await act(async () => emit("tokenRefresh")); expect(container.textContent).toContain("empty");
+    await act(async () => refreshed.resolve(session("alice", ["OWNER"]))); expect(container.textContent).toContain("pre-write");
+    await act(async () => { pending.resolve({ data: null }); await write; });
+    expect(read).toHaveBeenCalledTimes(3); expect(container.textContent).toContain("post-write");
+  });
+  it("preserves pending-write invalidation through a transient claims-read failure and same-account recovery", async () => {
+    const pending = deferred<{ data: null }>();
+    mocks.session.mockResolvedValueOnce(session("alice", ["OWNER"])).mockRejectedValueOnce(new Error("temporary lookup failure"))
+      .mockResolvedValueOnce(session("alice", ["OWNER"]));
+    read.mockResolvedValueOnce("initial").mockResolvedValueOnce("pre-write").mockResolvedValueOnce("post-write"); await mount();
+    const write = confirmedMutation(pending.promise);
+    await act(async () => roles.refresh()); expect(queryCache.identity()).toBeNull(); expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => roles.refresh()); expect(container.textContent).toContain("pre-write");
+    await act(async () => { pending.resolve({ data: null }); await write; });
+    expect(read).toHaveBeenCalledTimes(3); expect(container.textContent).toContain("post-write");
+  });
+  it.each(["signedOut", "tokenRefresh_failure"])("ends the write epoch on %s even during renewal, isolating a same-account sign-in", async (event) => {
+    const refreshed = deferred<ReturnType<typeof session>>(), pending = deferred<{ data: null }>();
+    mocks.session.mockResolvedValueOnce(session("alice", ["OWNER"])).mockReturnValueOnce(refreshed.promise)
+      .mockResolvedValueOnce(session("alice", ["OWNER"])); await mount();
+    const write = confirmedMutation(pending.promise);
+    await act(async () => emit("tokenRefresh")); await act(async () => emit(event));
+    await act(async () => emit("signedIn")); expect(read).toHaveBeenCalledTimes(2);
+    await act(async () => refreshed.resolve(session("alice", ["OWNER"]))); expect(read).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve({ data: null }); await write; });
+    expect(read).toHaveBeenCalledTimes(2); expect(queryCache.read(["customers"])?.data).toBe("server rows");
   });
 });

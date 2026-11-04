@@ -9,6 +9,8 @@ const MAX_ENTRIES = 20;
 
 export function createQueryCache(now = () => Date.now()) {
   let identity: string | null = null;
+  let principal: string | null = null;
+  let loginEpoch = 0;
   let generation = 0;
   let revision = 0;
   const versions = new Map<string, number>();
@@ -18,6 +20,7 @@ export function createQueryCache(now = () => Date.now()) {
   const emit = (event: Event) => { for (const listener of [...listeners]) listener(event); };
   const resource = (key: QueryKey) => String(key[0]);
   const id = (key: QueryKey) => JSON.stringify(key);
+  const clearReads = () => { generation++; entries.clear(); pending.clear(); versions.clear(); emit({ kind: "identity" }); };
   const prune = () => {
     const time = now();
     for (const [key, value] of entries) if (time - value.touchedAt >= RETAIN_MS) entries.delete(key);
@@ -29,13 +32,20 @@ export function createQueryCache(now = () => Date.now()) {
   return {
     identity: () => identity,
     generation: () => generation,
+    // A token renewal/group refresh fences reads without ending an ongoing login's writes.
+    writeScope: () => `${loginEpoch}:${principal ?? "signed-out"}`,
     scope: () => `${generation}:${identity ?? "signed-out"}`,
     subscribe(listener: (event: Event) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     activate(sub: string | null, groups: readonly string[] = []) {
       const next = sub ? JSON.stringify([sub, [...new Set(groups)].sort()]) : null;
-      if (next === identity) return;
-      identity = next; generation++; entries.clear(); pending.clear(); versions.clear();
-      emit({ kind: "identity" });
+      const accountChanged = sub !== principal;
+      if (accountChanged) { principal = sub; loginEpoch++; }
+      if (next === identity && !accountChanged) return;
+      identity = next; clearReads();
+    },
+    renew() {
+      // Keep principal even while privileged reads wait for verified refreshed claims.
+      identity = null; clearReads();
     },
     invalidate(resources: readonly string[] | null = null) {
       if (!resources) { revision++; entries.clear(); pending.clear(); }
@@ -93,10 +103,9 @@ function refused(data: unknown): boolean {
 export async function confirmedMutation<T extends { data?: unknown; errors?: readonly { message: string }[] }>(
   request: Promise<T>, resources: readonly string[] | null = null
 ): Promise<T> {
-  const owner = queryCache.identity();
-  const generation = queryCache.generation();
+  const scope = queryCache.writeScope();
   const invalidate = () => {
-    if (owner === queryCache.identity() && generation === queryCache.generation()) queryCache.invalidate(resources);
+    if (scope === queryCache.writeScope()) queryCache.invalidate(resources);
   };
   let result: T;
   try { result = await request; }
