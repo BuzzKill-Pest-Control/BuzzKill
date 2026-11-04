@@ -743,22 +743,26 @@ export default function WorkQueue() {
  */
 
 async function loadPaymentsInFlight(): Promise<BookingRequest[]> {
-  const data = await listAll((t) =>
-    api().models.BookingRequest.list({
-      filter: {
-        or: [
-          { status: { eq: "PROCESSING" } },
-          { status: { eq: "PAYMENT_FAILED" } },
-        ],
-      },
-      limit: 500,
-      nextToken: t,
-    })
+  const pages = await Promise.all(
+    (["PROCESSING", "PAYMENT_FAILED"] as const).map((status) =>
+      listAll((nextToken) => api().models.BookingRequest.listBookingRequestByStatus(
+        { status }, { limit: 500, nextToken }
+      ))
+    )
   );
+  // A payment can move between the two eventually consistent index reads.
+  // Keep one copy of its newest observed state instead of showing it twice.
+  const byId = new Map<string, BookingRequest>();
+  for (const row of pages.flat()) {
+    const prior = byId.get(row.id);
+    if (!prior || (Date.parse(row.updatedAt ?? "") || 0) >= (Date.parse(prior.updatedAt ?? "") || 0)) {
+      byId.set(row.id, row);
+    }
+  }
   // Failed attempts age out of this operating view after two weeks —
   // their money consequences live on as owned cases either way.
   const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  return data
+  return [...byId.values()]
     .filter(
       (b) =>
         b.status === "PROCESSING" ||
