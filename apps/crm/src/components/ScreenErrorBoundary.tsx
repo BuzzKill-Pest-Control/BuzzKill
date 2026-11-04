@@ -21,7 +21,7 @@ import { captureRenderFailure } from "../lib/monitoring";
  * next screen render normally.
  */
 export default class ScreenErrorBoundary extends Component<
-  { children: ReactNode; resetKey: string },
+  { children: ReactNode; resetKey: string; onRetry?: () => void },
   { failed: boolean; message: string | null; shownFor: string }
 > {
   state = {
@@ -63,9 +63,15 @@ export default class ScreenErrorBoundary extends Component<
       <div className="page">
         <EmptyState
           title="This screen didn't load."
-          body="Something on this page hit an error, so the rest of the CRM stayed up. Use the tabs below to carry on, or reload to try this screen again."
+          body="Something on this page hit an error. Try again or use the tabs below to carry on."
           action={
-            <Button onClick={() => window.location.reload()}>Reload</Button>
+            <>
+              <Button onClick={this.props.onRetry ?? (() => window.location.reload())}>
+                {this.props.onRetry ? "Try again" : "Reload"}
+              </Button>
+              {/* A removed deploy chunk needs a fresh HTML manifest; never auto-reload. */}
+              {this.props.onRetry ? <Button variant="ghost" onClick={() => window.location.reload()}>Reload app</Button> : null}
+            </>
           }
         />
         {/* The message, not a stack: enough for the office to quote when they

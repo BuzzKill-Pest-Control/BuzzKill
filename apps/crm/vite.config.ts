@@ -21,9 +21,6 @@ export default defineConfig(({ command, mode }) => {
     sentryPlugin: sentryVitePlugin,
   });
   return {
-    // The default Stripe entrypoint loads its external script on import, even
-    // without a key. The pure entrypoint waits for an explicit loadStripe call.
-    resolve: { alias: migrationPreview ? [{ find: /^@stripe\/stripe-js$/, replacement: "@stripe/stripe-js/pure" }] : [] },
     define: {
       ...previewDefines,
       ...monitoring.define,
