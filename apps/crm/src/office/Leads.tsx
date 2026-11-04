@@ -220,9 +220,14 @@ export default function Leads() {
     <Page
       title="Lead inbox"
       actions={
-        <Button small onClick={() => setAdding(true)}>
-          + Lead
-        </Button>
+        <>
+          <Button small variant="subtle" onClick={() => navigate("/search")}>
+            Search all
+          </Button>
+          <Button small onClick={() => setAdding(true)}>
+            + Lead
+          </Button>
+        </>
       }
     >
       <RefreshStatus state={freshness} label="leads" />

@@ -28,6 +28,7 @@ import Dashboard from "./office/Dashboard";
 import WorkQueue from "./office/Work";
 import Leads from "./office/Leads";
 import Customers from "./office/Customers";
+import Search from "./office/Search";
 import CustomerDetail from "./office/CustomerDetail";
 import GroupDetail from "./office/GroupDetail";
 import PricingLog from "./office/PricingLog";
@@ -249,6 +250,7 @@ function Shell() {
           <Route path="/visit-changes" element={<Require when={workStaff}><VisitChangeHistory /></Require>} />
           <Route path="/leads" element={<Require when={staff}><Leads /></Require>} />
           <Route path="/customers" element={<Require when={staff}><Customers /></Require>} />
+          <Route path="/search" element={<Require when={staff}><Search /></Require>} />
           {/* GL-13: the office customer view exposes plans, invoices, agreements
               and every job across the customer — not a technician surface. The
               field app never links here; a tech's customer context comes scoped

@@ -5,6 +5,7 @@ import { useAction, useAsync } from "../lib/useAsync";
 import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
 import { parseCustomersView, type CustomersView } from "../lib/navigationMemory";
 import RefreshStatus from "../components/RefreshStatus";
+import { customerMatchesSearch } from "../lib/customerSearch";
 import {
   rowsForTab,
   type CustomersLoaded,
@@ -67,27 +68,26 @@ export default function Customers() {
   useRememberedScroll("customers", customers !== null || groups !== null, JSON.stringify([tab, query]));
 
   const q = query.trim().toLowerCase();
-  const filtered = (customers ?? []).filter(
-    (c) =>
-      !q ||
-      c.displayName.toLowerCase().includes(q) ||
-      (c.serviceCity ?? "").toLowerCase().includes(q) ||
-      (c.email ?? "").toLowerCase().includes(q)
-  );
+  const filtered = (customers ?? []).filter((c) => customerMatchesSearch(c, query));
 
   return (
     <Page
       title="Customers"
       actions={
-        tab === "GROUPS" ? (
-          <Button small onClick={() => setAddingGroup(true)}>
-            + Group
+        <>
+          <Button small variant="subtle" onClick={() => navigate("/search")}>
+            Search all
           </Button>
-        ) : (
-          <Button small onClick={() => navigate("/leads")}>
-            + Lead
-          </Button>
-        )
+          {tab === "GROUPS" ? (
+            <Button small onClick={() => setAddingGroup(true)}>
+              + Group
+            </Button>
+          ) : (
+            <Button small onClick={() => navigate("/leads")}>
+              + Lead
+            </Button>
+          )}
+        </>
       }
     >
       <RefreshStatus state={freshness} label="customers" />
@@ -105,7 +105,7 @@ export default function Customers() {
       {tab !== "GROUPS" ? (
         <>
           <input
-            placeholder="Search name, city, email…"
+            placeholder="Search name, phone, email, address…"
             value={query}
             onChange={(e) => setView((current) => ({ ...current, query: e.target.value }))}
           />

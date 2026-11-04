@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   updateCustomerContact: vi.fn(),
   customerGet: vi.fn(),
   navigate: vi.fn(),
-  location: { pathname: "/customers/lead-123", state: null },
+  location: { pathname: "/customers/lead-123", state: null as unknown },
   lead: {
     id: "lead-123", displayName: "Manual job lead", status: "LEAD",
     serviceStreet: "12 Elm Street", serviceCity: "Providence", serviceState: "RI",
@@ -23,7 +23,7 @@ vi.mock("react-router-dom", () => ({
   useLocation: () => mocks.location,
 }));
 vi.mock("../lib/auth", () => ({
-  useRoles: () => ({ owner: true, office: true, finance: true, loading: false, groups: [] }),
+  useRoles: () => ({ owner: true, office: true, finance: true, loading: false, groups: [], sub: "owner-1" }),
 }));
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -88,6 +88,8 @@ async function fillJob() {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  mocks.location.state = null;
+  mocks.navigate.mockReset();
   HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected network request"); }));
   mocks.customerGet.mockReset().mockResolvedValue({ data: mocks.lead });
@@ -105,6 +107,20 @@ afterEach(async () => {
 });
 
 describe("manual lead job form", () => {
+  it("returns an office lookup to its search history entry", async () => {
+    mocks.location.state = { customerSearchReturn: { ownerSub: "owner-1" } };
+    await act(async () => root.render(createElement(CustomerDetail)));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click());
+    expect(mocks.navigate).toHaveBeenCalledWith(-1);
+  });
+
+  it("ignores another user's search-return marker", async () => {
+    mocks.location.state = { customerSearchReturn: { ownerSub: "another-user" } };
+    await act(async () => root.render(createElement(CustomerDetail)));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click());
+    expect(mocks.navigate).toHaveBeenCalledWith("/leads");
+  });
+
   it("opens from a lead and sends its appointment and agreed amount", async () => {
     await openJob();
     await fillJob();

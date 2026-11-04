@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { isSearchReturn } from "../lib/customerSearch";
 import {
   api,
   clientActionId,
@@ -305,6 +306,7 @@ export default function CustomerDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const roles = useRoles();
+  const returningToSearch = isSearchReturn(location.state, roles.sub);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [plans, setPlans] = useState<ServicePlan[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -642,14 +644,14 @@ export default function CustomerDetail() {
 
   if (notFound) {
     return (
-      <Page title="Customer" back="/customers">
+      <Page title="Customer" back={returningToSearch ? true : "/customers"}>
         <ErrorNote error="Customer not found" />
       </Page>
     );
   }
   if (!customer) {
     return (
-      <Page title="Customer" back="/customers">
+      <Page title="Customer" back={returningToSearch ? true : "/customers"}>
         <ErrorNote error={error} />
         <Spinner />
       </Page>
@@ -667,7 +669,7 @@ export default function CustomerDetail() {
         ? Object.entries(mergeInfo.blanked)
         : [];
     return (
-      <Page title={customer.displayName} back="/customers">
+      <Page title={customer.displayName} back={returningToSearch ? true : "/customers"}>
         <Card className="customer-summary-card">
           <div className="inline-actions">
             <StatusBadge status={customer.status} />
@@ -837,7 +839,7 @@ export default function CustomerDetail() {
   return (
     <Page
       title={customer.displayName}
-      back={isLead ? "/leads" : "/customers"}
+      back={returningToSearch ? true : isLead ? "/leads" : "/customers"}
       actions={
         roles.office ? (
           <Button small variant="ghost" onClick={() => setSheet("edit")}>
