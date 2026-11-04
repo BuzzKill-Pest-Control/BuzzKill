@@ -327,6 +327,7 @@ function ReportAmendments({ reportId, revision }: { reportId: string; revision: 
     <ErrorNote error={history.error} />
     {history.error ? <Button small onClick={() => void history.reload()}>Retry amendments</Button> : null}
     {history.data === null && !history.error ? <span className="muted small">Checking amendments…</span> : null}
+    {history.data?.length === 0 ? <span className="muted small">No amendments.</span> : null}
     {history.data?.map((amendment) => <ListRow key={amendment.id}
       title={`Amendment — ${fmtDate(amendment.issuedAt ?? "", true)}`} subtitle={amendment.reason}
       meta={<><DeliveryBadge status={amendment.deliveryStatus} emailedAt={amendment.emailedAt} />{amendment.pdfKey ? <DocButton docKey={amendment.pdfKey} /> : null}</>} />)}
@@ -1715,7 +1716,9 @@ function CustomerRecord() {
                     />
                   </div>
                 ) : null}
-                <ReportAmendments reportId={r.id} revision={reportsRead.data?.revision ?? 0} />
+                <RecordSection title="Amendment history">
+                  <ReportAmendments reportId={r.id} revision={reportsRead.data?.revision ?? 0} />
+                </RecordSection>
               </div>
             );
           })
@@ -2521,8 +2524,8 @@ function CustomerRecord() {
         onSaved={() => {
           setSheet(null);
           setPm(null);
-          // Webhook updates the label asynchronously; refresh shortly after.
-          setTimeout(() => void load(["customer", "payment"]), 1500);
+          // The setup webhook updates the label and can start active plans.
+          setTimeout(() => void load(["customer", "payment", "plans"]), 1500);
         }}
       /> : null}
 
