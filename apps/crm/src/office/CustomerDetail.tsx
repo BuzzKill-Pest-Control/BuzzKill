@@ -1,4 +1,5 @@
 import { confirmedMutation } from "../lib/queryCache";
+import { readPaymentMethodSummary } from "../lib/paymentMethodSummary";
 import {
   Fragment,
   useCallback,
@@ -476,8 +477,10 @@ export default function CustomerDetail() {
   // Payment summary is a live Stripe lookup — load after the record.
   useEffect(() => {
     if (!customer || !roles.office) return;
-    api()
-      .queries.getPaymentMethodSummary({ customerId: customer.id })
+    readPaymentMethodSummary(
+      api().queries.getPaymentMethodSummary({ customerId: customer.id }),
+      customer.paymentMethodLabel
+    )
       .then((res) => {
         if (!res.errors?.length) {
           setPm(

@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { useRoles } from "../lib/auth";
 import { useAction } from "../lib/useAsync";
+import { readPaymentMethodSummary } from "../lib/paymentMethodSummary";
 import { fmtDate, money, todayEastern } from "../lib/format";
 import { daysPastDue } from "../lib/aging";
 import { isOverdue } from "../lib/recovery";
@@ -59,9 +60,10 @@ export default function PortalBilling() {
       );
       const summaries = await Promise.all(
         mine.map(async (c) => {
-          const res = await api().queries.getPaymentMethodSummary({
-            customerId: c.id,
-          });
+          const res = await readPaymentMethodSummary(
+            api().queries.getPaymentMethodSummary({ customerId: c.id }),
+            c.paymentMethodLabel
+          );
           return [
             c.id,
             opResult<{ hasPaymentMethod: boolean; label: string | null }>(
