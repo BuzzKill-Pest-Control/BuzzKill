@@ -1,4 +1,5 @@
 import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
+import { searchCustomers, type SearchCustomersArgs } from "../shared/customerDirectory";
 import type { AppSyncResolverEvent } from "aws-lambda";
 import {
   AdminDisableUserCommand,
@@ -229,6 +230,8 @@ type AdminArgs =
 export const handler = async (event: AppSyncResolverEvent<AdminArgs>) => {
   assertBusinessActionsEnabled();
   switch (opFieldName(event)) {
+    case "searchCustomers":
+      return searchCustomers(event.arguments as unknown as SearchCustomersArgs, event.identity);
     case "adminCreateUser": {
       const args = event.arguments as AdminCreateUserArgs;
       try {

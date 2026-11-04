@@ -5,33 +5,37 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Search from "./Search";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), office: true, sub: "owner-1" }));
+const mocks = vi.hoisted(() => ({ search: vi.fn(), office: true, sub: "owner-1" }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ office: mocks.office, sub: mocks.sub }) }));
 vi.mock("../lib/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/api")>(),
-  api: () => ({ models: { Customer: { listCustomerByStatusAndDisplayName: mocks.list } } }),
+  api: () => ({ queries: { searchCustomers: mocks.search } }),
 }));
 
-const active = { id: "active", status: "ACTIVE", displayName: "Shared Active", serviceCity: "Boston" };
+const active = { id: "active", status: "ACTIVE", displayName: "Shared Active", serviceCity: "Boston", leadStage: null };
 const inactive = {
   id: "inactive", status: "INACTIVE", displayName: "Shared Inactive", phone: "+1 (508) 258-9294",
   serviceStreet: "420 Lakeside Ave", serviceUnit: "104", serviceCity: "Marlborough",
-  serviceState: "MA", serviceZip: "01752",
+  serviceState: "MA", serviceZip: "01752", leadStage: null,
 };
-const closedLead = {
-  id: "closed", status: "LEAD", displayName: "Shared Closed Inquiry", email: "closed@example.com",
-  lostReason: "CUSTOMER_DECLINED",
+const closed = {
+  id: "closed", status: "LEAD", displayName: "Shared Closed Inquiry", email: "closed@example.com", leadStage: "LOST",
 };
+const response = (items: unknown[], nextToken: string | null = null) => ({ data: JSON.stringify({ items, nextToken }) });
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 let container: HTMLDivElement;
 let root: Root;
 let seenLocation: ReturnType<typeof useLocation>;
-
 function LocationProbe() { seenLocation = useLocation(); return null; }
 function Record() {
   const navigate = useNavigate();
-  const { id } = useParams();
-  return createElement("div", null, `Record ${id}`, createElement("button", { onClick: () => navigate(-1) }, "Back to search"));
+  return createElement("div", null, `Record ${useParams().id}`,
+    createElement("button", { onClick: () => navigate(-1) }, "Back to search"));
 }
 function application(state: unknown = null) {
   return createElement(MemoryRouter, { initialEntries: [{ pathname: "/search", state }] },
@@ -49,19 +53,23 @@ async function typeQuery(value: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+async function debounce() { await act(async () => { await vi.advanceTimersByTimeAsync(300); }); }
 function rowLinks() { return Array.from(container.querySelectorAll<HTMLAnchorElement>("a.record-search-result")); }
+function button(text: string) {
+  const node = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === text);
+  if (!node) throw new Error(`Missing ${text}`);
+  return node;
+}
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   HTMLElement.prototype.scrollIntoView = vi.fn();
   mocks.office = true;
   mocks.sub = "owner-1";
-  mocks.list.mockReset().mockImplementation(async ({ status }, { nextToken }) => {
-    if (status === "ACTIVE") return nextToken
-      ? { data: [active], nextToken: null }
-      : { data: [], nextToken: "active-next-page" };
-    return { data: status === "INACTIVE" ? [inactive] : [closedLead], nextToken: null };
-  });
+  mocks.search.mockReset().mockImplementation(async ({ query }) => response(
+    query === "5082589294" ? [inactive] : query === "closed@example.com" ? [closed] : [active, closed, inactive]
+  ));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -69,61 +77,120 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-describe("the office customer and lead directory", () => {
-  it("finds active, inactive, and closed lead records across every index page without refetching per key", async () => {
+describe("bounded office directory search", () => {
+  it("debounces typing and renders lifecycle/status/contact matches from one bounded query", async () => {
     await act(async () => root.render(application()));
-    expect(rowLinks()).toHaveLength(0);
+    await typeQuery("S");
+    await typeQuery("Sha");
     await typeQuery("Shared");
+    expect(mocks.search).not.toHaveBeenCalled();
+    await debounce();
+    expect(mocks.search).toHaveBeenCalledExactlyOnceWith({ query: "Shared", limit: 25, nextToken: undefined });
     expect(rowLinks().map((link) => link.getAttribute("href"))).toEqual([
       "/customers/active", "/customers/closed", "/customers/inactive",
     ]);
-    expect(container.textContent).toContain("active");
-    expect(container.textContent).toContain("inactive");
-    expect(container.textContent).toContain("lead");
     expect(container.textContent).toContain("Lost");
     await typeQuery("5082589294");
+    expect(rowLinks()).toHaveLength(0);
+    await debounce();
     expect(rowLinks()).toHaveLength(1);
     expect(rowLinks()[0].textContent).toContain("420 Lakeside Ave, Unit 104, Marlborough, MA, 01752");
-    expect(mocks.list).toHaveBeenCalledTimes(4);
-    expect(mocks.list).toHaveBeenCalledWith({ status: "ACTIVE" }, { limit: 500, nextToken: "active-next-page" });
+    expect(mocks.search).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the lookup on record→Back without putting contact details in a URL", async () => {
+  it("does not claim no matches while an empty intermediate page has continuation", async () => {
+    mocks.search.mockResolvedValueOnce(response([], "continue-1")).mockResolvedValueOnce(response([]));
+    await act(async () => root.render(application()));
+    await typeQuery("Someone");
+    await debounce();
+    expect(container.textContent).not.toContain("No matches");
+    expect(container.textContent).toContain("More records remain to search");
+    await act(async () => button("Search more records").click());
+    expect(mocks.search).toHaveBeenLastCalledWith({ query: "Someone", limit: 25, nextToken: "continue-1" });
+    expect(container.textContent).toContain("No matches");
+  });
+
+  it("ignores an old query completing after the new lookup", async () => {
+    const old = deferred<ReturnType<typeof response>>();
+    mocks.search.mockReturnValueOnce(old.promise).mockResolvedValueOnce(response([closed]));
+    await act(async () => root.render(application()));
+    await typeQuery("First");
+    await debounce();
+    await typeQuery("Second");
+    await debounce();
+    await act(async () => old.resolve(response([active], "old-token")));
+    expect(rowLinks().map((link) => link.getAttribute("href"))).toEqual(["/customers/closed"]);
+    expect(container.textContent).not.toContain("Load more");
+  });
+
+  it("ignores an old continuation when the query changes, including double taps", async () => {
+    const more = deferred<ReturnType<typeof response>>();
+    mocks.search.mockResolvedValueOnce(response([active], "page-2"))
+      .mockReturnValueOnce(more.promise).mockResolvedValueOnce(response([closed]));
+    await act(async () => root.render(application()));
+    await typeQuery("First");
+    await debounce();
+    await act(async () => { button("Load more").click(); button("Load more").click(); });
+    expect(mocks.search).toHaveBeenCalledTimes(2);
+    await typeQuery("Second");
+    await debounce();
+    await act(async () => more.resolve(response([inactive], "old-token")));
+    expect(rowLinks().map((link) => link.getAttribute("href"))).toEqual(["/customers/closed"]);
+  });
+
+  it("keeps loaded results and the continuation available after a page fails", async () => {
+    mocks.search.mockResolvedValueOnce(response([active], "page-2"))
+      .mockRejectedValueOnce(new Error("Directory temporarily unavailable"))
+      .mockResolvedValueOnce(response([inactive]));
+    await act(async () => root.render(application()));
+    await typeQuery("Shared");
+    await debounce();
+    await act(async () => button("Load more").click());
+    expect(rowLinks()).toHaveLength(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Directory temporarily unavailable");
+    await act(async () => button("Load more").click());
+    expect(rowLinks()).toHaveLength(2);
+    expect(mocks.search).toHaveBeenLastCalledWith({ query: "Shared", limit: 25, nextToken: "page-2" });
+  });
+
+  it("keeps lookup history on record→Back without putting contact details in URLs", async () => {
     await act(async () => root.render(application()));
     await typeQuery("closed@example.com");
-    expect(seenLocation.pathname).toBe("/search");
+    await debounce();
     expect(seenLocation.search).toBe("");
     await act(async () => rowLinks()[0].click());
     expect(container.textContent).toContain("Record closed");
-    await act(async () => container.querySelector("button")!.click());
+    await act(async () => button("Back to search").click());
     expect(container.querySelector("input")!.value).toBe("closed@example.com");
+    await debounce();
     expect(rowLinks()[0].getAttribute("href")).toBe("/customers/closed");
     expect(seenLocation.search).toBe("");
   });
 
-  it("ignores a prior user's lookup state", async () => {
+  it("ignores a prior user's history and makes no blank lookup", async () => {
     await act(async () => root.render(application({ customerSearch: { ownerSub: "other-user", query: "private@example.com" } })));
+    await debounce();
     expect(container.querySelector("input")!.value).toBe("");
-    expect(container.textContent).not.toContain("private@example.com");
-    expect(rowLinks()).toHaveLength(0);
+    expect(mocks.search).not.toHaveBeenCalled();
   });
 
-  it("does not read the directory without office access", async () => {
+  it("does not query without office access", async () => {
     mocks.office = false;
-    await act(async () => root.render(application()));
-    expect(mocks.list).not.toHaveBeenCalled();
+    await act(async () => root.render(application({ customerSearch: { ownerSub: "owner-1", query: "Shared" } })));
+    await debounce();
+    expect(mocks.search).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Office access required");
   });
 
-  it("does not present an incomplete page as a no-match result when any partition fails", async () => {
-    mocks.list.mockRejectedValue(new Error("Directory temporarily unavailable"));
+  it("offers retry rather than a false empty result on initial failure", async () => {
+    mocks.search.mockRejectedValue(new Error("Directory temporarily unavailable"));
     await act(async () => root.render(application({ customerSearch: { ownerSub: "owner-1", query: "Shared" } })));
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Directory temporarily unavailable");
+    await debounce();
     expect(container.textContent).not.toContain("No matches");
-    expect(rowLinks()).toHaveLength(0);
-    expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Retry")).toBe(true);
+    expect(button("Retry")).toBeDefined();
   });
 });

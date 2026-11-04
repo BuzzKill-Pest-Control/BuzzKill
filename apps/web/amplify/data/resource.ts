@@ -2764,6 +2764,18 @@ export const schema = a.schema({
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
 
+  /** Bounded office lookup across customer and lead lifecycle states. */
+  searchCustomers: a
+    .query()
+    .arguments({
+      query: a.string().required(),
+      limit: a.integer(),
+      nextToken: a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(["OWNER"])])
+    .handler(a.handler.function(crmAdmin)),
+
   /**
    * The office's safe customer edit (GL-09). With raw Customer.update closed to
    * the browser, this is the only screen-driven write to a Customer, and it can

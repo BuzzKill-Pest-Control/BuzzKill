@@ -1,46 +1,25 @@
-import { useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { api, listAll, type Customer } from "../lib/api";
 import { useRoles } from "../lib/auth";
 import {
-  customerMatchesSearch,
+  normalizeCustomerSearchQuery,
   searchQueryFromHistory,
   withSearchQuery,
 } from "../lib/customerSearch";
 import { displayAddress } from "../lib/serviceAddress";
-import { deriveLeadStage, LEAD_STAGE_LABEL, LEAD_STAGE_TONE } from "../lib/leadStage";
-import { useAsync } from "../lib/useAsync";
+import { LEAD_STAGE_LABEL, LEAD_STAGE_TONE } from "../lib/leadStage";
+import { useCustomerSearch } from "../lib/useCustomerSearch";
 import {
   Badge, Button, Card, EmptyState, ErrorNote, Field, ListRow, Page,
   Spinner, StatusBadge,
 } from "../ui/kit";
-
-const STATUSES = ["ACTIVE", "INACTIVE", "LEAD"] as const;
 
 export default function Search() {
   const roles = useRoles();
   const location = useLocation();
   const navigate = useNavigate();
   const query = searchQueryFromHistory(location.state, roles.sub);
-  const { data: customers, error, loading, reload } = useAsync<Customer[]>(async () => {
-    if (!roles.office) return [];
-    // Use the existing status index, including closed leads. Exhaust each
-    // partition once per load; typing only filters these authorized rows.
-    const partitions = await Promise.all(
-      STATUSES.map((status) => listAll((nextToken) =>
-        api().models.Customer.listCustomerByStatusAndDisplayName(
-          { status }, { limit: 500, nextToken }
-        )
-      ))
-    );
-    return [...new Map(partitions.flat().map((row) => [row.id, row])).values()]
-      .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id));
-  }, [roles.office, roles.sub], "Could not load the customer and lead directory");
-
-  const matches = useMemo(
-    () => (customers ?? []).filter((customer) => customerMatchesSearch(customer, query)),
-    [customers, query]
-  );
+  const search = useCustomerSearch(query, roles.sub, roles.office);
+  const { items: matches, error, loading, searched, nextToken } = search;
 
   const setQuery = (value: string) => navigate(
     { pathname: location.pathname, search: location.search, hash: location.hash },
@@ -55,7 +34,7 @@ export default function Search() {
     <Page
       title="Search"
       back
-      actions={<Button small variant="subtle" disabled={loading} onClick={reload}>Refresh</Button>}
+      actions={<Button small variant="subtle" disabled={loading || !searched} onClick={() => void search.restart()}>Search again</Button>}
     >
       <Field
         label="Search customers and leads"
@@ -72,21 +51,21 @@ export default function Search() {
         />
       </Field>
       <ErrorNote error={error} />
-      {!customers && loading ? (
-        <Spinner label="Loading directory…" />
-      ) : !customers && error ? (
-        <Button onClick={reload}>Retry</Button>
-      ) : !query.trim() ? (
+      {!normalizeCustomerSearchQuery(query) ? (
         <EmptyState title="Find a customer or lead"
           body="Enter a name, phone number, email, or any part of their service address." />
-      ) : matches.length === 0 ? (
+      ) : loading && !searched ? (
+        <Spinner label="Searching directory…" />
+      ) : error && !searched ? (
+        <Button onClick={() => void search.retry()}>Retry</Button>
+      ) : matches.length === 0 && !nextToken ? (
         <EmptyState title="No matches"
           body="Try another name, contact detail, or part of the service address." />
-      ) : (
-        <Card title={`${matches.length} match${matches.length === 1 ? "" : "es"}`}>
+      ) : matches.length > 0 ? (
+        <Card title={`${matches.length} match${matches.length === 1 ? "" : "es"}${nextToken ? " so far" : ""}`}>
           {matches.map((customer) => {
             const address = displayAddress(customer);
-            const stage = deriveLeadStage(customer);
+            const stage = customer.leadStage;
             return (
               <Link
                 key={customer.id}
@@ -98,7 +77,7 @@ export default function Search() {
                   title={customer.displayName}
                   meta={<span className="inline-actions">
                     <StatusBadge status={customer.status} />
-                    {customer.status === "LEAD" ? (
+                    {stage ? (
                       <Badge tone={LEAD_STAGE_TONE[stage]}>{LEAD_STAGE_LABEL[stage]}</Badge>
                     ) : null}
                   </span>}
@@ -114,7 +93,17 @@ export default function Search() {
             );
           })}
         </Card>
-      )}
+      ) : null}
+      {searched && nextToken ? (
+        <Card>
+          <p className="muted small">
+            {matches.length ? "More records remain to search." : "No matching records in the pages checked so far. More records remain to search."}
+          </p>
+          <Button block loading={loading} onClick={() => void search.more()}>
+            {matches.length ? "Load more" : "Search more records"}
+          </Button>
+        </Card>
+      ) : null}
     </Page>
   );
 }
