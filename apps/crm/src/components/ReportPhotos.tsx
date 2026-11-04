@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useEffect, useRef, useState } from "react";
 import { api, opResult, type ServiceReport } from "../lib/api";
 import { useAction } from "../lib/useAsync";
@@ -76,10 +77,10 @@ export default function ReportPhotos({
       // Send only the delta — the server merges against the report's current
       // keys, so a photo another device just added is never overwritten.
       const res = opResult<{ refused?: string }>(
-        await api().mutations.setReportPhotos({
+        await confirmedMutation(api().mutations.setReportPhotos({
           reportId: report.id,
           addKeys: added,
-        })
+        }))
       );
       if (res?.refused) throw new Error(res.refused);
       await onChanged();
@@ -94,10 +95,10 @@ export default function ReportPhotos({
 
   const removePhoto = useAction(async (key: string) => {
     const res = opResult<{ refused?: string }>(
-      await api().mutations.setReportPhotos({
+      await confirmedMutation(api().mutations.setReportPhotos({
         reportId: report.id,
         removeKeys: [key],
-      })
+      }))
     );
     if (res?.refused) throw new Error(res.refused);
     await onChanged();

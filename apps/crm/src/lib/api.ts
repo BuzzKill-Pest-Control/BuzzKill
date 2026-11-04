@@ -1,3 +1,4 @@
+import { confirmedMutation } from "./queryCache";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../../../web/amplify/data/resource";
 import {
@@ -134,7 +135,7 @@ export function createLead(input: {
   contactConsentText?: string;
   contactConsentPolicyVersion?: string;
 }): OpResult {
-  return api().mutations.createLead(input);
+  return confirmedMutation(api().mutations.createLead(input));
 }
 
 export function logLeadTouch(input: {
@@ -147,7 +148,7 @@ export function logLeadTouch(input: {
   nextActionAt?: string;
   idempotencyKey: string;
 }): OpResult {
-  return api().mutations.logLeadTouch(input);
+  return confirmedMutation(api().mutations.logLeadTouch(input));
 }
 
 export function setLeadDisposition(input: {
@@ -163,7 +164,7 @@ export function setLeadDisposition(input: {
   bookingRequestId?: string;
   idempotencyKey: string;
 }): OpResult {
-  return api().mutations.setLeadDisposition(input);
+  return confirmedMutation(api().mutations.setLeadDisposition(input));
 }
 
 export function assignLeadOwner(input: {
@@ -172,7 +173,7 @@ export function assignLeadOwner(input: {
   toEmail?: string;
   idempotencyKey: string;
 }): OpResult {
-  return api().mutations.assignLeadOwner(input);
+  return confirmedMutation(api().mutations.assignLeadOwner(input));
 }
 
 /** Page the complete immutable timeline. A missing model or failed page is an
@@ -307,7 +308,7 @@ export function updateOwnedWork(input: {
   resolutionActionId?: string;
   reasonCode?: string;
 }): OpResult {
-  return api().mutations.updateOwnedWork(input);
+  return confirmedMutation(api().mutations.updateOwnedWork(input));
 }
 
 /** GL-18 R2: lift a bounce/complaint suppression (required consent note) so
@@ -317,7 +318,7 @@ export function liftEmailSuppression(input: {
   reasonCode: "CUSTOMER_RECONSENTED" | "ENTERED_IN_ERROR";
   evidence: string;
 }): OpResult {
-  return api().mutations.liftEmailSuppression(input);
+  return confirmedMutation(api().mutations.liftEmailSuppression(input));
 }
 
 /** GL-08/GL-18: record that a notice reached the customer another way — the
@@ -327,7 +328,7 @@ export function recordNoticeAlternateDelivery(input: {
   template: string;
   note: string;
 }): OpResult {
-  return api().mutations.recordNoticeAlternateDelivery(input);
+  return confirmedMutation(api().mutations.recordNoticeAlternateDelivery(input));
 }
 
 /**
@@ -371,7 +372,7 @@ export function settleInvoice(input: {
   method: "OFFLINE" | "CARD" | "MARK_DEPOSITED" | "UNMARK_DEPOSITED";
   note?: string;
 }): OpResult {
-  return api().mutations.settleInvoice(input);
+  return confirmedMutation(api().mutations.settleInvoice(input));
 }
 
 /**
@@ -380,7 +381,7 @@ export function settleInvoice(input: {
  * invoice's customer; OWNER/FINANCE may also call it.
  */
 export function payInvoice(input: { invoiceId: string }): OpResult {
-  return api().mutations.payInvoice(input);
+  return confirmedMutation(api().mutations.payInvoice(input));
 }
 
 /** GL-08 — the honest consequences of canceling a plan, computed server-side
@@ -434,7 +435,7 @@ export function cancelPlanByCustomer(input: {
   servicePlanId: string;
   reason?: string;
 }): OpResult {
-  return api().mutations.cancelPlanByCustomer(input);
+  return confirmedMutation(api().mutations.cancelPlanByCustomer(input));
 }
 
 /**
@@ -552,7 +553,7 @@ export function cancelVisit(input: {
   reasonCode: string;
   note?: string;
 }): OpResult {
-  return api().mutations.cancelVisit(input);
+  return confirmedMutation(api().mutations.cancelVisit(input));
 }
 
 /** Reschedule one visit — revalidates capacity + technician license, moves the
@@ -566,7 +567,7 @@ export function rescheduleVisit(input: {
   reasonCode: string;
   note?: string;
 }): OpResult {
-  return api().mutations.rescheduleVisit(input);
+  return confirmedMutation(api().mutations.rescheduleVisit(input));
 }
 
 /**
@@ -578,7 +579,7 @@ export function assignRecoveryOwner(input: {
   kind: "INVOICE" | "DISPUTE";
   id: string;
 }): OpResult {
-  return api().mutations.assignRecoveryOwner(input);
+  return confirmedMutation(api().mutations.assignRecoveryOwner(input));
 }
 
 /**
@@ -597,7 +598,7 @@ export function recordOfflinePayment(input: {
   terms?: InvoiceTerms;
   poNumber?: string;
 }): OpResult {
-  return api().mutations.recordOfflinePayment(input);
+  return confirmedMutation(api().mutations.recordOfflinePayment(input));
 }
 
 /** The due date a set of terms produces from an issue date — the backend's
@@ -623,11 +624,11 @@ export function sendInvoicePaymentLink(input: {
   invoiceId: string;
 }): OpResult {
   void input.invoiceId;
-  return api().mutations.sendCustomerEmail({
+  return confirmedMutation(api().mutations.sendCustomerEmail({
     customerId: input.customerId,
     kind: "payment-request",
     idempotencyKey: clientActionId("invoice-payment-link"),
-  });
+  }));
 }
 
 /**
@@ -727,7 +728,7 @@ export function updateMarketRate(fields: {
   type UpdateInput = Parameters<
     ReturnType<typeof api>["models"]["MarketRate"]["update"]
   >[0];
-  return api().models.MarketRate.update(fields as UpdateInput);
+  return confirmedMutation(api().models.MarketRate.update(fields as UpdateInput));
 }
 
 /**
@@ -800,7 +801,7 @@ export function saveTechnicianLicense(input: {
   expiresOn?: string;
   evidenceNote?: string;
 }): OpResult {
-  return api().mutations.saveTechnicianLicense(input);
+  return confirmedMutation(api().mutations.saveTechnicianLicense(input));
 }
 
 export function setLicenseStatus(input: {
@@ -808,7 +809,7 @@ export function setLicenseStatus(input: {
   status: string;
   reason: string;
 }): OpResult {
-  return api().mutations.setLicenseStatus(input);
+  return confirmedMutation(api().mutations.setLicenseStatus(input));
 }
 
 /** Set a staff login's role set to exactly `roles`. A controlled reasonCode is
@@ -821,7 +822,7 @@ export function changeStaffRoles(input: {
   reason?: string;
   idempotencyKey?: string;
 }): OpResult {
-  return api().mutations.changeStaffRoles(input);
+  return confirmedMutation(api().mutations.changeStaffRoles(input));
 }
 
 /** Offboard a staff member: disable + sign out first, remove groups, reassign a
@@ -835,7 +836,7 @@ export function offboardStaff(input: {
   reason?: string;
   idempotencyKey?: string;
 }): OpResult {
-  return api().mutations.offboardStaff(input);
+  return confirmedMutation(api().mutations.offboardStaff(input));
 }
 
 /** The immutable staff-access ledger row (GL-14), read directly from the model
@@ -1035,7 +1036,7 @@ export function mergeCustomers(input: {
   idempotencyKey: string;
   acknowledgeWarnings?: boolean;
 }): OpResult {
-  return api().mutations.mergeCustomers(input);
+  return confirmedMutation(api().mutations.mergeCustomers(input));
 }
 
 /** Parse an AWSJSON field. Round-trips are shape-shifty: depending on the

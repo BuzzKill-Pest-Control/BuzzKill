@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import {
   Fragment,
   useCallback,
@@ -1051,11 +1052,11 @@ export default function CustomerDetail() {
                   "payreq",
                   async () =>
                     unwrap(
-                      await api().mutations.sendCustomerEmail({
+                      await confirmedMutation(api().mutations.sendCustomerEmail({
                         customerId: customer.id,
                         kind: "payment-request",
                         idempotencyKey: clientActionId("payment-request"),
-                      })
+                      }))
                     ),
                   `Payment request emailed to ${customer.email}`
                 )
@@ -1121,13 +1122,13 @@ export default function CustomerDetail() {
                           // A refusal envelope must never read as a sent
                           // invite — surface the server's words instead.
                           const res = opResult<{ refused?: string }>(
-                            await api().mutations.adminCreateUser({
+                            await confirmedMutation(api().mutations.adminCreateUser({
                               email: customer.email!,
                               name: customer.contactName ?? customer.displayName,
                               roles: ["CUSTOMER"],
                               customerId: customer.id,
                               resend: Boolean(customer.portalUserSub),
-                            })
+                            }))
                           );
                           if (res?.refused) throw new Error(res.refused);
                         },
@@ -1158,11 +1159,11 @@ export default function CustomerDetail() {
                       "remind",
                       async () =>
                         unwrap(
-                          await api().mutations.sendCustomerEmail({
+                          await confirmedMutation(api().mutations.sendCustomerEmail({
                             customerId: customer.id,
                             kind: "portal-reminder",
                             idempotencyKey: clientActionId("portal-reminder"),
-                          })
+                          }))
                         ),
                       `Portal link emailed to ${customer.email}`
                     )
@@ -1210,9 +1211,9 @@ export default function CustomerDetail() {
                             if (!window.confirm("Cancel this plan's billing?")) return;
                             void run(`cancel-${p.id}`, async () =>
                               unwrap(
-                                await api().mutations.cancelSubscription({
+                                await confirmedMutation(api().mutations.cancelSubscription({
                                   servicePlanId: p.id,
-                                })
+                                }))
                               )
                             );
                           }}
@@ -1244,9 +1245,9 @@ export default function CustomerDetail() {
                               // announce monthly billing that never started.
                               async () =>
                                 opResultUnlessRefused(
-                                  await api().mutations.startSubscription({
+                                  await confirmedMutation(api().mutations.startSubscription({
                                     servicePlanId: p.id,
-                                  })
+                                  }))
                                 ),
                               `Billing started — ${money(p.priceCents)} every month`
                             );
@@ -1263,9 +1264,9 @@ export default function CustomerDetail() {
                           if (!window.confirm("Deactivate this plan? Billing pauses and no new visits are scheduled.")) return;
                           void run(`pause-${p.id}`, async () =>
                             opResultUnlessRefused(
-                              await api().mutations.pausePlan({
+                              await confirmedMutation(api().mutations.pausePlan({
                                 servicePlanId: p.id,
-                              })
+                              }))
                             )
                           );
                         }}
@@ -1282,9 +1283,9 @@ export default function CustomerDetail() {
                       onClick={() =>
                         void run(`resume-${p.id}`, async () =>
                           opResultUnlessRefused(
-                            await api().mutations.resumePlan({
+                            await confirmedMutation(api().mutations.resumePlan({
                               servicePlanId: p.id,
-                            })
+                            }))
                           )
                         )
                       }
@@ -1436,7 +1437,7 @@ export default function CustomerDetail() {
                             }
                             void run(`complete-${j.id}`, async () =>
                               unwrap(
-                                await api().mutations.completeJob({ jobId: j.id })
+                                await confirmedMutation(api().mutations.completeJob({ jobId: j.id }))
                               )
                             );
                           }}
@@ -1476,7 +1477,7 @@ export default function CustomerDetail() {
                               // — telling the office money is on its way when
                               // no charge was attempted at all.
                               const res = opResultUnlessRefused<{ status?: string }>(
-                                await api().mutations.chargeOneTimeJob({ jobId: j.id })
+                                await confirmedMutation(api().mutations.chargeOneTimeJob({ jobId: j.id }))
                               );
                               const collected =
                                 res?.status === "succeeded" || res?.status === "PAID";
@@ -1934,10 +1935,10 @@ export default function CustomerDetail() {
                               // refusal must not read as "Voided".
                               async () =>
                                 opResultUnlessRefused(
-                                  await api().mutations.voidInvoice({
+                                  await confirmedMutation(api().mutations.voidInvoice({
                                     invoiceId: inv.id,
                                     reason: reason.trim(),
-                                  })
+                                  }))
                                 ),
                               `Voided the ${money(inv.amountCents)} invoice`
                             );
@@ -1980,18 +1981,18 @@ export default function CustomerDetail() {
                 // command key, so it continues from the last confirmed step.
                 const res = opResult<{ partial?: boolean; message?: string }>(
                   cmd.action === "DEACTIVATE"
-                    ? await api().mutations.deactivateCustomer({
+                    ? await confirmedMutation(api().mutations.deactivateCustomer({
                         customerId: customer.id,
                         reasonCode: "OTHER",
                         note: "Resuming an unfinished transition",
                         idempotencyKey: cmd.id,
-                      })
-                    : await api().mutations.reactivateCustomer({
+                      }))
+                    : await confirmedMutation(api().mutations.reactivateCustomer({
                         customerId: customer.id,
                         reasonCode: "OTHER",
                         note: "Resuming an unfinished transition",
                         idempotencyKey: cmd.id,
-                      })
+                      }))
                 );
                 if (res?.partial) {
                   throw new Error(
@@ -2121,11 +2122,11 @@ export default function CustomerDetail() {
                   partial: boolean;
                   message?: string;
                 }>(
-                  await api().mutations.deactivateCustomer({
+                  await confirmedMutation(api().mutations.deactivateCustomer({
                     customerId: customer.id,
                     reasonCode: rc,
                     note,
-                  })
+                  }))
                 );
                 // A step didn't finish (a plan still billing, the portal login
                 // still live, or the status write didn't stick): the customer is
@@ -2224,11 +2225,11 @@ export default function CustomerDetail() {
                   state?: string;
                   message?: string;
                 }>(
-                  await api().mutations.reactivateCustomer({
+                  await confirmedMutation(api().mutations.reactivateCustomer({
                     customerId: customer.id,
                     reasonCode: rc,
                     note,
-                  })
+                  }))
                 );
                 if (res?.inProgress) {
                   throw new Error(
@@ -2273,7 +2274,7 @@ export default function CustomerDetail() {
             // on) comes back as a successful response. Read it, or the sheet
             // closes and reloads as though the edit had saved.
             opResultUnlessRefused(
-              await api().mutations.updateCustomerContact({
+              await confirmedMutation(api().mutations.updateCustomerContact({
                 customerId: customer.id,
                 displayName: v.displayName.trim(),
                 contactName: v.contactName.trim() || null,
@@ -2287,7 +2288,7 @@ export default function CustomerDetail() {
                 propertyClass: v.propertyClass || null,
                 leadSource: v.leadSource.trim() || null,
                 notes: v.notes.trim() || null,
-              })
+              }))
             );
             setSheet(null);
             await load();
@@ -2374,7 +2375,7 @@ export default function CustomerDetail() {
               catalogDecisionOpened?: boolean;
               message?: string;
             }>(
-              await api().mutations.createOfficeJob({
+              await confirmedMutation(api().mutations.createOfficeJob({
                 customerId: customer.id,
                 servicePlanId: v.servicePlanId || undefined,
                 serviceType: v.serviceType,
@@ -2391,7 +2392,7 @@ export default function CustomerDetail() {
                   ? v.packet.prepConfirmed
                   : undefined,
                 paymentExpectation: v.packet.paymentExpectation || undefined,
-              })
+              }))
             );
             if (result?.catalogDecisionOpened) {
               // GL-01: no job exists — the request is an owned catalog
@@ -2418,11 +2419,11 @@ export default function CustomerDetail() {
                 if (!freshCustomer) throw new Error("Customer details unavailable");
                 if (v.propertyClass !== freshCustomer.propertyClass) {
                   const saved = opResultUnlessRefused<{ customerId?: string }>(
-                    await api().mutations.updateCustomerContact({
+                    await confirmedMutation(api().mutations.updateCustomerContact({
                       customerId: customer.id,
                       displayName: freshCustomer.displayName,
                       propertyClass: v.propertyClass,
-                    })
+                    }))
                   );
                   if (saved?.customerId !== customer.id) {
                     throw new Error("Property default not confirmed");
@@ -2450,11 +2451,11 @@ export default function CustomerDetail() {
             // Another group change mid-flight refuses in words — surface them
             // rather than closing the sheet on a move that did not happen.
             opResultUnlessRefused(
-              await api().mutations.setCustomerGroup({
+              await confirmedMutation(api().mutations.setCustomerGroup({
                 reason,
                 customerId: customer.id,
                 groupId: groupId ?? undefined,
-              })
+              }))
             );
             setSheet(null);
             await load();
@@ -2629,11 +2630,11 @@ function RefundSheet({
 
   const refund = useAction(async () => {
     const res = opResult<{ refundedNowCents?: number; sentToStripe?: boolean }>(
-      await api().mutations.refundInvoice({
+      await confirmedMutation(api().mutations.refundInvoice({
         invoiceId: invoice.id,
         amountCents: cents,
         reason: reason.trim(),
-      })
+      }))
     );
     await onDone(
       res?.sentToStripe === false
@@ -2756,12 +2757,12 @@ function ChargeCardSheet({
   // the gate stops the second request being made at all.
   const charge = useAction(async () => {
     const res = opResult<{ status?: string }>(
-      await api().mutations.chargeManualAmount({
+      await confirmedMutation(api().mutations.chargeManualAmount({
         customerId: customer.id,
         amountCents: cents,
         description: description.trim(),
         idempotencyKey: idemToken,
-      })
+      }))
     );
     await onDone(
       res?.status === "succeeded"
@@ -3968,11 +3969,11 @@ function AmendReportForm({
         to: r.to.trim(),
       }));
     const data = opResult<{ deliveryStatus?: string | null }>(
-      await api().mutations.amendServiceReport({
+      await confirmedMutation(api().mutations.amendServiceReport({
         reportId: report.id,
         reason: reason.trim(),
         changes: JSON.stringify(changes),
-      })
+      }))
     );
     // The notice words come from the PERSISTED delivery state — an
     // issued-but-undelivered amendment is never called "sent".
@@ -4069,11 +4070,11 @@ function ReportDeliveryRecovery({
   const [busy, setBusy] = useState<null | "resend" | "alternate">(null);
 
   const record = useAction(async (action: "RESEND" | "ALTERNATE") => {
-    const res = await api().mutations.recordReportDelivery({
+    const res = await confirmedMutation(api().mutations.recordReportDelivery({
       reportId,
       action,
       note: note.trim() || undefined,
-    });
+    }));
     if (res.errors?.length) throw new Error(res.errors[0].message);
     await onDone();
   }, "Could not record delivery");
@@ -4401,7 +4402,7 @@ function JobPacketForm({
     // A packet edit refused because the visit closed under this sheet must not
     // read as a saved packet.
     opResultUnlessRefused(
-      await api().mutations.updateJobPacket({
+      await confirmedMutation(api().mutations.updateJobPacket({
         jobId: job.id,
         accessInstructions: packet.accessInstructions.trim() || undefined,
         hazardNotes: packet.hazardNotes.trim() || undefined,
@@ -4412,7 +4413,7 @@ function JobPacketForm({
         paymentExpectation: packet.paymentExpectation || undefined,
         propertyClass: propertyClass || undefined,
         managerReason: managerReason.trim() || undefined,
-      })
+      }))
     );
     await onDone();
   }, "Could not save the packet");
@@ -4554,7 +4555,7 @@ function PortalRequestsSection({ customerId }: { customerId: string }) {
   // it twice. `busyId` stays for the pressed row's spinner.
   const resolve = useAction(async (id: string, note: string) => {
     opResult(
-      await api().mutations.resolvePortalRequest({ portalRequestId: id, note })
+      await confirmedMutation(api().mutations.resolvePortalRequest({ portalRequestId: id, note }))
     );
     await loadRows();
   }, "Could not resolve");
@@ -4704,12 +4705,12 @@ function CallbacksSection({
   const schedule = useAction(async () => {
     if (!scheduling || !date || !technicianId) return;
     opResult(
-      await api().mutations.scheduleCallback({
+      await confirmedMutation(api().mutations.scheduleCallback({
         callbackRequestId: scheduling.id,
         scheduledDate: date,
         technicianId,
         customerRequestedLater: laterOk || undefined,
-      })
+      }))
     );
     setScheduling(null);
     setDate("");

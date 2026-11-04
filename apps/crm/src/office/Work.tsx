@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -160,7 +161,7 @@ export default function WorkQueue() {
       // verbatim: without this they collapse into the generic sentence below,
       // which says nothing about WHY and nothing about what to do instead.
       const result = opResultUnlessRefused(
-        await api().mutations.resendEmailLog({ emailLogId: item.relatedId! })
+        await confirmedMutation(api().mutations.resendEmailLog({ emailLogId: item.relatedId! }))
       ) as { resent?: boolean } | null;
       if (!result?.resent) {
         throw new Error(
@@ -287,7 +288,7 @@ export default function WorkQueue() {
       // second visit, which someone then has to cancel.
       await runOn(item, "Could not rebook the visit", async () => {
         const rebooked = opResult<{ jobId: string }>(
-          await api().mutations.rebookJob({ jobId: item.relatedId })
+          await confirmedMutation(api().mutations.rebookJob({ jobId: item.relatedId }))
         );
         if (!rebooked?.jobId) throw new Error("The visit was not rebooked");
         load();
@@ -310,9 +311,9 @@ export default function WorkQueue() {
       }
       await runOn(item, "Could not finish the booking", async () => {
         const res = opResult<{ status: string }>(
-          await api().mutations.retryBookingFinalization({
+          await confirmedMutation(api().mutations.retryBookingFinalization({
             bookingRequestId: item.relatedId,
-          })
+          }))
         );
         if (!res) throw new Error("The retry did not run");
         load();
@@ -334,9 +335,9 @@ export default function WorkQueue() {
       }
       await runOn(item, "Could not resume the cancellation", async () => {
         const res = opResult<{ status: string }>(
-          await api().mutations.resumePlanCancellation({
+          await confirmedMutation(api().mutations.resumePlanCancellation({
             servicePlanId: item.relatedId,
-          })
+          }))
         );
         if (!res) throw new Error("The resume did not run");
         load();
@@ -362,7 +363,7 @@ export default function WorkQueue() {
         // them — a refusal has no `outcome`, so it would otherwise pass the
         // check below and the case would silently look resumed.
         const res = opResultUnlessRefused<{ outcome?: string }>(
-          await api().mutations.resumeVisitChange({ jobId: item.relatedId })
+          await confirmedMutation(api().mutations.resumeVisitChange({ jobId: item.relatedId }))
         );
         if (!res) throw new Error("The resume did not run");
         load();

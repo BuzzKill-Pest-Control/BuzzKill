@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useEffect, useMemo, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
@@ -42,8 +43,8 @@ export default function CollectPaymentSheet({
     if (!open || !publishableKey) return;
     setClientSecret(null);
     setError(null);
-    api()
-      .mutations.createSetupIntent({ customerId })
+    confirmedMutation(api()
+      .mutations.createSetupIntent({ customerId }))
       .then((res) => {
         const data = opResult<{ clientSecret?: string }>(res);
         if (!data?.clientSecret) throw new Error("No client secret returned");

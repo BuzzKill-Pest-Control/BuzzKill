@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, opResult, type Customer } from "../lib/api";
 import { useRoles } from "../lib/auth";
 import { useAction } from "../lib/useAsync";
+import { confirmedMutation } from "../lib/queryCache";
 import {
   Button,
   Card,
@@ -127,7 +128,8 @@ type BookResult = {
 /** The createSetupIntent mutation carries the portal add-service actions too —
  *  `action` folds them onto this op so no new AppSync resource is spent. */
 function addServiceMutation() {
-  return api().mutations.createSetupIntent;
+  const mutate = api().mutations.createSetupIntent;
+  return (...args: Parameters<typeof mutate>) => confirmedMutation(mutate(...args));
 }
 
 export default function PortalAddService() {

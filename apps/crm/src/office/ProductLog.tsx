@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useState } from "react";
 import { api, listAll, opResult, type Product } from "../lib/api";
 import { useAction, useAsync } from "../lib/useAsync";
@@ -273,10 +274,10 @@ function ProductForm({
         trackInventory && parsedCost != null ? Math.round(parsedCost * 100) : null,
     };
     opResult(
-      await api().mutations.saveProduct({
+      await confirmedMutation(api().mutations.saveProduct({
         productId: existing?.id,
         ...fields,
-      })
+      }))
     );
     await onDone();
   }, "Could not save product");

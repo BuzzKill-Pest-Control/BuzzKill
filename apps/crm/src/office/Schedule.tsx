@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -144,7 +145,7 @@ export default function Schedule() {
       poolJobs: [...pool.values()],
       customers: new Map(customerList.map((c) => [c.id, c])),
     };
-  }, [weekStart], "Could not load schedule", { refreshOnResume: true, suspended: assigning !== null || busy !== null || showCapacity });
+  }, [weekStart], "Could not load schedule", { cacheKey: ["schedule", weekStart], refreshOnResume: true, suspended: assigning !== null || busy !== null || showCapacity });
   const { data, reload: load } = freshness;
   const techs = data?.techs ?? null;
   const routes = data?.routes ?? [];
@@ -165,11 +166,11 @@ export default function Schedule() {
     );
     if (existing) return existing;
     const created = unwrap(
-      await api().models.Route.create({
+      await confirmedMutation(api().models.Route.create({
         technicianId,
         date: day,
         status: "PLANNED",
-      })
+      }))
     );
     if (!created) throw new Error("Could not create route");
     return created;
@@ -194,7 +195,7 @@ export default function Schedule() {
     // the stop finished, or started, while this board sat open. Discarded, a
     // refusal would look exactly like a successful assignment.
     opResultUnlessRefused(
-      await api().mutations.updateJobSchedule({
+      await confirmedMutation(api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "ASSIGN",
         routeId: route.id,
@@ -203,7 +204,7 @@ export default function Schedule() {
         scheduledDate: selDate,
         // The board is the routing surface — its controlled reason IS routing.
         reasonCode: "ROUTING",
-      })
+      }))
     );
     setAssigning(null);
     await load();
@@ -235,7 +236,7 @@ export default function Schedule() {
   // visits to schedule for the same no-access record.
   const rebookAct = useAction(async (job: Job) => {
     setError(null);
-    opResult(await api().mutations.rebookJob({ jobId: job.id }));
+    opResult(await confirmedMutation(api().mutations.rebookJob({ jobId: job.id })));
     await load();
   }, "Could not rebook");
 
@@ -256,11 +257,11 @@ export default function Schedule() {
 
   const unassignAct = useAction(async (job: Job) => {
     opResultUnlessRefused(
-      await api().mutations.updateJobSchedule({
+      await confirmedMutation(api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "UNASSIGN",
         reasonCode: "ROUTING",
-      })
+      }))
     );
     await load();
   }, "Could not unassign");
@@ -288,13 +289,13 @@ export default function Schedule() {
   // pre-swap ordering wrote a sequence neither click asked for.
   const bumpAct = useAction(async (job: Job, swap: Job) => {
     opResultUnlessRefused(
-      await api().mutations.updateJobSchedule({
+      await confirmedMutation(api().mutations.updateJobSchedule({
         jobId: job.id,
         operation: "REORDER",
         routeOrder: swap.routeOrder ?? 0,
         otherJobId: swap.id,
         otherRouteOrder: job.routeOrder ?? 0,
-      })
+      }))
     );
     await load();
   }, "Could not reorder the stops");
@@ -828,28 +829,28 @@ function AvailabilityPanel({
   // `act()` helper; each is its own action so a PTO save that fails cannot be
   // erased by a closure that succeeds.
   const closeDay = useAction(async () => {
-    await models.CompanyClosure.create({
+    await confirmedMutation(models.CompanyClosure.create({
       id: date,
       date,
       reason: newClosure.trim(),
-    });
+    }));
     await refresh();
     setNewClosure("");
     setShowClosureForm(false);
   }, "The change did not save");
 
   const reopenDay = useAction(async () => {
-    await models.CompanyClosure.delete({ id: date });
+    await confirmedMutation(models.CompanyClosure.delete({ id: date }));
     await refresh();
   }, "The change did not save");
 
   const addPto = useAction(async () => {
-    await models.TechnicianDayException.create({
+    await confirmedMutation(models.TechnicianDayException.create({
       technicianId: ptoTech,
       date,
       kind: "PTO",
       reason: ptoReason.trim(),
-    });
+    }));
     await refresh();
     setPtoTech("");
     setPtoReason("");
@@ -858,7 +859,7 @@ function AvailabilityPanel({
 
   // Two clicks on Remove used to send two deletes for the same PTO row.
   const removePto = useAction(async (id: string) => {
-    await models.TechnicianDayException.delete({ id });
+    await confirmedMutation(models.TechnicianDayException.delete({ id }));
     await refresh();
   }, "The change did not save");
 

@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useEffect, useState } from "react";
 import {
   api,
@@ -695,12 +696,12 @@ function InviteForm({ onDone }: { onDone: () => Promise<void> }) {
   // adminCreateUser carries no idempotency key, so a double-click used to send
   // the same person two invite emails — and the second link kills the first.
   const send = useAction(async () => {
-    const res = await api().mutations.adminCreateUser({
+    const res = await confirmedMutation(api().mutations.adminCreateUser({
       email: email.trim(),
       name: name.trim(),
       roles: [...ROLE_CHOICES[role].groups],
       technicianId: technicianId || undefined,
-    });
+    }));
     if (res.errors?.length) throw new Error(res.errors[0].message);
     // A refusal is the server saying "no" in words meant for this screen (an
     // inactive or lapsed technician, a record already linked) — surface it

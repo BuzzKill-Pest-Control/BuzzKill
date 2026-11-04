@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useRef, useState } from "react";
 import { api, opResult, unwrap, type Customer } from "../lib/api";
 import { useAction } from "../lib/useAsync";
@@ -85,14 +86,14 @@ export default function CustomerDocuments({
     if (!put.ok) throw new Error(`Upload failed (${put.status})`);
 
     unwrap(
-      await api().mutations.recordCustomerDocument({
+      await confirmedMutation(api().mutations.recordCustomerDocument({
         customerId: customer.id,
         key: target.key,
         title: title.trim() || file.name,
         kind,
         contentType,
         sizeBytes: file.size,
-      })
+      }))
     );
     setTitle("");
     await onChanged();

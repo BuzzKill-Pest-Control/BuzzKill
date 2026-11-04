@@ -1,3 +1,4 @@
+import { confirmedMutation } from "../lib/queryCache";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, listAll, unwrap } from "../lib/api";
@@ -58,7 +59,7 @@ export default function Customers() {
         )
       ),
     };
-  }, [tab], "Could not load customers", { refreshOnResume: true, suspended: addingGroup });
+  }, [tab], "Could not load customers", { cacheKey: ["customers", tab], refreshOnResume: true, suspended: addingGroup });
   const { data: loaded, error, reload } = freshness;
 
   // Held rows belonging to a different tab are "not loaded yet" for this one,
@@ -202,12 +203,12 @@ function GroupForm({ onDone }: { onDone: () => Promise<void> }) {
       throw new Error("Group name is required");
     }
     unwrap(
-      await api().models.CustomerGroup.create({
+      await confirmedMutation(api().models.CustomerGroup.create({
         name: name.trim(),
         contactName: contactName.trim() || undefined,
         contactEmail: contactEmail.trim() || undefined,
         status: "ACTIVE",
-      })
+      }))
     );
     await onDone();
   }, "Could not create group");

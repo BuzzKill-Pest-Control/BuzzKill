@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type Location, type NavigateFunction } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Customers from "./Customers";
+import { queryCache } from "../lib/queryCache";
 import Leads from "./Leads";
 import Schedule from "./Schedule";
 import { activateNavigationOwner, writeNavigationValue } from "../lib/navigationMemory";
@@ -61,6 +62,7 @@ async function mount(path: string) {
 }
 
 beforeEach(() => {
+  queryCache.activate(null); queryCache.activate("alice", ["OWNER"]);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
@@ -85,6 +87,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  queryCache.activate(null);
   container.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -171,11 +174,49 @@ describe("remembered office navigation", () => {
     await input(search(), "dana@example.com");
     scrollY = 420;
     const before = mocks.byStatus.mock.calls.length;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 30_001);
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(mocks.byStatus).toHaveBeenCalledTimes(before + 1);
     expect(search().value).toBe("dana@example.com");
     expect(button("Inactive").className).toContain("seg-on");
     expect(scrollY).toBe(420);
+  });
+
+  it("reuses fresh customer rows on record Back and tab returns without another directory request", async () => {
+    await mount("/customers");
+    expect(container.textContent).toContain("ACTIVE customer");
+    await act(async () => button("Inactive").click());
+    expect(container.textContent).toContain("INACTIVE customer");
+    const reads = mocks.byStatus.mock.calls.length;
+    await go("/customers/inactive");
+    await go(-1);
+    expect(container.textContent).toContain("INACTIVE customer");
+    expect(mocks.byStatus).toHaveBeenCalledTimes(reads);
+    await act(async () => button("Active").click());
+    expect(container.textContent).toContain("ACTIVE customer");
+    expect(mocks.byStatus).toHaveBeenCalledTimes(reads);
+    await go("/other"); await go("/customers");
+    expect(container.textContent).toContain("ACTIVE customer");
+    expect(mocks.byStatus).toHaveBeenCalledTimes(reads);
+    expect(JSON.stringify(sessionStorage)).not.toContain("ACTIVE customer");
+  });
+
+  it("reuses the selected schedule week on record Back but reads a different week", async () => {
+    mocks.technicians.mockResolvedValue({ data: [{
+      id: "alex", name: "Cached technician", active: true,
+      licenseNumber: "example", licenseExpiresOn: "2030-01-01",
+    }], nextToken: null });
+    await mount("/schedule");
+    await input(container.querySelector('input[type="date"]')!, "2027-03-17");
+    const reads = mocks.technicians.mock.calls.length;
+    await go("/customers/active"); await go(-1);
+    expect(container.textContent).toContain("Cached technician");
+    expect(container.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe("2027-03-17");
+    expect(mocks.technicians).toHaveBeenCalledTimes(reads);
+    await act(async () => button("Next week ›").click());
+    expect(mocks.technicians).toHaveBeenCalledTimes(reads + 1);
+    await input(container.querySelector('input[type="date"]')!, "2027-03-17");
+    expect(mocks.technicians).toHaveBeenCalledTimes(reads + 1);
   });
 
   it("falls back safely for malformed saved filters and dates", async () => {
