@@ -280,15 +280,17 @@ async function suppress(input: {
   if (!("SuppressedEmail" in client.models)) return;
   const email = input.email.trim().toLowerCase();
   if (!email) return;
-  const { data: existing } = await client.models.SuppressedEmail.get({ email });
+  const { data: existing, errors: readErrors } = await client.models.SuppressedEmail.get({ email });
+  if (readErrors?.length) throw new Error("Email suppression status could not be read");
   if (existing) return; // already suppressed — keep the first reason/time
-  await client.models.SuppressedEmail.create({
+  const { errors } = await client.models.SuppressedEmail.create({
     email,
     reason: input.reason,
     source: input.source,
     relatedId: input.relatedId,
     suppressedAt: new Date().toISOString(),
   });
+  if (errors?.length) throw new Error("Email suppression could not be recorded");
 }
 
 async function handleBadAddress(input: {
