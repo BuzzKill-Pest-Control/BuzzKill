@@ -1,4 +1,6 @@
-import { assertBusinessActionsEnabled } from "../shared/migrationPreview";
+import { assertBusinessActionsEnabled, isMigrationPreview } from "../shared/migrationPreview";
+import { assertPreviewAdminChallenge, PREVIEW_ADMIN_CRM_ORIGIN, PREVIEW_ADMIN_FROM, type PreviewAdminLoginConfig } from "../shared/previewAdminLogin";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { VerifyAuthChallengeResponseTriggerHandler } from "aws-lambda";
 import {
@@ -8,6 +10,7 @@ import {
 import { sendEmail, emailShell } from "../shared/email";
 
 const cognito = new CognitoIdentityProviderClient();
+const previewSes = new SESClient();
 
 const LINK_TTL_MINUTES = 60;
 
@@ -35,14 +38,16 @@ export const REQUEST_LINK_ANSWER = "REQUEST_LINK";
 export const handler: VerifyAuthChallengeResponseTriggerHandler = async (
   event
 ) => {
-  assertBusinessActionsEnabled();
+  const previewAdmin = isMigrationPreview() ? assertPreviewAdminChallenge(event) : undefined;
+  if (!previewAdmin) assertBusinessActionsEnabled();
   const answer = event.request.challengeAnswer ?? "";
 
   if (answer === REQUEST_LINK_ANSWER) {
     await emailSignInLink(
       event.userPoolId,
       event.userName,
-      event.request.userAttributes.email
+      event.request.userAttributes.email,
+      previewAdmin
     );
     event.response.answerCorrect = false;
     return event;
@@ -80,7 +85,8 @@ export const handler: VerifyAuthChallengeResponseTriggerHandler = async (
 async function emailSignInLink(
   userPoolId: string,
   userName: string,
-  email: string
+  email: string,
+  previewAdmin?: PreviewAdminLoginConfig
 ) {
   const token = randomBytes(32).toString("base64url");
   const hash = createHash("sha256").update(token).digest("hex");
@@ -97,8 +103,24 @@ async function emailSignInLink(
     })
   );
 
-  const crmUrl = process.env.CRM_APP_URL ?? "";
+  const crmUrl = previewAdmin ? PREVIEW_ADMIN_CRM_ORIGIN : process.env.CRM_APP_URL ?? "";
   const link = `${crmUrl}/welcome#email=${encodeURIComponent(email)}&token=${token}`;
+  if (previewAdmin) {
+    // Isolated acceptance test only: no business outbox writes or customer
+    // messages. IAM independently limits this function to this one recipient.
+    const result = await previewSes.send(new SendEmailCommand({
+      Source: PREVIEW_ADMIN_FROM,
+      ConfigurationSetName: previewAdmin.configurationSet,
+      Destination: { ToAddresses: [previewAdmin.email] },
+      Message: {
+        Subject: { Data: "[Migration test] Your BuzzKill administrator sign-in link", Charset: "UTF-8" },
+        Body: { Text: { Data: `Sign in to the isolated BuzzKill migration preview: ${link}\nThis one-use link expires in ${LINK_TTL_MINUTES} minutes. Business actions remain disabled.`, Charset: "UTF-8" } },
+      },
+      Tags: [{ Name: "purpose", Value: "migration-admin-login" }],
+    }));
+    console.log("migration administrator login email accepted", { messageId: result.MessageId });
+    return;
+  }
   // GL-03: the sign-in link goes through the ONE email contract — outbox
   // record, suppression check, configuration set (bounce/complaint events),
   // and owned-work recovery — instead of a raw side-channel SES call that

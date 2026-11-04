@@ -159,7 +159,7 @@ async function stripeClient(): Promise<Stripe> {
   if (stripe) return stripe;
   const key = await getSecret("STRIPE_SECRET_KEY");
   if (!key) throw new Error("Stripe is not configured");
-  assertStripeKeyAllowed(key, process.env.AMPLIFY_BRANCH);
+  assertStripeKeyAllowed(key, process.env.BUZZKILL_BUSINESS_ENVIRONMENT ?? process.env.AMPLIFY_BRANCH);
   stripe = new Stripe(key);
   return stripe;
 }
