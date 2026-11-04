@@ -157,8 +157,8 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
   // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3093);
-  expect(allResources(bootstrap)).toHaveLength(2127);
+  expect(allResources(full)).toHaveLength(3094);
+  expect(allResources(bootstrap)).toHaveLength(2128);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(607);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1821);
@@ -204,9 +204,16 @@ it("retains and backs up the private projection, reuses Customer's stream and al
     expect(mappings).toHaveLength(1);
     expect(mappings[0].Properties).toMatchObject({ Enabled: assembly === released, BatchSize: 10, StartingPosition: "TRIM_HORIZON", FunctionResponseTypes: ["ReportBatchItemFailures"] });
     const alarms = resources.filter((r) => r.Type === "AWS::CloudWatch::Alarm" && String(r.Properties?.AlarmName).includes("customer-search-indexer"));
-    expect(alarms.map((r) => r.Properties?.MetricName).sort()).toEqual(["Errors", "IteratorAge", "Throttles"]);
+    expect(alarms.map((r) => r.Properties?.MetricName).sort()).toEqual(["Errors", "IteratorAge", "RecordFailures", "Throttles"]);
+    const recordFailures = alarms.find((r) => r.Properties?.MetricName === "RecordFailures")!;
+    expect(recordFailures.Properties).toMatchObject({ Namespace: "BuzzKill/CustomerSearch", Threshold: 1, EvaluationPeriods: 1, Period: 300, Statistic: "Sum", TreatMissingData: "notBreaching" });
+    const indexer = Object.values(assembly.templates).flatMap((t) => Object.entries(t.Resources)).find(([, r]) => r.Type === "AWS::Lambda::Function" && JSON.stringify(r.Properties?.Environment ?? {}).includes('"CUSTOMER_SEARCH_WORKER_ENABLED"'))!;
+    expect(recordFailures.Properties?.Dimensions).toEqual([{ Name: "FunctionName", Value: { Ref: indexer[0] } }]);
     expect(alarms.find((r) => r.Properties?.MetricName === "IteratorAge")?.Properties).toMatchObject({ Threshold: 600000, EvaluationPeriods: 2, TreatMissingData: "notBreaching" });
-    if (assembly === released) for (const alarm of alarms) expect(alarm.Properties?.AlarmActions).toBeDefined();
+    if (assembly === released) for (const alarm of alarms) {
+      expect(alarm.Properties?.AlarmActions).toBeDefined();
+      expect(alarm.Properties?.OKActions).toEqual(alarm.Properties?.AlarmActions);
+    }
   }
 });
 

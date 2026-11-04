@@ -29,6 +29,7 @@ import {
 } from "aws-cdk-lib/aws-sns-subscriptions";
 import {
   ComparisonOperator,
+  Metric,
   TreatMissingData,
 } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
@@ -62,6 +63,7 @@ import { googleSignIn } from "./functions/google-sign-in/resource";
 import { grantGoogleAccountLinking } from "./auth/google-account-linking";
 import { customerSearchIndexer } from "./functions/customer-search-indexer/resource";
 import { configureCustomerSearch } from "./customer-search-infrastructure";
+import { CUSTOMER_SEARCH_METRIC_NAMESPACE, CUSTOMER_SEARCH_RECORD_FAILURE_METRIC } from "./functions/shared/customerSearchMetrics";
 
 const migrationPreview = isMigrationPreview();
 const businessMode = businessEnvironment();
@@ -917,6 +919,17 @@ const monitored: [string, { resources: { lambda: import("aws-cdk-lib/aws-lambda"
   ["ses-events", backend.sesEvents],
   ["customer-search-indexer", backend.customerSearchIndexer],
 ];
+wireAlarm(new Metric({
+  namespace: CUSTOMER_SEARCH_METRIC_NAMESPACE, metricName: CUSTOMER_SEARCH_RECORD_FAILURE_METRIC,
+  dimensionsMap: { FunctionName: backend.customerSearchIndexer.resources.lambda.functionName },
+  period: Duration.minutes(5), statistic: "Sum",
+}).createAlarm(backend.customerSearchIndexer.resources.lambda.stack, "customer-search-indexer-record-failures", {
+  alarmName: `buzzkill-${branch}-customer-search-indexer-record-failures`,
+  alarmDescription: "Customer search indexing rejected stream records and will retry. Check worker permissions or conflicts; general search remains available.",
+  threshold: 1, evaluationPeriods: 1,
+  comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+  treatMissingData: TreatMissingData.NOT_BREACHING,
+}), alarmAction);
 wireAlarm(backend.customerSearchIndexer.resources.lambda
   .metric("IteratorAge", { period: Duration.minutes(5), statistic: "Maximum" })
   .createAlarm(backend.customerSearchIndexer.resources.lambda.stack, "customer-search-indexer-backlog", {

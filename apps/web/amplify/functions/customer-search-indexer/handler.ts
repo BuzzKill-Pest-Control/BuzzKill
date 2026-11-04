@@ -4,6 +4,7 @@ import type { DynamoDBStreamEvent, DynamoDBBatchResponse } from "aws-lambda";
 import { hash, INDEX_SOURCE_FIELDS } from "../shared/customerSearchIndex";
 import { indexWriter, synchronizeCustomer, type IndexWriter } from "../shared/customerIndexWriter";
 import { customerSearchDynamoClient as client, customerSourceTable, searchProjection } from "../shared/customerSearchStore";
+import { emitCustomerSearchRecordFailures } from "../shared/customerSearchMetrics";
 
 type BackfillCursor = { v: 1; binding: string; phase: "customers" | "manifests"; key: Record<string, string> | null };
 type BackfillEvent = { kind: "BACKFILL"; cursor?: string | null };
@@ -74,6 +75,7 @@ export async function handler(event: DynamoDBStreamEvent | BackfillEvent): Promi
       await synchronizeCustomer(id, writer);
     } catch { failures.push({ itemIdentifier: sequence }); }
   }
-  // No event, lookup key, source identity, image or provider exception is logged.
+  // Partial retries do not increment Lambda Errors. Emit only an aggregate, including healthy zeroes.
+  emitCustomerSearchRecordFailures(failures.length);
   return { batchItemFailures: failures };
 }

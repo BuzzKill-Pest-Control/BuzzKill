@@ -1,17 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import type { DynamoDBStreamEvent } from "aws-lambda";
 import { backfillPage, handler } from "./handler";
-const mocks = vi.hoisted(() => ({ source: vi.fn(), snapshot: vi.fn(), commit: vi.fn() }));
+const mocks = vi.hoisted(() => ({ source: vi.fn(), snapshot: vi.fn(), commit: vi.fn(), output: vi.fn() }));
 vi.mock("../shared/customerSearchStore", async (original) => ({ ...await original<typeof import("../shared/customerSearchStore")>(), customerSourceTable: mocks.source }));
 vi.mock("../shared/customerIndexWriter", async (original) => ({ ...await original<typeof import("../shared/customerIndexWriter")>(), indexWriter: () => ({ snapshot: mocks.snapshot, commit: mocks.commit }) }));
 beforeEach(() => {
   vi.clearAllMocks(); process.env.CUSTOMER_SEARCH_TABLE_NAME = "CustomerSearch-test";
   process.env.CUSTOMER_SEARCH_WORKER_ENABLED = "true"; process.env.BUZZKILL_MIGRATION_PREVIEW = "false";
+  process.env.AWS_LAMBDA_FUNCTION_NAME = "customer-search-indexer-test";
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { mocks.output(String(chunk)); return true; });
   mocks.source.mockResolvedValue("Customer-test-NONE");
   mocks.snapshot.mockResolvedValue({ source: null, manifest: null }); mocks.commit.mockResolvedValue(true);
 });
+afterEach(() => vi.restoreAllMocks());
 const writer = () => ({ snapshot: mocks.snapshot, commit: mocks.commit });
 const client = (send: ReturnType<typeof vi.fn>) => ({ send } as unknown as DynamoDBClient);
 describe("existing Customer stream maintenance", () => {
@@ -26,6 +29,25 @@ describe("existing Customer stream maintenance", () => {
     expect(mocks.commit).toHaveBeenCalledWith("good", { source: { id: "good", displayName: "Current" }, manifest: null });
     expect(mocks.snapshot).toHaveBeenCalledWith("next");
     expect(JSON.stringify(result)).not.toMatch(/private|bad|Current/);
+    expect(mocks.output).toHaveBeenCalledOnce();
+    const metric = JSON.parse(mocks.output.mock.calls[0][0]);
+    expect(metric).toEqual({
+      _aws: { Timestamp: expect.any(Number), CloudWatchMetrics: [{
+        Namespace: "BuzzKill/CustomerSearch", Dimensions: [["FunctionName"]],
+        Metrics: [{ Name: "RecordFailures", Unit: "Count" }],
+      }] },
+      FunctionName: "customer-search-indexer-test", RecordFailures: 1,
+    });
+    expect(mocks.output.mock.calls[0][0]).not.toMatch(/private|Stale|good|bad|next|Sequence|customerId/);
+  });
+  it("emits the rejected-record aggregate then healthy zero after recovery without identifiers or provider errors", async () => {
+    const event = { Records: ["private-customer-one", "private-customer-two"].map((id, i) => ({ dynamodb: { Keys: { id: { S: id } }, SequenceNumber: `private-sequence-${i}` } })) } as DynamoDBStreamEvent;
+    mocks.commit.mockRejectedValue(new Error("private provider exception"));
+    expect(await handler(event)).toEqual({ batchItemFailures: [{ itemIdentifier: "private-sequence-0" }, { itemIdentifier: "private-sequence-1" }] });
+    mocks.commit.mockResolvedValue(true);
+    expect(await handler(event)).toEqual({ batchItemFailures: [] });
+    expect(mocks.output.mock.calls.map(([line]) => JSON.parse(line).RecordFailures)).toEqual([2, 0]);
+    expect(JSON.stringify(mocks.output.mock.calls)).not.toMatch(/private|sequence|customerId|exception/);
   });
   it("refuses preview/disabled work before reads and bounds stream batches", async () => {
     process.env.BUZZKILL_MIGRATION_PREVIEW = "true";
@@ -33,6 +55,7 @@ describe("existing Customer stream maintenance", () => {
     process.env.BUZZKILL_MIGRATION_PREVIEW = "false"; process.env.CUSTOMER_SEARCH_WORKER_ENABLED = "false";
     await expect(handler({ kind: "BACKFILL" })).rejects.toThrow(/paused/);
     expect(mocks.source).not.toHaveBeenCalled(); expect(mocks.snapshot).not.toHaveBeenCalled();
+    expect(mocks.output).not.toHaveBeenCalled();
     process.env.CUSTOMER_SEARCH_WORKER_ENABLED = "true";
     await expect(handler({ Records: Array.from({ length: 11 }, () => ({})) } as DynamoDBStreamEvent)).rejects.toThrow(/invalid/);
   });
