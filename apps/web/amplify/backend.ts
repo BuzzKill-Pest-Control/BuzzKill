@@ -60,6 +60,8 @@ import { leadSweep } from "./functions/lead-sweep/resource";
 import { preToken } from "./functions/pre-token/resource";
 import { googleSignIn } from "./functions/google-sign-in/resource";
 import { grantGoogleAccountLinking } from "./auth/google-account-linking";
+import { customerSearchIndexer } from "./functions/customer-search-indexer/resource";
+import { configureCustomerSearch } from "./customer-search-infrastructure";
 
 const migrationPreview = isMigrationPreview();
 const businessMode = businessEnvironment();
@@ -86,6 +88,7 @@ const backend = defineBackend({
   leadSweep,
   preToken,
   googleSignIn,
+  customerSearchIndexer,
 });
 
 if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKILL_PREVIEW_ADMIN_LOGIN === "true") {
@@ -257,6 +260,17 @@ const dataApiIdParamPolicy = new PolicyStatement({
   actions: ["ssm:GetParameter"],
   resources: [`arn:aws:ssm:us-east-1:*:parameter${dataApiIdParamName}`],
 });
+const customerSearch = configureCustomerSearch({
+  customer: backend.data.resources.tables.Customer,
+  indexer: backend.customerSearchIndexer.resources.lambda,
+  reader: backend.crmAdmin.resources.lambda,
+  appId: lockAppId, branch: lockBranch, preview: migrationPreview, paused: workersPaused,
+});
+backend.crmAdmin.addEnvironment("CUSTOMER_SEARCH_TABLE_NAME", customerSearch.tableName);
+backend.customerSearchIndexer.addEnvironment("CUSTOMER_SEARCH_TABLE_NAME", customerSearch.tableName);
+backend.customerSearchIndexer.addEnvironment("CUSTOMER_SEARCH_WORKER_ENABLED", String(!migrationPreview));
+backend.customerSearchIndexer.resources.lambda.addToRolePolicy(dataApiIdParamPolicy);
+backend.customerSearchIndexer.addEnvironment("AMPLIFY_DATA_API_ID_PARAM", dataApiIdParamName);
 for (const fn of [
   backend.crmAdmin,
   backend.crmBilling,
@@ -901,7 +915,17 @@ const monitored: [string, { resources: { lambda: import("aws-cdk-lib/aws-lambda"
   ["lead-intake", backend.leadIntake],
   ["lead-sweep", backend.leadSweep],
   ["ses-events", backend.sesEvents],
+  ["customer-search-indexer", backend.customerSearchIndexer],
 ];
+wireAlarm(backend.customerSearchIndexer.resources.lambda
+  .metric("IteratorAge", { period: Duration.minutes(5), statistic: "Maximum" })
+  .createAlarm(backend.customerSearchIndexer.resources.lambda.stack, "customer-search-indexer-backlog", {
+    alarmName: `buzzkill-${branch}-customer-search-indexer-backlog`,
+    alarmDescription: "Customer search projection is over10minutes behind. Check the worker, then run its bounded full source/manifest backfill if events aged past24hours. General search remains complete.",
+    threshold: Duration.minutes(10).toMilliseconds(), evaluationPeriods: 2,
+    comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    treatMissingData: TreatMissingData.NOT_BREACHING,
+  }), alarmAction);
 for (const [name, fn] of monitored) {
 wireAlarm(
   fn.resources.lambda
@@ -1069,6 +1093,7 @@ backupPlan.addSelection("BuzzKillRetentionSelection", {
       `arn:aws:dynamodb:us-east-1:${backupStack.account}:table/*-${backend.data.resources.graphqlApi.apiId}-NONE`
     ),
     BackupResource.fromArn(docsBucket.bucketArn),
+    BackupResource.fromArn(customerSearch.table.tableArn),
   ],
 });
 

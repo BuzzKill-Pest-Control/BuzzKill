@@ -1,163 +1,155 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSyncIdentityCognito } from "aws-lambda";
 import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider";
-import {
-  CUSTOMER_SEARCH_FIELDS, SEARCH_MAX_EVALUATED, SEARCH_MAX_REQUESTS,
-  searchCustomers,
-} from "./customerDirectory";
+import { searchCustomers, SEARCH_MAX_EVALUATED, SEARCH_MAX_REQUESTS } from "./customerDirectory";
+import type { DirectoryStore, SourceKey } from "./customerSearchStore";
+import type { SearchRow } from "./customerSearchRecords";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn() }));
-vi.mock("./dataClient", () => ({ dataClient: async () => ({
-  models: { Customer: { listCustomerByStatusAndDisplayName: mocks.list } },
-}) }));
-
+const mocks = vi.hoisted(() => ({ factory: vi.fn() }));
+vi.mock("./customerSearchStore", () => ({ directoryStore: mocks.factory }));
+vi.mock("./dataClient", () => ({ dataClient: async () => ({ models: {} }) }));
 const identity = (sub = "alice", groups = ["OWNER"]) => ({ sub, groups } as AppSyncIdentityCognito);
 const row = (id: string, status = "ACTIVE") => ({
   id, status, displayName: `Shared ${id}`, email: `${id}@example.com`, phone: "+1 (508) 258-9294",
-  serviceStreet: "420 Lakeside Ave", serviceUnit: "104", serviceCity: "Marlborough",
-  serviceState: "MA", serviceZip: "01752", lostReason: status === "LEAD" ? "PRICE" : null,
-  notes: "private office notes", stripeCustomerId: "cus_private", billingStreet: "private billing",
-});
+  serviceStreet: "420 Lakeside Ave", serviceUnit: "104", serviceCity: "Marlborough", serviceState: "MA", serviceZip: "01752",
+  lostReason: status === "LEAD" ? "PRICE" : null, notes: "private notes", stripeCustomerId: "cus_private", billingStreet: "private billing",
+} as SearchRow);
+const key = (status: string, id: string): SourceKey => ({ status, id, displayName: `Shared ${id}` });
+function store(rows: SearchRow[] = []): DirectoryStore {
+  return { lookup: vi.fn(async () => []), page: vi.fn(async (status) => ({ ids: rows.filter((row) => row.status === status).map((row) => row.id), nextKey: null })),
+    current: vi.fn(async (ids) => rows.filter((row) => ids.includes(row.id))) };
+}
+beforeEach(() => mocks.factory.mockReset());
+afterEach(() => vi.restoreAllMocks());
 
-beforeEach(() => { mocks.list.mockReset(); });
-afterEach(() => { vi.restoreAllMocks(); });
-
-describe("bounded office customer search", () => {
-  it("searches lifecycle partitions and returns only contact/address facts and derived stage", async () => {
-    mocks.list.mockImplementation(async ({ status }) => ({ data: [row(status, status)], nextToken: null }));
-    const result = await searchCustomers({ query: "5082589294", limit: 10 }, identity());
+describe("indexed first chunk and complete bounded fallback", () => {
+  it("returns exact phone/name indexed hits immediately, verified against current facts", async () => {
+    const io = store([row("one")]);
+    vi.mocked(io.lookup).mockResolvedValue(["one", "one", "deleted"]);
+    const result = await searchCustomers({ query: "+1 (508) 258-9294" }, identity(), io);
+    expect(result.items.map((hit) => hit.id)).toEqual(["one"]);
+    expect(io.page).not.toHaveBeenCalled();
+    expect(result.nextToken).toBeTruthy();
+    expect(io.current).toHaveBeenCalledWith(["one", "deleted"]);
+    expect(JSON.stringify(result.items)).not.toMatch(/private notes|private billing|cus_private|lostReason/);
+  });
+  it("validates changed/deleted/merged index candidates and preserves DNC's current stage", async () => {
+    const io = store([{ ...row("changed"), phone: "9999999999" }, { ...row("merged"), mergedIntoId: "winner" }, { ...row("dnc", "LEAD"), doNotContact: true }]);
+    vi.mocked(io.lookup).mockResolvedValue(["changed", "merged", "deleted", "dnc"]);
+    const result = await searchCustomers({ query: "5082589294" }, identity(), io);
+    expect(result.items.map((item) => [item.id, item.leadStage])).toEqual([["dnc", "DNC"]]);
+    expect(io.page).not.toHaveBeenCalled();
+  });
+  it("finds every lifecycle and full address match even with an empty/not-yet-backfilled index", async () => {
+    const io = store([row("active"), row("inactive", "INACTIVE"), row("lost", "LEAD")]);
+    const result = await searchCustomers({ query: "420 lakeside 104 marlborough 01752", limit: 10 }, identity(), io);
     expect(result.items.map((item) => item.status)).toEqual(["ACTIVE", "INACTIVE", "LEAD"]);
     expect(result.items[2].leadStage).toBe("LOST");
     expect(result.nextToken).toBeNull();
-    expect(Object.keys(result.items[0]).sort()).toEqual([
-      "id", "displayName", "status", "contactName", "email", "phone", "serviceStreet",
-      "serviceUnit", "serviceCity", "serviceState", "serviceZip", "leadStage",
-    ].sort());
-    expect(JSON.stringify(result)).not.toMatch(/private office|cus_private|private billing|lostReason/);
-    for (const call of mocks.list.mock.calls) {
-      expect(call[1].selectionSet).toEqual(CUSTOMER_SEARCH_FIELDS);
-      expect(call[1].selectionSet).not.toContain("notes");
-      expect(call[1].selectionSet).not.toContain("stripeCustomerId");
-    }
   });
-
-  it("does bounded work even through empty pages and keeps an explicit continuation", async () => {
-    let next = 0;
-    const read = vi.fn(async (_status: string, _token: string | undefined, _limit: number) => ({ data: [], nextToken: `page-${++next}` }));
-    const first = await searchCustomers({ query: "Nobody", limit: 25 }, identity(), read);
-    expect(first.items).toEqual([]);
-    expect(first.nextToken).toBeTruthy();
-    expect(read).toHaveBeenCalledTimes(SEARCH_MAX_REQUESTS);
-    expect(read.mock.calls.reduce((total, call) => total + Number(call[2]), 0)).toBeLessThanOrEqual(SEARCH_MAX_EVALUATED);
-    const priorTokens = read.mock.calls.slice(-3).map((call) => call[1]);
-    await searchCustomers({ query: "Nobody", limit: 25, nextToken: first.nextToken }, identity(), read);
-    expect(read).toHaveBeenCalledTimes(SEARCH_MAX_REQUESTS * 2);
-    expect(read.mock.calls.slice(SEARCH_MAX_REQUESTS, SEARCH_MAX_REQUESTS + 3).map((call) => call[1]))
-      .not.toEqual(priorTokens);
+  it.each(["ResourceNotFoundException", "ProvisionedThroughputExceededException"])("degrades derived lookup %s to bounded source search", async (reason) => {
+    const io = store([row("one")]); let n = 0;
+    vi.mocked(io.lookup).mockRejectedValue(new Error(reason));
+    vi.mocked(io.page).mockImplementation(async (status) => ({ ids: status === "ACTIVE" ? ["one"] : [], nextKey: key(status, String(++n)) }));
+    const result = await searchCustomers({ query: "Shared" }, identity(), io);
+    expect(result.items.map((hit) => hit.id)).toEqual(["one"]);
+    expect(result.nextToken).toBeTruthy(); expect(io.page).toHaveBeenCalledTimes(6);
+    expect(io.current).toHaveBeenCalledWith(["one"]);
   });
-
-  it("bounds evaluated rows separately from request count for larger result limits", async () => {
-    let next = 0;
-    const read = vi.fn(async (_status: string, _token: string | undefined, _limit: number) => ({ data: [], nextToken: `page-${++next}` }));
-    const result = await searchCustomers({ query: "Nobody", limit: 50 }, identity(), read);
-    expect(result.nextToken).toBeTruthy();
-    expect(read.mock.calls.reduce((total, call) => total + Number(call[2]), 0)).toBe(150);
-    expect(read.mock.calls.length).toBeLessThan(SEARCH_MAX_REQUESTS);
-  });
-
-  it("never drops matches when a result limit cuts across source pages", async () => {
-    const groups = Object.fromEntries(["ACTIVE", "INACTIVE", "LEAD"].map((status) => [
-      status, Array.from({ length: 5 }, (_, i) => row(`${status}-${i}`, status)),
-    ]));
-    const read = vi.fn(async (status: string, token: string | undefined, limit: number) => {
-      const offset = Number(token ?? 0);
-      return {
-        data: groups[status].slice(offset, offset + limit),
-        nextToken: offset + limit < groups[status].length ? String(offset + limit) : null,
-      };
+  it("keeps fast seed exclusions throughout multiple fallback cursors without dropping unsearched index candidates", async () => {
+    const io = store([row("seed"), row("second"), row("third")]);
+    vi.mocked(io.lookup).mockResolvedValue(["seed"]);
+    vi.mocked(io.page).mockImplementation(async (status, after, limit) => {
+      if (status !== "ACTIVE") return { ids: [], nextKey: null };
+      const ids = after?.id === "seed" ? ["second"] : after?.id === "second" ? ["seed"] : after?.id === "third" ? [] : ["seed"];
+      if (after?.id === "seed-again") return { ids: ["third"], nextKey: null };
+      const next = ids[0] === "seed" ? key(status, after?.id === "second" ? "seed-again" : "seed") : key(status, "second");
+      expect(ids.length).toBeLessThanOrEqual(limit);
+      return { ids, nextKey: next };
     });
-    let token: string | null = null;
-    const ids: string[] = [];
-    do {
-      const page = await searchCustomers({ query: "Shared", limit: 2, nextToken: token }, identity(), read);
-      expect(page.items.length).toBeLessThanOrEqual(2);
-      ids.push(...page.items.map((item) => item.id));
-      token = page.nextToken;
-    } while (token);
-    expect(ids).toHaveLength(15);
-    expect(new Set(ids).size).toBe(15);
-    expect(read.mock.calls.every((call) => call[2] <= 2)).toBe(true);
+    const first = await searchCustomers({ query: "Shared", limit: 1 }, identity(), io);
+    const second = await searchCustomers({ query: "Shared", limit: 1, nextToken: first.nextToken }, identity(), io);
+    const third = await searchCustomers({ query: "Shared", limit: 1, nextToken: second.nextToken }, identity(), io);
+    expect([first, second, third].flatMap((page) => page.items.map((item) => item.id))).toEqual(["seed", "second", "third"]);
+    expect(io.lookup).toHaveBeenCalledOnce();
+    const decoded = JSON.parse(Buffer.from(second.nextToken!, "base64url").toString());
+    expect(decoded.seeds).toEqual(["seed"]);
   });
-
-  it("binds continuation to the lookup and caller before reading any rows", async () => {
-    let next = 0;
-    const read = vi.fn(async () => ({ data: [], nextToken: `page-${++next}` }));
-    const first = await searchCustomers({ query: "First lookup" }, identity(), read);
-    read.mockClear();
-    await expect(searchCustomers({ query: "Another lookup", nextToken: first.nextToken }, identity(), read)).rejects.toThrow(/continuation is invalid/);
-    await expect(searchCustomers({ query: "First lookup", nextToken: first.nextToken }, identity("bob"), read)).rejects.toThrow(/continuation is invalid/);
-    expect(read).not.toHaveBeenCalled();
+  it("bounds empty intermediate pages and returns continuation rather than false exhaustion", async () => {
+    const io = store();
+    let page = 0;
+    vi.mocked(io.page).mockImplementation(async (status) => ({ ids: [], nextKey: key(status, `page-${++page}`) }));
+    const result = await searchCustomers({ query: "Nobody", limit: 25 }, identity(), io);
+    expect(result.items).toEqual([]); expect(result.nextToken).toBeTruthy();
+    expect(io.page).toHaveBeenCalledTimes(SEARCH_MAX_REQUESTS);
+    expect(vi.mocked(io.page).mock.calls.reduce((sum, call) => sum + call[2], 0)).toBe(SEARCH_MAX_EVALUATED);
+    await searchCustomers({ query: "Nobody", nextToken: result.nextToken }, identity(), io);
+    expect(io.lookup).toHaveBeenCalledOnce();
+    expect(io.page).toHaveBeenCalledTimes(12);
   });
-
-  it.each([{ groups: ["TECH"] }, { groups: ["CUSTOMER"] }, { groups: ["TECH", "CUSTOMER"] }, { groups: [] }])("refuses non-office callers %o before data access", async ({ groups }) => {
-    const read = vi.fn();
-    await expect(searchCustomers({ query: "Shared" }, identity("outsider", groups), read)).rejects.toThrow(/Owner role required/);
-    expect(read).not.toHaveBeenCalled();
+  it("separately bounds evaluated source rows for larger result limits", async () => {
+    const io = store(); let n = 0;
+    vi.mocked(io.page).mockImplementation(async (status) => ({ ids: [], nextKey: key(status, String(++n)) }));
+    await searchCustomers({ query: "Nobody", limit: 50 }, identity(), io);
+    expect(io.page).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(io.page).mock.calls.reduce((sum, call) => sum + call[2], 0)).toBe(150);
   });
-
-  it.each([
-    { query: "" }, { query: "---" }, { query: "x".repeat(201) },
-    { query: "Shared", limit: 0 }, { query: "Shared", limit: 51 },
-    { query: "Shared", limit: 1.5 }, { query: "Shared", nextToken: "not a token" },
-  ])("rejects invalid input %o before data access", async (args) => {
-    const read = vi.fn();
-    await expect(searchCustomers(args, identity(), read)).rejects.toThrow();
-    expect(read).not.toHaveBeenCalled();
+  it("does not lose source matches where result limits cut across pages", async () => {
+    const rows = ["ACTIVE", "INACTIVE", "LEAD"].flatMap((status) => Array.from({ length: 5 }, (_, n) => row(`${status}-${n}`, status)));
+    const io = store(rows);
+    vi.mocked(io.page).mockImplementation(async (status, after, limit) => {
+      const partition = rows.filter((row) => row.status === status);
+      const offset = after ? partition.findIndex((row) => row.id === after.id) + 1 : 0;
+      const selected = partition.slice(offset, offset + limit);
+      return { ids: selected.map((row) => row.id), nextKey: offset + limit < partition.length ? key(status, selected.at(-1)!.id) : null };
+    });
+    let token: string | null = null; const ids: string[] = [];
+    do { const result = await searchCustomers({ query: "Shared", limit: 2, nextToken: token }, identity(), io); ids.push(...result.items.map((row) => row.id)); token = result.nextToken; } while (token);
+    expect(ids).toHaveLength(15); expect(new Set(ids).size).toBe(15);
   });
-
-  it("does not turn a failed page into partial success or advance the caller's token", async () => {
-    const read = vi.fn(async () => ({ data: [row("match")], errors: [{ message: "Unavailable" }], nextToken: "next" }));
-    await expect(searchCustomers({ query: "Shared" }, identity(), read)).rejects.toThrow("Unavailable");
-    expect(read).toHaveBeenCalledOnce();
+  it("rejects unverified/failed source work instead of advancing a caller's cursor", async () => {
+    const io = store([row("one")]);
+    vi.mocked(io.current).mockRejectedValue(new Error("Could not verify all results"));
+    await expect(searchCustomers({ query: "Shared" }, identity(), io)).rejects.toThrow(/verify/);
   });
-
-  it("enforces the office boundary through the real resolver handler", async () => {
-    const { handler } = await import("../crm-admin/handler");
-    await expect(handler({
-      fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared" }, identity: identity("tech", ["TECH"]),
-    } as never)).rejects.toThrow(/Owner role required/);
-    expect(mocks.list).not.toHaveBeenCalled();
+  it.each([{groups:["TECH"]}, {groups:["CUSTOMER"]}, {groups:["TECH", "CUSTOMER"]}, {groups:[]}])("refuses nonowners %o before any reads", async ({groups}) => {
+    const io = store(); await expect(searchCustomers({ query: "Shared" }, identity("outsider", groups), io)).rejects.toThrow(/Owner role required/);
+    expect(io.lookup).not.toHaveBeenCalled(); expect(io.page).not.toHaveBeenCalled();
   });
+  it.each([{ query: "" }, { query: "---" }, { query: "x".repeat(201) }, { query: "Shared", limit: 0 }, { query: "Shared", limit: 51 }, { query: "Shared", limit: 1.5 }, { query: "Shared", nextToken: "not valid" }])("rejects bad input before reads %o", async (args) => {
+    const io = store(); await expect(searchCustomers(args, identity(), io)).rejects.toThrow(); expect(io.page).not.toHaveBeenCalled();
+  });
+  it("binds versioned cursor to caller and query and validates source key/seed metadata", async () => {
+    const io = store(); let n = 0;
+    vi.mocked(io.page).mockImplementation(async (status) => ({ ids: [], nextKey: key(status, String(++n)) }));
+    const first = await searchCustomers({ query: "Shared" }, identity(), io);
+    vi.mocked(io.page).mockClear();
+    await expect(searchCustomers({ query: "Other", nextToken: first.nextToken }, identity(), io)).rejects.toThrow(/continuation is invalid/);
+    await expect(searchCustomers({ query: "Shared", nextToken: first.nextToken }, identity("bob"), io)).rejects.toThrow(/continuation is invalid/);
+    const saved = JSON.parse(Buffer.from(first.nextToken!, "base64url").toString());
+    for (const mutate of [(c: typeof saved) => c.v = 1, (c: typeof saved) => c.seeds = ["x", "x"], (c: typeof saved) => c.partitions[0].key = { id: "x", status: "ACTIVE", displayName: "x".repeat(1025) }, (c: typeof saved) => c.partitions[0].key.extra = "private"]) {
+      const corrupted = structuredClone(saved); mutate(corrupted);
+      await expect(searchCustomers({ query: "Shared", nextToken: Buffer.from(JSON.stringify(corrupted)).toString("base64url") }, identity(), io)).rejects.toThrow(/continuation is invalid/);
+    }
+    expect(io.page).not.toHaveBeenCalled();
+  });
+});
 
-  it.each([undefined, {}, { lookup: null, query: null, limit: null, nextToken: null }])("preserves the no-argument staff roster contract %o", async (args) => {
+describe("existing owner-only staffRoster query contract", () => {
+  it.each([undefined, {}, { lookup: null, query: null, limit: null, nextToken: null }])("preserves legacy roster arguments %o", async (args) => {
     const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send").mockResolvedValue({ Users: [] } as never);
     const { handler } = await import("../crm-admin/handler");
-    const result = await handler({ fieldName: "staffRoster", arguments: args, identity: identity() } as never);
-    expect(result).toMatchObject({ staff: [], generatedAt: expect.any(String) });
-    expect(send).toHaveBeenCalled();
-    expect(mocks.list).not.toHaveBeenCalled();
+    expect(await handler({ fieldName: "staffRoster", arguments: args, identity: identity() } as never)).toMatchObject({ staff: [], generatedAt: expect.any(String) });
+    expect(send).toHaveBeenCalled(); expect(mocks.factory).not.toHaveBeenCalled();
   });
-
-  it("only the explicit customer discriminator dispatches bounded lookup", async () => {
-    const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send");
-    mocks.list.mockImplementation(async ({ status }) => ({ data: [row(status, status)], nextToken: null }));
+  it("dispatches explicit customer mode only, keeping technician access forbidden", async () => {
+    const io = store([row("one")]); mocks.factory.mockReturnValue(io);
     const { handler } = await import("../crm-admin/handler");
-    const result = await handler({
-      fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared", limit: 5 }, identity: identity(),
-    } as never);
-    expect(result).toMatchObject({ items: expect.any(Array), nextToken: null });
-    expect(send).not.toHaveBeenCalled();
-    expect(mocks.list).toHaveBeenCalledTimes(3);
+    expect(await handler({ fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared" }, identity: identity() } as never)).toMatchObject({ items: [expect.objectContaining({ id: "one" })] });
+    await expect(handler({ fieldName: "staffRoster", arguments: { lookup: "CUSTOMERS", query: "Shared" }, identity: identity("tech", ["TECH"]) } as never)).rejects.toThrow(/Owner role required/);
   });
-
-  it.each([
-    { lookup: "OTHER" }, { lookup: "STAFF", query: "Shared" }, { query: "Shared" },
-    { nextToken: "cursor" }, { limit: 25 }, { lookup: "CUSTOMERS" },
-  ])("refuses invalid or mixed lookup args %o instead of returning staff", async (args) => {
-    const send = vi.spyOn(CognitoIdentityProviderClient.prototype, "send");
+  it.each([{ lookup: "OTHER" }, { query: "Shared" }, { nextToken: "cursor" }, { limit: 25 }, { lookup: "CUSTOMERS" }])("rejects mixed/invalid arguments %o", async (args) => {
     const { handler } = await import("../crm-admin/handler");
     await expect(handler({ fieldName: "staffRoster", arguments: args, identity: identity() } as never)).rejects.toThrow();
-    expect(send).not.toHaveBeenCalled();
-    expect(mocks.list).not.toHaveBeenCalled();
   });
 });
