@@ -25,6 +25,13 @@ vi.mock("react-router-dom", () => ({
 vi.mock("../lib/auth", () => ({
   useRoles: () => ({ owner: true, office: true, finance: true, loading: false, groups: [], sub: "owner-1" }),
 }));
+vi.mock("../lib/customerRecordReads", () => ({
+  readCustomerRecord: async () => (await mocks.customerGet()).data,
+  readCustomerEssentials: async () => [],
+  readCustomerPage: async () => ({ items: [], nextToken: null }),
+  readCustomerDocuments: async () => [], readReportAmendments: async () => [],
+  readLifecyclePage: async () => ({ items: [], nextToken: null }),
+}));
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
   const list = async () => ({ data: [], nextToken: null });
@@ -34,7 +41,7 @@ vi.mock("../lib/api", async (importOriginal) => {
   return {
     ...actual,
     api: () => ({
-      models: { ...models, Customer: { get: mocks.customerGet }, BookingRequest: { listBookingRequestByLeadCustomerId: list } },
+      models: { ...models, Customer: { get: mocks.customerGet }, CustomerLifecycleCommand: { listCustomerLifecycleCommandByCustomerIdAndRequestedAt: list }, BookingRequest: { listBookingRequestByLeadCustomerId: list } },
       queries: { getPaymentMethodSummary: async () => ({ data: JSON.stringify({ hasPaymentMethod: false, label: null }) }) },
       mutations: { createOfficeJob: mocks.createOfficeJob, updateCustomerContact: mocks.updateCustomerContact },
     }),

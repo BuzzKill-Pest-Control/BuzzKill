@@ -7,6 +7,13 @@ import Search from "./Search";
 import CustomerDetail from "./CustomerDetail";
 
 const mocks = vi.hoisted(() => ({ search: vi.fn(), get: vi.fn() }));
+vi.mock("../lib/customerRecordReads", () => ({
+  readCustomerRecord: async () => (await mocks.get()).data,
+  readCustomerEssentials: async () => [],
+  readCustomerPage: async () => ({ items: [], nextToken: null }),
+  readCustomerDocuments: async () => [], readReportAmendments: async () => [],
+  readLifecyclePage: async () => ({ items: [], nextToken: null }),
+}));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({
   owner: true, office: true, finance: true, loading: false, groups: [], sub: "owner-1",
 }) }));
@@ -20,7 +27,7 @@ vi.mock("../lib/api", async (original) => {
     ...actual,
     searchCustomers: mocks.search,
     api: () => ({
-      models: { ...models, Customer: { get: mocks.get }, BookingRequest: { listBookingRequestByLeadCustomerId: list } },
+      models: { ...models, Customer: { get: mocks.get }, CustomerLifecycleCommand: { listCustomerLifecycleCommandByCustomerIdAndRequestedAt: list }, BookingRequest: { listBookingRequestByLeadCustomerId: list } },
       queries: { getPaymentMethodSummary: async () => ({ data: JSON.stringify({ hasPaymentMethod: false, label: null }) }) },
     }),
     listCustomerLifecycleEvents: async () => ({ data: [], readFailed: false }),

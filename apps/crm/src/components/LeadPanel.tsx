@@ -1,5 +1,5 @@
 import { confirmedMutation } from "../lib/queryCache";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import {
   api,
   clientActionId,
@@ -20,8 +20,8 @@ import {
   LEAD_STAGE_LABEL,
   LEAD_STAGE_TONE,
 } from "../lib/leadStage";
-import { useAction } from "../lib/useAsync";
-import { Badge, Button, Card, ErrorNote, Field } from "../ui/kit";
+import { useAction, useAsync } from "../lib/useAsync";
+import { Badge, Button, Card, ErrorNote, Field, Spinner } from "../ui/kit";
 
 /**
  * The lead record is an exception-safe inbox, not a second sales system.
@@ -34,17 +34,18 @@ export default function LeadPanel({
   customer,
   onChanged,
   onAddJob,
+  canAddJob = true,
 }: {
   customer: Customer;
   onChanged: () => void | Promise<void>;
   onAddJob: () => void;
+  canAddJob?: boolean;
 }) {
   const roles = useRoles();
-  const [activity, setActivity] = useState<LeadActivity[] | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [preparedUrl, setPreparedUrl] = useState<string | null>(null);
   const [lostReason, setLostReason] = useState("");
-  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [activityQuery, setActivityQuery] = useState("");
   const [activityPage, setActivityPage] = useState(0);
   const [clearReason, setClearReason] = useState("CUSTOMER_RECONSENTED");
@@ -55,27 +56,12 @@ export default function LeadPanel({
     "MONTHLY" | "BIMONTHLY" | "QUARTERLY" | "SEMIANNUAL"
   >("MONTHLY");
 
-  const loadActivity = useCallback(async () => {
-    try {
-      setTimelineError(null);
-      const res = await listLeadActivity(customer.id);
-      setActivity(
-        (res.data ?? []).sort((a, b) =>
-          (b.occurredAt ?? "").localeCompare(a.occurredAt ?? "")
-        )
-      );
-    } catch (err) {
-      setActivity(null);
-      setTimelineError(
-        err instanceof Error ? err.message : "Lead history could not be read"
-      );
-    }
-  }, [customer.id]);
-
-
-  useEffect(() => {
-    void loadActivity();
-  }, [loadActivity]);
+  const timeline = useAsync<LeadActivity[] | null>(async () => {
+    if (!historyOpen) return null;
+    const result = await listLeadActivity(customer.id);
+    return result.data.sort((a, b) => (b.occurredAt ?? "").localeCompare(a.occurredAt ?? ""));
+  }, [customer.id, historyOpen], "Lead history could not be read");
+  const activity = timeline.data;
 
   // Every disposition mints its idempotency key with clientActionId at click
   // time, so a second click carries a NEW key and the server collapses
@@ -84,7 +70,7 @@ export default function LeadPanel({
   const disposition = useAction(async (fn: () => Promise<unknown>) => {
     await fn();
     await onChanged();
-    await loadActivity();
+    if (historyOpen) await timeline.reload();
   }, "That action did not complete");
 
   // `busy` stays as the key of the button that is working: the gate is a single
@@ -157,7 +143,7 @@ export default function LeadPanel({
             Confirm the service address on this record before scheduling.
             You can also use the website quote form with this lead's details filled in.
           </p>
-          <Button block onClick={onAddJob}>
+          <Button block disabled={!canAddJob} onClick={onAddJob}>
             Add job
           </Button>
           <Button
@@ -421,9 +407,11 @@ export default function LeadPanel({
         </p>
       )}
 
-      <details style={{ marginTop: 16 }}>
-        <summary className="small">Audit history ({activity?.length ?? 0})</summary>
-        <ErrorNote error={timelineError} />
+      <details style={{ marginTop: 16 }} open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+        <summary className="small">Audit history{activity ? ` (${activity.length})` : ""}</summary>
+        <ErrorNote error={timeline.error} />
+        {historyOpen && timeline.loading ? <Spinner /> : null}
+        {timeline.error ? <Button small onClick={() => void timeline.reload()}>Retry history</Button> : null}
         {activity ? (
           <div className="inline-actions" style={{ marginTop: 8 }}>
             <input

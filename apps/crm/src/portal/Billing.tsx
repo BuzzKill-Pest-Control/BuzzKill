@@ -9,7 +9,6 @@ import {
 } from "../lib/api";
 import { useRoles } from "../lib/auth";
 import { useAction } from "../lib/useAsync";
-import { readPaymentMethodSummary } from "../lib/paymentMethodSummary";
 import { fmtDate, money, todayEastern } from "../lib/format";
 import { daysPastDue } from "../lib/aging";
 import { isOverdue } from "../lib/recovery";
@@ -32,7 +31,7 @@ export default function PortalBilling() {
   const roles = useRoles();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [pm, setPm] = useState<Record<string, { hasPaymentMethod: boolean; label: string | null }>>({});
+  const [pm, setPm] = useState<Record<string, { hasPaymentMethod: boolean; label: string | null; needsRepair?: boolean }>>({});
   const [collectFor, setCollectFor] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -60,15 +59,12 @@ export default function PortalBilling() {
       );
       const summaries = await Promise.all(
         mine.map(async (c) => {
-          const res = await readPaymentMethodSummary(
-            api().queries.getPaymentMethodSummary({ customerId: c.id }),
-            c.paymentMethodLabel
-          );
+          const res = await api().queries.getPaymentMethodSummary({ customerId: c.id });
+          const summary = opResult<{ hasPaymentMethod: boolean; label: string | null; needsRepair?: boolean }>(res)
+            ?? { hasPaymentMethod: false, label: null };
           return [
             c.id,
-            opResult<{ hasPaymentMethod: boolean; label: string | null }>(
-              res
-            ) ?? { hasPaymentMethod: false, label: null },
+            summary.needsRepair ? { ...summary, hasPaymentMethod: false, label: null } : summary,
           ] as const;
         })
       );
@@ -164,7 +160,7 @@ export default function PortalBilling() {
               </p>
             ) : (
               <p style={{ marginBottom: 10 }}>
-                {summary.hasPaymentMethod
+                {summary.needsRepair ? "A saved payment method needs office attention before billing can use it. Update your payment method below or contact the office." : summary.hasPaymentMethod
                   ? summary.label
                   : "Add a card or bank account so service can be billed."}
               </p>
