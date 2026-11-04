@@ -15,6 +15,7 @@ import {
   recordNoticeAlternateDelivery,
 } from "../lib/api";
 import { toMessage, useAsync, useKeyedAction } from "../lib/useAsync";
+import RefreshStatus from "../components/RefreshStatus";
 import { useRoles } from "../lib/auth";
 import { fmtDateTime, money, todayUtc } from "../lib/format";
 import {
@@ -70,11 +71,7 @@ export default function WorkQueue() {
     [runKeyed]
   );
 
-  const {
-    data,
-    error: loadError,
-    reload: load,
-  } = useAsync<{ items: WorkItem[]; events: WorkEvent[] }>(
+  const freshness = useAsync<{ items: WorkItem[]; events: WorkEvent[] }>(
     async () => {
       const [work, history] = await Promise.all([
         listAll((t) => listWorkItems({ limit: 1000, nextToken: t })),
@@ -83,8 +80,24 @@ export default function WorkQueue() {
       return { items: work, events: history };
     },
     [],
-    "Could not load work queue"
+    "Could not load work queue",
+    { refreshOnResume: true, suspended: override !== null || perform.busyKey !== null }
   );
+  // Payments are an independent read: their provider/model failure must never
+  // hide the owned tasks the office needs to resolve it.
+  const paymentFreshness = useAsync(loadPaymentsInFlight, [], "Could not load payments in flight", {
+    refreshOnResume: true, suspended: override !== null || perform.busyKey !== null,
+  });
+  const { data, error: loadError } = freshness;
+  const { reload: reloadWork } = freshness;
+  const { reload: reloadPayments } = paymentFreshness;
+  const load = useCallback(async () => {
+    await Promise.all([reloadWork(), reloadPayments()]);
+  }, [reloadWork, reloadPayments]);
+  const refreshAll = () => {
+    freshness.refresh();
+    paymentFreshness.refresh();
+  };
   // A failed load used to fall through to the empty state beside its error,
   // rather than spinning forever — keep that.
   const items = data?.items ?? (loadError ? [] : null);
@@ -398,7 +411,9 @@ export default function WorkQueue() {
 
   return (
     <Page title="Owned work" back={roles.office ? "/dashboard" : "/more"}>
-      <PaymentsInFlight />
+      <RefreshStatus state={{ ...freshness, refresh: refreshAll }} label="owned work" />
+      <ErrorNote error={paymentFreshness.error ? `Payments in flight: ${paymentFreshness.error}` : null} />
+      <PaymentsInFlight rows={paymentFreshness.data ?? []} />
       <SegControl
         options={[
           { value: "OPEN" as Tab, label: `Open (${items.filter((i) => i.status === "OPEN").length})` },
@@ -727,43 +742,42 @@ export default function WorkQueue() {
  * only through the owned cases below).
  */
 
-export function PaymentsInFlight() {
-  // This tile has never surfaced a load failure — it simply renders nothing,
-  // which is what an unresolved `data` gives us too.
-  const { data: rows } = useAsync<BookingRequest[]>(
-    async () => {
-      const data = await listAll((t) =>
-        api().models.BookingRequest.list({
-          filter: {
-            or: [
-              { status: { eq: "PROCESSING" } },
-              { status: { eq: "PAYMENT_FAILED" } },
-            ],
-          },
-          limit: 500,
-          nextToken: t,
-        })
-      );
-      // Failed attempts age out of this operating view after two weeks —
-      // their money consequences live on as owned cases either way.
-      const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-      return data
-        .filter(
-          (b) =>
-            b.status === "PROCESSING" ||
-            !b.updatedAt ||
-            Date.parse(b.updatedAt) > cutoff
-        )
-        .sort((a, b) =>
-          (a.processingStartedAt ?? a.updatedAt ?? "").localeCompare(
-            b.processingStartedAt ?? b.updatedAt ?? ""
-          )
-        );
-    },
-    [],
-    "Could not load payments in flight"
+async function loadPaymentsInFlight(): Promise<BookingRequest[]> {
+  const pages = await Promise.all(
+    (["PROCESSING", "PAYMENT_FAILED"] as const).map((status) =>
+      listAll((nextToken) => api().models.BookingRequest.listBookingRequestByStatus(
+        { status }, { limit: 500, nextToken }
+      ))
+    )
   );
+  // A payment can move between the two eventually consistent index reads.
+  // Keep one copy of its newest observed state instead of showing it twice.
+  const byId = new Map<string, BookingRequest>();
+  for (const row of pages.flat()) {
+    const prior = byId.get(row.id);
+    if (!prior || (Date.parse(row.updatedAt ?? "") || 0) >= (Date.parse(prior.updatedAt ?? "") || 0)) {
+      byId.set(row.id, row);
+    }
+  }
+  // Failed attempts age out of this operating view after two weeks —
+  // their money consequences live on as owned cases either way.
+  const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  return [...byId.values()]
+    .filter(
+      (b) =>
+        b.status === "PROCESSING" ||
+        !b.updatedAt ||
+        Date.parse(b.updatedAt) > cutoff
+    )
+    .sort((a, b) =>
+      (a.processingStartedAt ?? a.updatedAt ?? "").localeCompare(
+        b.processingStartedAt ?? b.updatedAt ?? ""
+      )
+    );
 
+}
+
+export function PaymentsInFlight({ rows }: { rows: BookingRequest[] }) {
   if (!rows || rows.length === 0) return null;
   const today = todayUtc();
   const ageDays = (iso?: string | null) =>

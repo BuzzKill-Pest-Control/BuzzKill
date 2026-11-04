@@ -6,6 +6,7 @@ import {
   runGuarded,
   toMessage,
 } from "./asyncCore";
+import { useResumeRefresh } from "./useResumeRefresh";
 
 /**
  * The two hooks every screen in this app was hand-rolling.
@@ -35,10 +36,17 @@ export type AsyncState<T> = {
   loading: boolean;
   error: string | null;
   /** Re-run the loader. Safe to pass straight to onClick. */
-  reload: () => void;
+  reload: () => Promise<void>;
   /** Update in place after a mutation, instead of a full refetch. */
   setData: (next: T | null) => void;
+  /** User/resume refresh keeps existing rows and respects editing/writes. */
+  refresh: () => void;
+  lastUpdatedAt: number | null;
+  online: boolean;
+  refreshSuspended: boolean;
 };
+
+type LoadOptions = { refreshOnResume?: boolean; suspended?: boolean };
 
 /**
  * Load when `deps` change, with the stale-response guard applied.
@@ -49,16 +57,29 @@ export type AsyncState<T> = {
 export function useAsync<T>(
   load: () => Promise<T>,
   deps: unknown[],
-  fallbackMessage = "Could not load"
+  fallbackMessage = "Could not load",
+  options: LoadOptions = {}
 ): AsyncState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const guardRef = useRef(createRequestGuard());
+  const mounted = useRef(false);
+  const inFlight = useRef(false);
+  const suspended = useRef(options.suspended ?? false);
+  suspended.current = options.suspended ?? false;
   useEffect(() => {
-    const guard = guardRef.current;
-    return () => guard.dispose();
+    // React StrictMode replays setup/cleanup with the same refs. Each setup
+    // needs a new live guard; disposed guards keep earlier reads invalid.
+    const guard = createRequestGuard();
+    guardRef.current = guard;
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      guard.dispose();
+    };
   }, []);
 
   // Read from the latest render rather than from `deps`: callers write the
@@ -66,31 +87,51 @@ export function useAsync<T>(
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  const run = useCallback(() => {
+  const run = useCallback(async (background = false) => {
+    if (!mounted.current) return;
     const isCurrent = guardRef.current.begin();
+    inFlight.current = true;
     setError(null);
     setLoading(true);
-    void runGuarded(
+    await runGuarded(
       () => loadRef.current(),
       isCurrent,
       {
-        data: setData,
+        data: (value) => {
+          if (background && suspended.current) return;
+          setData(value);
+          setLastUpdatedAt(Date.now());
+        },
         error: setError,
-        settled: () => setLoading(false),
+        settled: () => {
+          inFlight.current = false;
+          setLoading(false);
+        },
       },
       fallbackMessage
     );
   }, [fallbackMessage]);
 
+  const reload = useCallback(() => run(), [run]);
+  const refresh = useCallback(() => {
+    if (suspended.current || inFlight.current || document.visibilityState === "hidden" || navigator.onLine === false) return;
+    void run(true);
+  }, [run]);
+  const online = useResumeRefresh(refresh, options.refreshOnResume === true);
+
   useEffect(() => {
     // Clear stale rows so the caller shows its spinner rather than the
     // previous selection's data while the new one is in flight.
     setData(null);
-    run();
+    setLastUpdatedAt(null);
+    void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  return { data, loading, error, reload: run, setData };
+  return {
+    data, loading, error, reload, setData, refresh, lastUpdatedAt, online,
+    refreshSuspended: options.suspended ?? false,
+  };
 }
 
 export type ActionState<A extends unknown[]> = {

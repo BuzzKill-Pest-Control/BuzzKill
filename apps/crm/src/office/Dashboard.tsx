@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   api,
@@ -41,7 +41,8 @@ import {
 } from "../lib/recovery";
 import { isLeadOpen } from "../lib/leadStage";
 import { useRoles } from "../lib/auth";
-import { useAction } from "../lib/useAsync";
+import { useAction, useAsync } from "../lib/useAsync";
+import RefreshStatus from "../components/RefreshStatus";
 import {
   Badge,
   Button,
@@ -57,6 +58,14 @@ import {
 } from "../ui/kit";
 
 type Period = "MONTH" | "LAST_MONTH" | "ALL";
+type DashboardData = {
+  invoices: Invoice[];
+  customers: Customer[];
+  plans: ServicePlan[];
+  jobs: Job[];
+  disputes: Dispute[];
+  bookings: BookingRequest[];
+};
 
 /**
  * Which financial tile is drilled open. The revenue keys break down the top
@@ -90,46 +99,35 @@ export default function Dashboard() {
   const roles = useRoles();
   const [period, setPeriod] = useState<Period>("MONTH");
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [invoices, setInvoices] = useState<Invoice[] | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [plans, setPlans] = useState<ServicePlan[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [disputes, setDisputes] = useState<Dispute[]>([]);
-  const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [depositingId, setDepositingId] = useState<string | null>(null);
   const [showDiscounts, setShowDiscounts] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [inv, cus, pl, jb, dp, bk] = await Promise.all([
-        listAll((t) => api().models.Invoice.list({ limit: 1000, nextToken: t })),
-        listAll((t) => api().models.Customer.list({ limit: 1000, nextToken: t })),
-        listAll((t) => api().models.ServicePlan.list({ limit: 1000, nextToken: t })),
-        listAll((t) => api().models.Job.list({ limit: 1000, nextToken: t })),
-        listAll((t) => listDisputes({ limit: 1000, nextToken: t })),
-        // Discounts live on BookingRequest (promoDiscountCents snapshot), not
-        // on invoices. Tolerate this list failing — a dashboard that can't say
-        // "discounts" should still say everything else.
-        listAll((t) =>
-          api().models.BookingRequest.list({ limit: 1000, nextToken: t })
-        ).catch(() => [] as BookingRequest[]),
-      ]);
-      setInvoices(inv);
-      setCustomers(cus);
-      setPlans(pl);
-      setJobs(jb);
-      setDisputes(dp);
-      setBookings(bk);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load dashboard");
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const freshness = useAsync<DashboardData>(async () => {
+    const [inv, cus, pl, jb, dp, bk] = await Promise.all([
+      listAll((t) => api().models.Invoice.list({ limit: 1000, nextToken: t })),
+      listAll((t) => api().models.Customer.list({ limit: 1000, nextToken: t })),
+      listAll((t) => api().models.ServicePlan.list({ limit: 1000, nextToken: t })),
+      listAll((t) => api().models.Job.list({ limit: 1000, nextToken: t })),
+      listAll((t) => listDisputes({ limit: 1000, nextToken: t })),
+      // Discounts live on BookingRequest (promoDiscountCents snapshot), not
+      // on invoices. Tolerate this list failing — a dashboard that can't say
+      // "discounts" should still say everything else.
+      listAll((t) =>
+        api().models.BookingRequest.list({ limit: 1000, nextToken: t })
+      ).catch(() => [] as BookingRequest[]),
+    ]);
+    return { invoices: inv, customers: cus, plans: pl, jobs: jb, disputes: dp, bookings: bk };
+  }, [], "Could not load dashboard", { refreshOnResume: true, suspended: assigningId !== null || depositingId !== null });
+  const { data, reload: load } = freshness;
+  const invoices = data?.invoices ?? null;
+  const customers = data?.customers ?? [];
+  const plans = data?.plans ?? [];
+  const jobs = data?.jobs ?? [];
+  const disputes = data?.disputes ?? [];
+  const bookings = data?.bookings ?? [];
+  const error = actionError ?? freshness.error;
 
   // Confirm a cash/cheque payment reached the bank. The server stamps the
   // actor and refuses Stripe-settled invoices; reload shows it gone from the
@@ -180,6 +178,7 @@ export default function Dashboard() {
   if (!invoices) {
     return (
       <Page title="Dashboard">
+        <RefreshStatus state={freshness} label="dashboard" />
         <ErrorNote error={error} />
         {error ? (
           <Button
@@ -369,6 +368,7 @@ export default function Dashboard() {
 
   return (
     <Page title="Dashboard">
+      <RefreshStatus state={freshness} label="dashboard" />
       <SegControl
         options={[
           { value: "MONTH" as Period, label: "This month" },

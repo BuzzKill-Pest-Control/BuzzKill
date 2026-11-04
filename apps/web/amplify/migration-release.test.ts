@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const complete = { auth: { user_pool_id: "us-east-1_NT4TiB2DQ" }, custom: { migrationPreview: true, migrationApiReady: true, migrationBackendAppId: "d3owdoeg1om341", migrationBackendBranch: "codex-buzzkill-account-migration", migrationAccountId: "743917687359" } };
+const scheduleIndex = { type: "key", properties: { name: "jobsByStatus", queryField: "listJobByStatus", fields: ["status"] } };
+const complete = { auth: { user_pool_id: "us-east-1_NT4TiB2DQ" }, custom: { migrationPreview: true, migrationApiReady: true, migrationBackendAppId: "d3owdoeg1om341", migrationBackendBranch: "codex-buzzkill-account-migration", migrationAccountId: "743917687359" }, data: { model_introspection: { models: { Job: { attributes: [scheduleIndex] } } } } };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function check(preview: boolean, bootstrap: boolean, outputs?: object, env: Record<string, string> = {}) {
@@ -69,4 +70,19 @@ it("binds ordinary Hosting main to the retained backend on both apps", () => {
   expect(check(false, false, live, { ...env, BUZZKILL_BACKEND_BRANCH: "" }).status).not.toBe(0);
   expect(check(false, false, { ...live, auth: { user_pool_id: "us-east-1_CyX0nNTre" } }, env).status).not.toBe(0);
   expect(check(false, false, { ...live, custom: { ...live.custom, migrationBackendBranch: "main" } }, env).status).not.toBe(0);
+});
+
+
+it.each([
+  { attributes: [] },
+  { attributes: [{ ...scheduleIndex, type: "model" }] },
+  { attributes: [{ ...scheduleIndex, properties: { ...scheduleIndex.properties, queryField: "listJobByStatusAndScheduledDate" } }] },
+  { attributes: [{ ...scheduleIndex, properties: { ...scheduleIndex.properties, fields: ["status", "scheduledDate"] } }] },
+  { attributes: [{ ...scheduleIndex, properties: { ...scheduleIndex.properties, fields: ["scheduledDate"] } }] },
+])("holds CRM release until outputs contain the exact status-only index: %o", ({ attributes }) => {
+  const live = { ...complete, custom: { ...complete.custom, migrationPreview: false }, data: { model_introspection: { models: { Job: { attributes } } } } };
+  const env = { AWS_APP_ID: "d2y2zigtl5rx3", BUZZKILL_BACKEND_APP_ID: "d3owdoeg1om341", BUZZKILL_SOURCE_ENVIRONMENT: "main" };
+  const result = check(false, false, live, env);
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain("status-only Job scheduling index");
 });

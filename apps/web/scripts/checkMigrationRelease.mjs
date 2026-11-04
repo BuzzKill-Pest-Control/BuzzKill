@@ -4,6 +4,19 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/** Require the complete, non-sparse scheduling pool query before CRM release. */
+export function assertScheduleIndexReady(outputs) {
+  const attributes = outputs?.data?.model_introspection?.models?.Job?.attributes;
+  const ready = Array.isArray(attributes) && attributes.some((attribute) =>
+    attribute?.type === "key" &&
+    attribute.properties?.queryField === "listJobByStatus" &&
+    Array.isArray(attribute.properties.fields) &&
+    attribute.properties.fields.length === 1 &&
+    attribute.properties.fields[0] === "status"
+  );
+  if (!ready) throw new Error("CRM outputs are missing the status-only Job scheduling index.");
+}
+
 /** Both apps must consume outputs from the same complete, account-bound backend. */
 export function assertMigrationReleaseReady(env, readOutputs) {
   if (env.BUZZKILL_MIGRATION_BOOTSTRAP === "true") {
@@ -44,6 +57,7 @@ export function assertMigrationReleaseReady(env, readOutputs) {
   if (outputs?.custom?.migrationPreview !== preview || outputs?.custom?.migrationApiReady !== true) {
     throw new Error("Migration API mode is not complete or does not match this frontend build.");
   }
+  if (env.AWS_APP_ID === "d2y2zigtl5rx3") assertScheduleIndexReady(outputs);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

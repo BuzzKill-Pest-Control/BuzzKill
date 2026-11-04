@@ -20,9 +20,10 @@ import {
 } from "../lib/format";
 import { assignBlockedNote, unassignBlockedNote } from "../lib/unassignStop";
 import { formatJobAppointmentTime } from "../lib/jobAppointment";
-import { useAction } from "../lib/useAsync";
+import { useAction, useAsync } from "../lib/useAsync";
 import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
 import { parseScheduleDate } from "../lib/navigationMemory";
+import RefreshStatus from "../components/RefreshStatus";
 import { technicianComplianceIssue } from "./technicians";
 import {
   Badge,
@@ -39,6 +40,13 @@ import {
 } from "../ui/kit";
 
 const DOW_LABEL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+type ScheduleData = {
+  techs: Technician[];
+  routes: Route[];
+  weekJobs: Job[];
+  poolJobs: Job[];
+  customers: Map<string, Customer>;
+};
 
 /**
  * The schedule: a list of technicians, each with their own week calendar.
@@ -52,107 +60,100 @@ export default function Schedule() {
   const navigate = useNavigate();
   const [selDate, setSelDate] = useRememberedView("schedule", parseScheduleDate, todayEastern);
   const weekStart = startOfWeek(selDate);
-  const [techs, setTechs] = useState<Technician[] | null>(null);
-  const [routes, setRoutes] = useState<Route[]>([]);
-  const [weekJobs, setWeekJobs] = useState<Job[]>([]);
-  const [poolJobs, setPoolJobs] = useState<Job[]>([]);
-  const [customers, setCustomers] = useState<Map<string, Customer>>(new Map());
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<Job | null>(null);
   const [showCapacity, setShowCapacity] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const thisWeekStart = startOfWeek(todayEastern());
+
+  const freshness = useAsync<ScheduleData>(async () => {
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    // Every indexed list is paged to exhaustion so the board and pool cannot
+    // drop stops past the first page. The status-only pool includes jobs
+    // without a date; the status/date index deliberately cannot do that. The
+    // week's jobs and routes are each loaded per day (there is no by-week
+    // index), so switching the focused day inside the week never refetches.
+    const [techList, routesByDay, jobsByDay, unscheduled, customerList] =
+      await Promise.all([
+        listAll((t) =>
+          api().models.Technician.list({ limit: 200, nextToken: t })
+        ),
+        Promise.all(
+          days.map((d) =>
+            listAll((t) =>
+              api().models.Route.listRouteByDate(
+                { date: d },
+                { limit: 200, nextToken: t }
+              )
+            )
+          )
+        ),
+        Promise.all(
+          days.map((d) =>
+            listAll((t) =>
+              api().models.Job.listJobByScheduledDate(
+                { scheduledDate: d },
+                { limit: 500, nextToken: t }
+              )
+            )
+          )
+        ),
+        listAll((t) =>
+          api().models.Job.listJobByStatus(
+            { status: "UNSCHEDULED" },
+            { limit: 500, nextToken: t }
+          )
+        ),
+        listAll((t) =>
+          api().models.Customer.list({ limit: 1000, nextToken: t })
+        ),
+      ]);
+    const inWeek = jobsByDay.flat().filter((j) => j.status !== "CANCELED");
+    // A no-access visit that has already been rebooked has handed its
+    // scheduling need to the new linked stop, so it must stop offering
+    // Rebook. The original is never mutated, so the only signal is a job
+    // pointing back at it via rebookedFromJobId — collect those originals
+    // and drop them from the pool (otherwise the same customer shows a
+    // Rebook row for the original AND an Assign row for its rebooking).
+    const rebookedOriginals = new Set<string>();
+    for (const j of [...inWeek, ...unscheduled]) {
+      if (j.rebookedFromJobId) rebookedOriginals.add(j.rebookedFromJobId);
+    }
+    // COMPLETED / IN_PROGRESS / CANCELED never belong in the pool. A
+    // NO_ACCESS visit does, but only to be rebooked — the render offers
+    // Rebook, not Assign — so it is let through the assign-blocked filter.
+    // Dated-but-unrouted stops anywhere in the week join the always-present
+    // UNSCHEDULED jobs; dedupe by id so a row can't appear twice.
+    const pool = new Map<string, Job>();
+    for (const j of inWeek) {
+      if (
+        !j.routeId &&
+        !rebookedOriginals.has(j.id) &&
+        (!assignBlockedNote(j.status) || j.status === "NO_ACCESS")
+      ) {
+        pool.set(j.id, j);
+      }
+    }
+    for (const j of unscheduled) pool.set(j.id, j);
+    return {
+      techs: techList.filter((t) => t.active),
+      routes: routesByDay.flat(),
+      weekJobs: inWeek,
+      poolJobs: [...pool.values()],
+      customers: new Map(customerList.map((c) => [c.id, c])),
+    };
+  }, [weekStart], "Could not load schedule", { refreshOnResume: true, suspended: assigning !== null || busy !== null || showCapacity });
+  const { data, reload: load } = freshness;
+  const techs = data?.techs ?? null;
+  const routes = data?.routes ?? [];
+  const weekJobs = data?.weekJobs ?? [];
+  const poolJobs = data?.poolJobs ?? [];
+  const customers = data?.customers ?? new Map<string, Customer>();
+  const error = actionError ?? freshness.error;
   // Switching days in a loaded technician card should keep that card in view.
   useRememberedScroll("schedule", techs !== null, weekStart);
-
-  const load = useCallback(async () => {
-    setError(null);
-    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    try {
-      // Every list is paged to exhaustion: a filtered scan counts the limit
-      // against rows scanned, not rows matched, so a single page can silently
-      // drop stops from the board and the pool past a few hundred jobs. The
-      // week's jobs and routes are each loaded per day (there is no by-week
-      // index), so switching the focused day inside the week never refetches.
-      const [techList, routesByDay, jobsByDay, unscheduled, customerList] =
-        await Promise.all([
-          listAll((t) =>
-            api().models.Technician.list({ limit: 200, nextToken: t })
-          ),
-          Promise.all(
-            days.map((d) =>
-              listAll((t) =>
-                api().models.Route.listRouteByDate(
-                  { date: d },
-                  { limit: 200, nextToken: t }
-                )
-              )
-            )
-          ),
-          Promise.all(
-            days.map((d) =>
-              listAll((t) =>
-                api().models.Job.listJobByScheduledDate(
-                  { scheduledDate: d },
-                  { limit: 500, nextToken: t }
-                )
-              )
-            )
-          ),
-          listAll((t) =>
-            api().models.Job.list({
-              filter: { status: { eq: "UNSCHEDULED" } },
-              limit: 500,
-              nextToken: t,
-            })
-          ),
-          listAll((t) =>
-            api().models.Customer.list({ limit: 1000, nextToken: t })
-          ),
-        ]);
-      setTechs(techList.filter((t) => t.active));
-      setRoutes(routesByDay.flat());
-      const inWeek = jobsByDay.flat().filter((j) => j.status !== "CANCELED");
-      setWeekJobs(inWeek);
-      // A no-access visit that has already been rebooked has handed its
-      // scheduling need to the new linked stop, so it must stop offering
-      // Rebook. The original is never mutated, so the only signal is a job
-      // pointing back at it via rebookedFromJobId — collect those originals
-      // and drop them from the pool (otherwise the same customer shows a
-      // Rebook row for the original AND an Assign row for its rebooking).
-      const rebookedOriginals = new Set<string>();
-      for (const j of [...inWeek, ...unscheduled]) {
-        if (j.rebookedFromJobId) rebookedOriginals.add(j.rebookedFromJobId);
-      }
-      // COMPLETED / IN_PROGRESS / CANCELED never belong in the pool. A
-      // NO_ACCESS visit does, but only to be rebooked — the render offers
-      // Rebook, not Assign — so it is let through the assign-blocked filter.
-      // Dated-but-unrouted stops anywhere in the week join the always-present
-      // UNSCHEDULED jobs; dedupe by id so a row can't appear twice.
-      const pool = new Map<string, Job>();
-      for (const j of inWeek) {
-        if (
-          !j.routeId &&
-          !rebookedOriginals.has(j.id) &&
-          (!assignBlockedNote(j.status) || j.status === "NO_ACCESS")
-        ) {
-          pool.set(j.id, j);
-        }
-      }
-      for (const j of unscheduled) pool.set(j.id, j);
-      setPoolJobs([...pool.values()]);
-      setCustomers(new Map(customerList.map((c) => [c.id, c])));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load schedule");
-    }
-  }, [weekStart]);
-
-  useEffect(() => {
-    setTechs(null);
-    void load();
-  }, [load]);
 
   /** Every technician has a daily route by default — created on first use. */
   const ensureRoute = async (
@@ -389,6 +390,7 @@ export default function Schedule() {
 
   return (
     <Page title="Schedule">
+      <RefreshStatus state={freshness} label="schedule" />
       <Card>
         <div className="row-split sched-weeknav">
           <Button

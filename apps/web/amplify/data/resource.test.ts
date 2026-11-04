@@ -211,3 +211,20 @@ describe("GL-13 technician least-privilege (SDL @auth)", () => {
     }
   });
 });
+
+
+describe("scheduling pool status index", () => {
+  it("keeps a status-only query alongside the existing status/date query", () => {
+    const sdl = schema.transform().schema;
+    const job = sdl.match(/type Job [^{]*\{[\s\S]*?\n\}/)?.[0];
+    expect(job).toBeDefined();
+    const status = job!.split("\n").find((line) => /^  status:/.test(line));
+    const indexes = [...status!.matchAll(/@index\(([^)]*)\)/g)].map((match) => match[1]);
+    const pool = indexes.find((index) => index.includes('queryField: "listJobByStatus"'));
+    expect(pool).toBeDefined();
+    expect(pool).not.toContain("sortKeyFields");
+    const dated = indexes.find((index) => index.includes('queryField: "listJobByStatusAndScheduledDate"'));
+    expect(dated).toContain('sortKeyFields: ["scheduledDate"]');
+    expect(job).toMatch(/^  scheduledDate: AWSDate(?: |$)/m);
+  });
+});
