@@ -246,6 +246,7 @@ export default function TechJob() {
   >([]);
 
   const [reportsUnavailable, setReportsUnavailable] = useState(false);
+  const [reportReadReady, setReportReadReady] = useState(false);
   const [catalogUnavailable, setCatalogUnavailable] = useState(false);
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
   const [lineageUnavailable, setLineageUnavailable] = useState(false);
@@ -255,6 +256,7 @@ export default function TechJob() {
   const [historyToken, setHistoryToken] = useState<string | null | undefined>(undefined);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [failedHistoryPages, setFailedHistoryPages] = useState<{ token: string | undefined; ids: string[] }[]>([]);
   const readGeneration = useRef(0);
   const historyGeneration = useRef(0);
   const activeJob = useRef(jobId);
@@ -267,6 +269,7 @@ export default function TechJob() {
     setCatalog([]); setPriorVisits([]); setLineage([]); setHistoryItems([]);
     setHistoryToken(undefined); setHistoryExpanded(false); setHistoryBusy(false);
     setHistoryError(null); setReportsUnavailable(false); setCatalogUnavailable(false);
+    setReportReadReady(false); setFailedHistoryPages([]);
     setHistoryUnavailable(false); setLineageUnavailable(false);
   }, []);
   const load = useCallback(async (currentOnly = false, refreshedReportId?: string) => {
@@ -282,13 +285,14 @@ export default function TechJob() {
       setJob(d.job); setPacketChanged(Boolean(d.packetChanged)); setOnsiteMinutes(d.onsiteMinutes ?? null);
       if (!d.customerUnavailable) setCustomer(d.customer);
       else if (contextChanged) setCustomer(null);
-      if (!d.reportsUnavailable) setReport(d.reports[0] ?? null);
-      else if (contextChanged) setReport(null);
+      if (!d.reportsUnavailable) { setReport(d.reports[0] ?? null); setReportReadReady(true); }
+      else if (contextChanged) { setReport(null); setReportReadReady(false); }
       setReportsUnavailable(Boolean(d.reportsUnavailable)); setTechRecord(d.technician as Technician | null);
       const allowed = d.historyAllowed !== false; setHistoryAllowed(allowed);
       if (!allowed || contextChanged) {
         historyGeneration.current++; setPriorVisits([]); setLineage([]); setHistoryItems([]); setCatalog([]);
         setHistoryExpanded(false); setHistoryToken(undefined); setHistoryBusy(false);
+        setFailedHistoryPages([]);
         if (contextChanged && currentOnly) setCatalogUnavailable(true);
         if (contextChanged) clearDraft(jobId);
       }
@@ -299,6 +303,7 @@ export default function TechJob() {
         const prior = allowed ? full.priorVisits ?? [] : [];
         setPriorVisits(prior.filter((h) => ["NO_ACCESS", "CANCELED", "COMPLETED"].includes(h.status)).slice(0, 4));
         setHistoryItems(prior); setHistoryToken(undefined); setHistoryExpanded(false);
+        setFailedHistoryPages([]);
         setCatalog(allowed ? (full.catalog ?? []).slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999) || a.name.localeCompare(b.name)) : []);
       }
       setError(d.customerUnavailable || !d.customer ? "Customer visit details are unavailable. Retry the job refresh." : null);
@@ -309,21 +314,32 @@ export default function TechJob() {
     }
   }, [jobId, clearContext]);
   const refreshCurrent = useCallback((refreshedReportId?: string) => load(true, refreshedReportId ?? report?.id), [load, report?.id]);
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (retryPage?: { token: string | undefined; ids: string[] }) => {
     if (!jobId || historyBusy || !historyAllowed) return;
     const generation = ++historyGeneration.current;
     const scope = queryCache.scope();
+    const pageToken = retryPage ? retryPage.token : historyToken ?? undefined;
     setHistoryBusy(true); setHistoryExpanded(true); setHistoryError(null);
     try {
-      const page = await technicianJobHistory(jobId, historyToken ?? undefined);
+      const page = await technicianJobHistory(jobId, pageToken);
       if (generation !== historyGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
       if (!page.historyAllowed) {
         setHistoryAllowed(false); setHistoryItems([]); setPriorVisits([]); setCatalog([]); setLineage([]); setHistoryToken(null);
+        setFailedHistoryPages([]);
       } else {
         setHistoryItems((prior) => [...new Map([...prior, ...page.priorVisits].map((row) => [row.id, row])).values()]
           .sort((a, b) => (b.scheduledDate ?? "0").localeCompare(a.scheduledDate ?? "0") || a.id.localeCompare(b.id)));
         setPriorVisits((prior) => prior.map((row) => page.priorVisits.find((updated) => updated.id === row.id) ?? row));
-        setHistoryToken(page.historyNextToken); setHistoryUnavailable(false);
+        const unavailable = page.priorVisits.filter((row) => row.findingsUnavailable).map((row) => row.id);
+        // Replay only failed pages, even after directory pagination reaches its
+        // final page. Missing retry rows remain unavailable, never recovered by omission.
+        const unresolved = [...new Set([...unavailable, ...(retryPage?.ids.filter((id) => !page.priorVisits.some((row) => row.id === id)) ?? [])])];
+        setFailedHistoryPages((prior) => [
+          ...prior.filter((entry) => entry.token !== pageToken),
+          ...(unresolved.length ? [{ token: pageToken, ids: unresolved }] : []),
+        ]);
+        if (!retryPage) setHistoryToken(page.historyNextToken);
+        setHistoryUnavailable(false);
       }
     } catch (err) {
       if (generation !== historyGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
@@ -678,6 +694,9 @@ export default function TechJob() {
           {!historyExpanded || historyToken !== null ? <Button small loading={historyBusy} onClick={() => void loadHistory()}>
             {historyExpanded ? historyError ? "Retry visit history" : "Load more visits" : "Open visit history"}
           </Button> : null}
+          {failedHistoryPages.length ? <Button small loading={historyBusy} onClick={() => void loadHistory(failedHistoryPages[0])}>
+            Retry treatment findings
+          </Button> : null}
         </Card>
       ) : null}
       {reportsUnavailable || catalogUnavailable ? <Card>
@@ -803,7 +822,7 @@ export default function TechJob() {
           </div>
           <ReportPhotos report={report} readOnly onChanged={refreshCurrent} />
         </Card>
-      ) : job.status === "IN_PROGRESS" || job.status === "COMPLETED" || report ? (
+      ) : reportReadReady && (job.status === "IN_PROGRESS" || job.status === "COMPLETED" || report) ? (
         <fieldset disabled={reportsUnavailable || catalogUnavailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}><ReportForm
           key={`${job.id}:${job.customerId}:${techRecord?.id ?? "office"}`}
           job={job}

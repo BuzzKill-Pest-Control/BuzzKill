@@ -150,3 +150,45 @@ it("an old-login draft save cannot continue finalization or clear a new-login ph
   expect(container.querySelector("textarea")!.value).toBe("New login unsaved words");
   expect([...savedStorage.values()].join(" ")).toContain("New login unsaved words");
 });
+it("waits for a successful first report read, then edits the recovered draft's fields and ID", async () => {
+  const recovered = { ...report, id: "existing-draft", servicesPerformed: "Recovered server words" };
+  mocks.full.mockResolvedValue(fixture({ reports: [], reportsUnavailable: true }));
+  mocks.current.mockResolvedValue(current({ reports: [recovered] }));
+  mocks.save.mockResolvedValue({ data: JSON.stringify({ reportId: recovered.id }) });
+  await mount();
+  expect(container.querySelector("textarea")).toBeNull();
+  expect([...container.querySelectorAll("button")].some((node) => node.textContent?.trim() === "Save draft")).toBe(false);
+  await act(async () => button("Retry job refresh").click());
+  expect(container.querySelector("textarea")!.value).toBe("Recovered server words");
+  await act(async () => button("Save draft").click());
+  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ reportId: "existing-draft", servicesPerformed: "Recovered server words" }));
+});
+it("preserves an already mounted editor and its unsaved typing through a later unavailable report read", async () => {
+  mocks.current.mockResolvedValueOnce(current({ reports: [], reportsUnavailable: true })).mockResolvedValue(current());
+  await mount(); await type("Keep this mounted editor");
+  const editor = container.querySelector("textarea");
+  await act(async () => button("I've read the change — acknowledge").click());
+  expect(container.querySelector("textarea")).toBe(editor);
+  expect(container.querySelector("textarea")!.value).toBe("Keep this mounted editor");
+  await act(async () => button("Retry job refresh").click());
+  expect(container.querySelector("textarea")).toBe(editor);
+  await act(async () => button("Save draft").click());
+  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ reportId: "draft", servicesPerformed: "Keep this mounted editor" }));
+});
+it("retries unavailable final-page findings without erasing loaded history or restarting pagination", async () => {
+  const first = { id: "first-page", status: "CANCELED", serviceType: "Keep earlier loaded visit", scheduledDate: "2026-09-01" };
+  const last = { ...recent, id: "final-page", serviceType: "Final page treatment" };
+  mocks.full.mockResolvedValue(fixture({ priorVisits: [] }));
+  mocks.history.mockResolvedValueOnce({ historyPage: true, historyAllowed: true, priorVisits: [first], historyNextToken: "final-token" })
+    .mockResolvedValueOnce({ historyPage: true, historyAllowed: true, priorVisits: [last], historyNextToken: null })
+    .mockResolvedValueOnce({ historyPage: true, historyAllowed: true, priorVisits: [{ ...last, findingsUnavailable: false, findings: { servicesPerformed: "Recovered final-page findings" } }], historyNextToken: null });
+  await mount(); await act(async () => button("Open visit history").click());
+  await act(async () => button("Load more visits").click());
+  expect(container.textContent).toContain("Treatment findings unavailable");
+  expect([...container.querySelectorAll("button")].some((node) => node.textContent?.trim() === "Load more visits")).toBe(false);
+  await act(async () => button("Retry treatment findings").click());
+  expect(mocks.history.mock.calls).toEqual([["job", undefined], ["job", "final-token"], ["job", "final-token"]]);
+  expect(container.textContent).toContain("Keep earlier loaded visit"); expect(container.textContent).toContain("Recovered final-page findings");
+  expect(container.textContent).not.toContain("Treatment findings unavailable");
+  expect([...container.querySelectorAll("button")].some((node) => node.textContent?.trim() === "Retry treatment findings")).toBe(false);
+});
