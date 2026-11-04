@@ -338,6 +338,38 @@ function ReportAmendments({ reportId, revision }: { reportId: string; revision: 
 type RecordResource = "customer" | "plans" | "jobs" | "invoices" | "agreements" | "reports" | "documents" | "lifecycle" | "payment";
 const ESSENTIAL_RESOURCES: RecordResource[] = ["customer", "plans", "jobs", "invoices", "lifecycle"];
 
+/** Instantiated once per record/login. Verified absence is cached; a failed
+ * lookup stays missing. One queue bounds overlapping history-page requests. */
+function createHistoryGroupLookup(read: (id: string) => Promise<CustomerGroup | null>, current: () => boolean, open: () => boolean) {
+  const values = new Map<string, CustomerGroup | null>();
+  const pending = new Map<string, Promise<CustomerGroup | null>>();
+  const queue: (() => Promise<void>)[] = [];
+  let active = 0;
+  const drain = () => { while (active < 4 && queue.length) void queue.shift()!(); };
+  const lookup = (id: string) => {
+    if (values.has(id)) return Promise.resolve(values.get(id)!);
+    const held = pending.get(id); if (held) return held;
+    let resolve!: (value: CustomerGroup | null) => void, reject!: (error: unknown) => void;
+    const promise = new Promise<CustomerGroup | null>((yes, no) => { resolve = yes; reject = no; });
+    pending.set(id, promise);
+    queue.push(async () => {
+      active++;
+      try {
+        if (!current() || !open()) throw new Error("Open this record's history to verify group names.");
+        const row = await read(id);
+        if (!current()) throw new Error("This record changed before group names could be verified.");
+        values.set(id, row); resolve(row);
+      } catch (error) { reject(error); }
+      finally { pending.delete(id); active--; queueMicrotask(drain); }
+    });
+    drain(); return promise;
+  };
+  return async (ids: string[]) => {
+    const rows = await Promise.all(ids.map(lookup));
+    return rows.filter((row): row is CustomerGroup => row !== null);
+  };
+}
+
 function CustomerRecord() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -434,10 +466,15 @@ function CustomerRecord() {
     const match = /^group:\s*(.*?)\s*→\s*(.*?)$/i.exec(event.effects ?? "");
     return match ? match.slice(1).filter((value) => value && value.toLowerCase() !== "none") : [];
   }))].sort().join("\n");
+  const lifecycleOpen = useRef(lifecycleRead.open); lifecycleOpen.current = lifecycleRead.open;
+  const historyGroupLookup = useRef<ReturnType<typeof createHistoryGroupLookup> | null>(null);
+  if (!historyGroupLookup.current) historyGroupLookup.current = createHistoryGroupLookup(
+    async (groupId) => unwrap(await api().models.CustomerGroup.get({ id: groupId })), isCurrent, () => lifecycleOpen.current
+  );
   const historyGroupsRead = useAsync(async () => {
     if (!lifecycleRead.open || !historyGroupIds) return { ids: historyGroupIds, verified: lifecycleRead.open, rows: [] as CustomerGroup[] };
-    const rows = await Promise.all(historyGroupIds.split("\n").map(async (groupId) => unwrap(await api().models.CustomerGroup.get({ id: groupId }))));
-    return { ids: historyGroupIds, verified: true, rows: rows.filter((row) => row !== null) };
+    const rows = await historyGroupLookup.current!(historyGroupIds.split("\n"));
+    return { ids: historyGroupIds, verified: true, rows };
   }, [recordKey, lifecycleRead.open, historyGroupIds], "Historical customer group names could not be verified");
   const historyGroupsCurrent = historyGroupsRead.data?.verified === true && historyGroupsRead.data.ids === historyGroupIds && !historyGroupsRead.loading && !historyGroupsRead.error;
   const groups = [...new Map([...(groupRead.data ? [groupRead.data] : []), ...(historyGroupsCurrent ? historyGroupsRead.data!.rows : []), ...(rosterRead.data ?? [])].map((group) => [group.id, group])).values()];

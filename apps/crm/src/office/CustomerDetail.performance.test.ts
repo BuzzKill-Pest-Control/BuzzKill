@@ -131,17 +131,65 @@ describe("independent customer essentials and explicit history", () => {
     await act(async () => pending.reject(new Error("Amendment refresh unavailable")));
     expect(container.textContent).toContain("Amendment refresh unavailable"); expect(container.textContent).not.toContain("No amendments.");
   });
-  it("does not classify referenced groups as archived while a reopened history is verifying their names", async () => {
+  it("reuses verified names on reopen without transiently classifying groups as archived", async () => {
     const summaries = vi.spyOn(await import("../lib/customerPresentation"), "groupChangeSummary");
     mocks.history.mockResolvedValue({ items: [{ id: "event", action: "GROUP_CHANGE", effects: "group: old → new", occurredAt: "2026-10-01T12:00:00Z" }], nextToken: null });
     await mount(); await open("Lifecycle history"); expect(container.textContent).toContain("Changed from Group old to Group new");
     await open("Lifecycle history", false); summaries.mockClear();
-    const pending = deferred<void>();
-    mocks.group.mockImplementation(async ({ id }) => { await pending.promise; return { data: { id, name: `Recovered ${id}` } }; });
-    await open("Lifecycle history"); expect(container.textContent).toContain("Group names are not yet verified.");
+    mocks.group.mockRejectedValue(new Error("Verified names should be reused"));
+    await open("Lifecycle history"); expect(container.textContent).toContain("Changed from Group old to Group new");
     // Observe every attempted summary, including the first commit before passive effects.
     expect(summaries.mock.results.some((result) => String(result.value).includes("archived"))).toBe(false);
-    await act(async () => pending.resolve()); expect(container.textContent).toContain("Changed from Recovered old to Recovered new");
+    expect(mocks.group).toHaveBeenCalledTimes(2);
+  });
+  it.each(["route", "login"])("fetches only new history group IDs and scopes verified results to the %s", async (transition) => {
+    const event = (id: string, from: string, to: string) => ({ id, action: "GROUP_CHANGE", effects: `group: ${from} → ${to}`, occurredAt: "2026-10-01T12:00:00Z" });
+    mocks.history.mockImplementation(async (_customer, token) => token ? { items: [event("later", "new", "third")], nextToken: null } : { items: [event("first", "old", "new")], nextToken: "later" });
+    await mount(); await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(2);
+    await act(async () => button("Load more lifecycle history").click());
+    expect(mocks.group.mock.calls.map(([value]) => value.id).sort()).toEqual(["new", "old", "third"]);
+    expect(container.textContent).toContain("Changed from Group new to Group third");
+    await open("Lifecycle history", false); await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(3);
+    if (transition === "route") { mocks.params.id = "other"; await mount(); }
+    else { await act(async () => { queryCache.activate(null); queryCache.activate("owner", ["OWNER"]); }); }
+    expect(mocks.group).toHaveBeenCalledTimes(3); await open("Lifecycle history");
+    expect(mocks.group).toHaveBeenCalledTimes(5);
+  });
+  it("caches verified nulls while failed group IDs remain unverified and retry only the missing lookup", async () => {
+    mocks.history.mockResolvedValue({ items: [{ id: "event", action: "GROUP_CHANGE", effects: "group: good → missing", occurredAt: "2026-10-01T12:00:00Z" }], nextToken: null });
+    mocks.group.mockImplementation(async ({ id }) => id === "good" ? { data: { id, name: "Verified group" } } : { data: null, errors: [{ message: "Group lookup unavailable" }] });
+    await mount(); await open("Lifecycle history"); expect(container.textContent).toContain("Group lookup unavailable");
+    expect(container.textContent).toContain("Group names are not yet verified."); expect(container.textContent).not.toContain("archived group");
+    mocks.group.mockResolvedValue({ data: null }); await act(async () => button("Retry historical group names").click());
+    expect(mocks.group.mock.calls.map(([value]) => value.id)).toEqual(["good", "missing", "missing"]);
+    expect(container.textContent).toContain("Changed from Verified group to an archived group");
+    await open("Lifecycle history", false); await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(3);
+  });
+  it("bounds overlapping history-page lookups to four and deduplicates IDs already pending", async () => {
+    const events = (start: number) => Array.from({ length: 6 }, (_, index) => ({ id: `event-${start + index}`, action: "GROUP_CHANGE", effects: `group: none → g${start + index}`, occurredAt: "2026-10-01T12:00:00Z" }));
+    mocks.history.mockImplementation(async (_customer, token) => ({ items: events(token ? 6 : 0), nextToken: token ? null : "later" }));
+    let active = 0, maximum = 0;
+    const waiting: { id: string; done: ReturnType<typeof deferred<{ data: { id: string; name: string } }>> }[] = [];
+    mocks.group.mockImplementation(({ id }) => {
+      active++; maximum = Math.max(maximum, active); const done = deferred<{ data: { id: string; name: string } }>();
+      waiting.push({ id, done }); return done.promise.finally(() => { active--; });
+    });
+    await mount(); await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(4);
+    await act(async () => button("Load more lifecycle history").click()); expect(mocks.group).toHaveBeenCalledTimes(4);
+    for (let batch = 0; batch < 3; batch++) await act(async () => {
+      for (const { id, done } of waiting.splice(0)) done.resolve({ data: { id, name: `Group ${id}` } });
+    });
+    expect(mocks.group).toHaveBeenCalledTimes(12); expect(new Set(mocks.group.mock.calls.map(([value]) => value.id)).size).toBe(12);
+    expect(maximum).toBe(4); expect(active).toBe(0); expect(container.textContent).not.toContain("Group names are not yet verified.");
+  });
+  it("does not start queued group lookups after the login ends or reuse old completions in a new login", async () => {
+    mocks.history.mockResolvedValue({ items: Array.from({ length: 8 }, (_, index) => ({ id: `event-${index}`, action: "GROUP_CHANGE", effects: `group: none → g${index}`, occurredAt: "2026-10-01T12:00:00Z" })), nextToken: null });
+    const pending = deferred<{ data: null }>(); mocks.group.mockReturnValue(pending.promise);
+    await mount(); await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(4);
+    await act(async () => { queryCache.activate(null); queryCache.activate("owner", ["OWNER"]); });
+    await act(async () => pending.resolve({ data: null })); expect(mocks.group).toHaveBeenCalledTimes(4);
+    mocks.group.mockImplementation(async ({ id }) => ({ data: { id, name: `New login ${id}` } }));
+    await open("Lifecycle history"); expect(mocks.group).toHaveBeenCalledTimes(12); expect(container.textContent).not.toContain("archived group");
   });
   it("does not infer an unassigned group while its independent reference is pending or unreadable", async () => {
     const pending = deferred<{ data: unknown; errors?: { message: string }[] }>();
