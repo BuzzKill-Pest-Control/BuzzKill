@@ -21,6 +21,8 @@ import {
 import { assignBlockedNote, unassignBlockedNote } from "../lib/unassignStop";
 import { formatJobAppointmentTime } from "../lib/jobAppointment";
 import { useAction } from "../lib/useAsync";
+import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
+import { parseScheduleDate } from "../lib/navigationMemory";
 import { technicianComplianceIssue } from "./technicians";
 import {
   Badge,
@@ -48,8 +50,8 @@ const DOW_LABEL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
  */
 export default function Schedule() {
   const navigate = useNavigate();
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(todayEastern()));
-  const [selDate, setSelDate] = useState(todayEastern());
+  const [selDate, setSelDate] = useRememberedView("schedule", parseScheduleDate, todayEastern);
+  const weekStart = startOfWeek(selDate);
   const [techs, setTechs] = useState<Technician[] | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [weekJobs, setWeekJobs] = useState<Job[]>([]);
@@ -62,6 +64,8 @@ export default function Schedule() {
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const thisWeekStart = startOfWeek(todayEastern());
+  // Switching days in a loaded technician card should keep that card in view.
+  useRememberedScroll("schedule", techs !== null, weekStart);
 
   const load = useCallback(async () => {
     setError(null);
@@ -391,7 +395,6 @@ export default function Schedule() {
             small
             variant="ghost"
             onClick={() => {
-              setWeekStart(addDays(weekStart, -7));
               setSelDate(addDays(selDate, -7));
             }}
           >
@@ -408,7 +411,6 @@ export default function Schedule() {
                   small
                   variant="subtle"
                   onClick={() => {
-                    setWeekStart(thisWeekStart);
                     setSelDate(todayEastern());
                   }}
                 >
@@ -421,13 +423,23 @@ export default function Schedule() {
             small
             variant="ghost"
             onClick={() => {
-              setWeekStart(addDays(weekStart, 7));
               setSelDate(addDays(selDate, 7));
             }}
           >
             Next week ›
           </Button>
         </div>
+        <Field label="Go to date">
+          <input
+            type="date"
+            aria-label="Schedule date"
+            value={selDate}
+            onChange={(e) => {
+              const date = parseScheduleDate(e.target.value);
+              if (date) setSelDate(date);
+            }}
+          />
+        </Field>
       </Card>
 
       <ErrorNote

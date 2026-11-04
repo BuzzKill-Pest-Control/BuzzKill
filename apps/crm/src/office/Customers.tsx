@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, listAll, unwrap } from "../lib/api";
 import { useAction, useAsync } from "../lib/useAsync";
+import { useRememberedScroll, useRememberedView } from "../lib/useRememberedView";
+import { parseCustomersView, type CustomersView } from "../lib/navigationMemory";
 import {
   rowsForTab,
   type CustomersLoaded,
@@ -23,11 +25,12 @@ import {
 } from "../ui/kit";
 
 type Tab = CustomersTab;
+const initialCustomersView = (): CustomersView => ({ tab: "ACTIVE", query: "" });
 
 export default function Customers() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("ACTIVE");
-  const [query, setQuery] = useState("");
+  const [{ tab, query }, setView] = useRememberedView("customers", parseCustomersView, initialCustomersView);
+  const setTab = (next: Tab) => setView((current) => ({ ...current, tab: next }));
   const [addingGroup, setAddingGroup] = useState(false);
 
   // The stale-response guard this screen used to hand-roll now lives in
@@ -63,6 +66,7 @@ export default function Customers() {
   // which the existing `!customers` / `!groups` branches already render as a
   // Spinner. No cast anywhere: the tag does the narrowing.
   const { customers, groups } = rowsForTab(loaded, tab);
+  useRememberedScroll("customers", customers !== null || groups !== null, JSON.stringify([tab, query]));
 
   const q = query.trim().toLowerCase();
   const filtered = (customers ?? []).filter(
@@ -104,7 +108,7 @@ export default function Customers() {
           <input
             placeholder="Search name, city, email…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setView((current) => ({ ...current, query: e.target.value }))}
           />
           {!customers ? (
             <Spinner />
