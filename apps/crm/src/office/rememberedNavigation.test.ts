@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   owner: "alice",
   auth: null as null | ((event: { payload: { event: string } }) => void),
   byStatus: vi.fn(),
+  technicians: vi.fn(),
 }));
 vi.mock("aws-amplify/utils", () => ({ Hub: { listen: (_: string, listener: typeof mocks.auth) => { mocks.auth = listener; } } }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ sub: mocks.owner, owner: true, office: true, finance: true, groups: [] }) }));
@@ -20,7 +21,7 @@ vi.mock("../lib/api", async (original) => {
   const list = async () => ({ data: [], nextToken: null });
   return { ...actual, api: () => ({ models: {
     Customer: { listCustomerByStatusAndDisplayName: mocks.byStatus, list },
-    CustomerGroup: { list }, Technician: { list }, Route: { listRouteByDate: list },
+    CustomerGroup: { list }, Technician: { list: mocks.technicians }, Route: { listRouteByDate: list },
     Job: { listJobByScheduledDate: list, list },
   } }) };
 });
@@ -63,6 +64,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   sessionStorage.clear();
   mocks.owner = "alice";
+  mocks.technicians.mockReset().mockResolvedValue({ data: [], nextToken: null });
   mocks.byStatus.mockReset().mockImplementation(async ({ status }: { status: string }) => ({
     data: status === "LEAD" ? [
       { id: "new", status, displayName: "New lead", leadOwnerSub: "alice" },
@@ -137,6 +139,28 @@ describe("remembered office navigation", () => {
     expect(container.textContent).toContain("Showing Wednesday, March 17");
     await act(async () => button("Next week ›").click());
     expect(container.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe("2027-03-24");
+  });
+
+  it("keeps a technician in view when selecting another day of the loaded week", async () => {
+    mocks.technicians.mockResolvedValue({ data: [{
+      id: "alex", name: "Alex", active: true,
+      licenseNumber: "example", licenseExpiresOn: "2030-01-01",
+    }], nextToken: null });
+    await mount("/schedule");
+    await input(container.querySelector('input[type="date"]')!, "2027-03-17");
+    const reads = mocks.technicians.mock.calls.length;
+    scrollY = 720;
+    const thursday = container.querySelectorAll<HTMLButtonElement>('[aria-label="Alex week"] button')[3];
+    await act(async () => thursday.click());
+    expect(container.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe("2027-03-18");
+    expect(scrollY).toBe(720);
+    expect(mocks.technicians).toHaveBeenCalledTimes(reads);
+    await go("/customers/active");
+    await go(-1);
+    expect(scrollY).toBe(720);
+    expect(container.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe("2027-03-18");
+    await act(async () => button("Next week ›").click());
+    expect(scrollY).toBe(0);
   });
 
   it("falls back safely for malformed saved filters and dates", async () => {

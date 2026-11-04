@@ -64,7 +64,8 @@ export default function Schedule() {
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const thisWeekStart = startOfWeek(todayEastern());
-  useRememberedScroll("schedule", techs !== null, selDate);
+  // Switching days in a loaded technician card should keep that card in view.
+  useRememberedScroll("schedule", techs !== null, weekStart);
 
   const load = useCallback(async () => {
     setError(null);
