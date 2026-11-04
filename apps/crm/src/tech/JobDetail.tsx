@@ -1,4 +1,4 @@
-import { confirmedMutation } from "../lib/queryCache";
+import { confirmedMutation, queryCache } from "../lib/queryCache";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { COMMON_UNITS } from "../../../web/amplify/functions/shared/units";
 import { displayAddress, routingAddress } from "../lib/serviceAddress";
@@ -7,6 +7,8 @@ import {
   api,
   opResult,
   technicianJob,
+  technicianJobCurrent,
+  technicianJobHistory,
   type Customer,
   type Job,
   type Product as CatalogProduct,
@@ -63,6 +65,9 @@ type ProductRow = {
   pestTouched?: boolean;
 };
 type Geo = { lat: number; lng: number; accuracyM: number; capturedAt: string };
+function assertLogin(scope: string) {
+  if (scope !== queryCache.writeScope()) throw new Error("Your sign-in changed. Reload this job before continuing.");
+}
 
 /**
  * What this phone keeps if the battery dies mid-report (R12) — the exact UI
@@ -123,6 +128,19 @@ function parseProducts(raw: unknown): ProductRow[] {
   } catch {
     return [];
   }
+}
+
+function VisitFindings({ visit }: { visit: TechnicianJobDetail["priorVisits"][number] }) {
+  const facts = visit.findings;
+  return <>
+    {visit.findingsUnavailable ? <p className="muted small">Treatment findings unavailable — retry visit history.</p> : null}
+    {facts ? <p className="muted small" style={{ marginLeft: 24 }}>{[
+      facts.servicesPerformed ? `did: ${facts.servicesPerformed}` : null,
+      facts.areasTreated ? `areas: ${facts.areasTreated}` : null,
+      facts.targetPests ? `pests: ${facts.targetPests}` : null,
+      facts.recommendations ? `recommended: ${facts.recommendations}` : null,
+    ].filter(Boolean).join(" · ")}</p> : null}
+  </>;
 }
 
 /** The units the amount dropdown offers — the set the inventory converter
@@ -227,74 +245,97 @@ export default function TechJob() {
     NonNullable<TechnicianJobDetail["lineage"]>
   >([]);
 
-  const load = useCallback(async () => {
+  const [reportsUnavailable, setReportsUnavailable] = useState(false);
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
+  const [lineageUnavailable, setLineageUnavailable] = useState(false);
+  const [historyAllowed, setHistoryAllowed] = useState(true);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historyItems, setHistoryItems] = useState<TechnicianJobDetail["priorVisits"]>([]);
+  const [historyToken, setHistoryToken] = useState<string | null | undefined>(undefined);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const readGeneration = useRef(0);
+  const historyGeneration = useRef(0);
+  const activeJob = useRef(jobId);
+  activeJob.current = jobId;
+  const contextCustomer = useRef<string | null>(null);
+  const contextTechnician = useRef<string | null>(null);
+  const clearContext = useCallback(() => {
+    historyGeneration.current++; contextCustomer.current = null; contextTechnician.current = null;
+    setJob(null); setCustomer(null); setReport(null); setTechRecord(null);
+    setCatalog([]); setPriorVisits([]); setLineage([]); setHistoryItems([]);
+    setHistoryToken(undefined); setHistoryExpanded(false); setHistoryBusy(false);
+    setHistoryError(null); setReportsUnavailable(false); setCatalogUnavailable(false);
+    setHistoryUnavailable(false); setLineageUnavailable(false);
+  }, []);
+  const load = useCallback(async (currentOnly = false, refreshedReportId?: string) => {
     if (!jobId) return;
+    if (!currentOnly) { historyGeneration.current++; setHistoryBusy(false); setHistoryError(null); }
+    const generation = ++readGeneration.current;
+    const scope = queryCache.scope();
     try {
-      // GL-13 row-scoping: one server-scoped read. The Lambda proves this job is
-      // the caller's (or office), returns the job, its customer (visit fields
-      // only), its reports, the catalog, prior-visit context, and the caller's
-      // OWN technician record — identity for the report is the signed-in user,
-      // never the job's assigned tech. A job that is not the caller's rejects
-      // with the same opaque error as a missing one.
-      const d = await technicianJob(jobId);
-      setJob(d.job);
-      setPacketChanged(Boolean(d.packetChanged));
-      setOnsiteMinutes(d.onsiteMinutes ?? null);
-      setLineage(d.lineage ?? []);
-      setCustomer(d.customer);
-      setReport(d.reports[0] ?? null);
-      setTechRecord(d.technician as Technician | null);
-      // GL-12: the last few relevant outcomes at this address (didn't happen /
-      // did). The query already excludes the current job.
-      setPriorVisits(
-        d.priorVisits
-          .filter(
-            (h) =>
-              h.status === "NO_ACCESS" ||
-              h.status === "CANCELED" ||
-              h.status === "COMPLETED"
-          )
-          .sort((a, b) =>
-            (b.scheduledDate ?? "0").localeCompare(a.scheduledDate ?? "0")
-          )
-          .slice(0, 4)
-      );
-      // The query already restricts the catalog to active, label-approved rows;
-      // sort for stable field ordering.
-      setCatalog(
-        d.catalog
-          .slice()
-          .sort(
-            (a, b) =>
-              (a.sortOrder ?? 999) - (b.sortOrder ?? 999) ||
-              a.name.localeCompare(b.name)
-          )
-      );
-      setError(null);
-    } catch (err) {
-      // GL-13: the server refusing this job (reassignment, deactivation, or a
-      // lapsed licence) makes the locally cached draft unreadable on this very
-      // interaction — the device does not keep another assignee's customer data.
-      if (
-        !isConnectivityError(err) &&
-        err instanceof Error &&
-        /not authorized/i.test(err.message)
-      ) {
-        clearDraft(jobId);
+      const d = currentOnly ? await technicianJobCurrent(jobId, refreshedReportId) : await technicianJob(jobId);
+      if (generation !== readGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
+      const contextChanged = contextCustomer.current !== null && (contextCustomer.current !== d.job.customerId || contextTechnician.current !== (d.technician?.id ?? null));
+      contextCustomer.current = d.job.customerId; contextTechnician.current = d.technician?.id ?? null;
+      setJob(d.job); setPacketChanged(Boolean(d.packetChanged)); setOnsiteMinutes(d.onsiteMinutes ?? null);
+      if (!d.customerUnavailable) setCustomer(d.customer);
+      else if (contextChanged) setCustomer(null);
+      if (!d.reportsUnavailable) setReport(d.reports[0] ?? null);
+      else if (contextChanged) setReport(null);
+      setReportsUnavailable(Boolean(d.reportsUnavailable)); setTechRecord(d.technician as Technician | null);
+      const allowed = d.historyAllowed !== false; setHistoryAllowed(allowed);
+      if (!allowed || contextChanged) {
+        historyGeneration.current++; setPriorVisits([]); setLineage([]); setHistoryItems([]); setCatalog([]);
+        setHistoryExpanded(false); setHistoryToken(undefined); setHistoryBusy(false);
+        if (contextChanged && currentOnly) setCatalogUnavailable(true);
+        if (contextChanged) clearDraft(jobId);
       }
-      setError(
-        isConnectivityError(err)
-          ? "No connection — couldn't load this job. It will load when signal returns."
-          : err instanceof Error
-            ? err.message
-            : "Could not load job"
-      );
+      if (!currentOnly) {
+        const full = d as TechnicianJobDetail;
+        setCatalogUnavailable(Boolean(full.catalogUnavailable)); setHistoryUnavailable(Boolean(full.historyUnavailable));
+        setLineageUnavailable(Boolean(full.lineageUnavailable)); setLineage(allowed ? full.lineage ?? [] : []);
+        const prior = allowed ? full.priorVisits ?? [] : [];
+        setPriorVisits(prior.filter((h) => ["NO_ACCESS", "CANCELED", "COMPLETED"].includes(h.status)).slice(0, 4));
+        setHistoryItems(prior); setHistoryToken(undefined); setHistoryExpanded(false);
+        setCatalog(allowed ? (full.catalog ?? []).slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999) || a.name.localeCompare(b.name)) : []);
+      }
+      setError(d.customerUnavailable || !d.customer ? "Customer visit details are unavailable. Retry the job refresh." : null);
+    } catch (err) {
+      if (generation !== readGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
+      if (!isConnectivityError(err) && err instanceof Error && /not authorized|isn't linked/i.test(err.message)) { clearDraft(jobId); clearContext(); }
+      setError(isConnectivityError(err) ? "No connection — couldn't load this job. It will load when signal returns." : err instanceof Error ? err.message : "Could not load job");
     }
-  }, [jobId]);
+  }, [jobId, clearContext]);
+  const refreshCurrent = useCallback((refreshedReportId?: string) => load(true, refreshedReportId ?? report?.id), [load, report?.id]);
+  const loadHistory = useCallback(async () => {
+    if (!jobId || historyBusy || !historyAllowed) return;
+    const generation = ++historyGeneration.current;
+    const scope = queryCache.scope();
+    setHistoryBusy(true); setHistoryExpanded(true); setHistoryError(null);
+    try {
+      const page = await technicianJobHistory(jobId, historyToken ?? undefined);
+      if (generation !== historyGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
+      if (!page.historyAllowed) {
+        setHistoryAllowed(false); setHistoryItems([]); setPriorVisits([]); setCatalog([]); setLineage([]); setHistoryToken(null);
+      } else {
+        setHistoryItems((prior) => [...new Map([...prior, ...page.priorVisits].map((row) => [row.id, row])).values()]
+          .sort((a, b) => (b.scheduledDate ?? "0").localeCompare(a.scheduledDate ?? "0") || a.id.localeCompare(b.id)));
+        setPriorVisits((prior) => prior.map((row) => page.priorVisits.find((updated) => updated.id === row.id) ?? row));
+        setHistoryToken(page.historyNextToken); setHistoryUnavailable(false);
+      }
+    } catch (err) {
+      if (generation !== historyGeneration.current || activeJob.current !== jobId || scope !== queryCache.scope()) return;
+      if (err instanceof Error && /not authorized|isn't linked/i.test(err.message)) { clearDraft(jobId); clearContext(); setError(err.message); }
+      else setHistoryError("Visit history could not be loaded. Retry to continue.");
+    } finally { if (generation === historyGeneration.current && activeJob.current === jobId && scope === queryCache.scope()) setHistoryBusy(false); }
+  }, [jobId, historyToken, historyBusy, historyAllowed, clearContext]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    clearContext(); void load();
+    return () => { readGeneration.current++; historyGeneration.current++; };
+  }, [load, clearContext]);
 
   // Regained signal reloads the job — the offline error clears itself instead
   // of asking the tech to know that pull-to-refresh exists.
@@ -322,6 +363,12 @@ export default function TechJob() {
 
   // Always cancel the watch when leaving the screen.
   useEffect(() => stopOmwWatch, [stopOmwWatch]);
+  useEffect(() => queryCache.subscribe((event) => {
+    if (event.kind !== "identity") return;
+    readGeneration.current++; clearContext(); setHistoryAllowed(false);
+    stopOmwWatch(); setOmwSharing(false); setOmwBusy(false);
+    if (queryCache.identity()) void load();
+  }), [load, clearContext, stopOmwWatch]);
 
   // Arrival (Start job → the job is no longer SCHEDULED) ends sharing on its
   // own — the backend also stops accepting pings, but this stops the phone.
@@ -335,6 +382,7 @@ export default function TechJob() {
   // START emails the customer their live map, so two taps racing the
   // geolocation prompt used to email them twice; the gate refuses the second.
   const shareArrival = useAction(async (j: Job, lat: number, lng: number) => {
+    const scope = queryCache.writeScope();
     // Only START (which emails the customer) on the first tap; if this
     // visit is already en route, resume streaming without a second email.
     opResult(
@@ -345,10 +393,12 @@ export default function TechJob() {
         lng,
       }))
     );
+    assertLogin(scope);
   }, "Could not start On My Way");
 
   const beginOnMyWay = () => {
     if (!job) return;
+    const scope = queryCache.writeScope();
     if (!navigator.geolocation) {
       setError("This device can't share location.");
       return;
@@ -357,6 +407,7 @@ export default function TechJob() {
     setError(null);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        if (scope !== queryCache.writeScope() || activeJob.current !== job.id) return;
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         // `omwBusy` covers the location prompt as well as the write, so it
@@ -365,12 +416,14 @@ export default function TechJob() {
           setOmwBusy(false);
           return;
         }
+        if (scope !== queryCache.writeScope() || activeJob.current !== job.id) return;
         omwLastPing.current = Date.now();
         setOmwSharing(true);
         setOmwBusy(false);
         // Stream position; throttle writes to ~1 / 15s to spare battery/data.
         omwWatchId.current = navigator.geolocation.watchPosition(
           (p) => {
+            if (scope !== queryCache.writeScope() || activeJob.current !== job.id) { stopOmwWatch(); return; }
             const now = Date.now();
             if (now - omwLastPing.current < 15000) return;
             omwLastPing.current = now;
@@ -405,32 +458,36 @@ export default function TechJob() {
   };
 
   const acknowledge = useAction(async (j: Job) => {
+    const scope = queryCache.writeScope();
     const res = await confirmedMutation(api().mutations.acknowledgePacket({
       jobId: j.id,
       version: j.packetVersion ?? 1,
     }));
+    assertLogin(scope);
     if (res.errors?.length) throw new Error(res.errors[0].message);
     // A refusal (the office reassigned this stop while the packet was open)
     // comes back as a successful response — without this the screen would
     // simply reload and say nothing at all.
     const ack = opResult<{ refused?: string }>(res);
     if (ack?.refused) throw new Error(ack.refused);
-    await load();
+    await refreshCurrent();
   }, "Could not acknowledge");
 
   const startJob = useAction(async (j: Job) => {
+    const scope = queryCache.writeScope();
     try {
       // The application's start time on the pesticide record — stamped
       // by the server's clock. The Job model is read-only for techs, so
       // there is no browser-supplied timestamp to rewrite.
       const res = await confirmedMutation(api().mutations.startJob({ jobId: j.id }));
+      assertLogin(scope);
       if (res.errors?.length) throw new Error(res.errors[0].message);
       // The packet-changed refusal is the whole point of GL-12: the technician
       // has to be TOLD to read the change. Silently reloading would leave them
       // tapping Start on a button that appears to do nothing.
       const started = opResult<{ refused?: string }>(res);
       if (started?.refused) throw new Error(started.refused);
-      await load();
+      await refreshCurrent();
     } catch (err) {
       throw asOfflineError(
         err,
@@ -455,12 +512,12 @@ export default function TechJob() {
   const pageError =
     error ?? shareArrival.error ?? acknowledge.error ?? startJob.error;
 
-  if (!job || !customer) {
+  if (!job || job.id !== jobId || !customer) {
     return (
       <Page title="Job" back="/tech">
         {offlineBanner}
         <ErrorNote error={pageError} />
-        {!pageError ? <Spinner /> : null}
+        {!pageError ? <Spinner /> : <Button small onClick={() => void load()}>Retry job refresh</Button>}
       </Page>
     );
   }
@@ -572,7 +629,8 @@ export default function TechJob() {
         </dl>
       </Card>
 
-      {lineage.length ? (
+      {lineageUnavailable ? <Card><p className="muted small">Earlier attempt history is unavailable. Reload this job to retry.</p></Card> : null}
+      {lineage.length && !lineageUnavailable ? (
         <Card>
           <Badge tone="info">attempt {lineage.length + 1} of this visit</Badge>
           <p className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
@@ -586,6 +644,7 @@ export default function TechJob() {
         </Card>
       ) : null}
 
+      {historyUnavailable ? <Card><p className="muted small">Earlier visit context is unavailable. Open visit history to retry.</p></Card> : null}
       {priorVisits.length ? (
         <Card title="Before this visit">
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
@@ -598,31 +657,33 @@ export default function TechJob() {
                     ? ` — ${NO_ACCESS_LABEL[v.noAccessReason] ?? "couldn't access"}`
                     : ""}
                 </span>
-                {v.findings ? (
-                  <div className="muted small" style={{ marginLeft: 24 }}>
-                    {[
-                      v.findings.servicesPerformed
-                        ? `did: ${v.findings.servicesPerformed}`
-                        : null,
-                      v.findings.areasTreated
-                        ? `areas: ${v.findings.areasTreated}`
-                        : null,
-                      v.findings.targetPests
-                        ? `pests: ${v.findings.targetPests}`
-                        : null,
-                      v.findings.recommendations
-                        ? `recommended: ${v.findings.recommendations}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                ) : null}
+                <VisitFindings visit={v} />
               </li>
             ))}
           </ul>
         </Card>
       ) : null}
+
+      {historyAllowed ? (
+        <Card title="Visit history">
+          <ErrorNote error={historyError} />
+          {historyExpanded ? historyItems.length ? (
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {historyItems.map((visit) => <li key={visit.id} style={{ marginBottom: 8 }}>
+                <StatusBadge status={visit.status} /> {fmtDate(visit.scheduledDate, true)} · {visit.serviceType}
+                <VisitFindings visit={visit} />
+              </li>)}
+            </ul>
+          ) : <p className="muted small">{historyToken === null ? "No other visits recorded." : "No visits loaded yet. Continue to check the remaining history."}</p> : null}
+          {!historyExpanded || historyToken !== null ? <Button small loading={historyBusy} onClick={() => void loadHistory()}>
+            {historyExpanded ? historyError ? "Retry visit history" : "Load more visits" : "Open visit history"}
+          </Button> : null}
+        </Card>
+      ) : null}
+      {reportsUnavailable || catalogUnavailable ? <Card>
+        <p className="muted small">{reportsUnavailable ? "The report could not be verified. Your typing is preserved; retry before continuing." : "The product catalog is unavailable. Reload this job before continuing."}</p>
+        <Button small onClick={() => void (catalogUnavailable ? load() : refreshCurrent())}>Retry job refresh</Button>
+      </Card> : null}
 
       {job.status === "SCOPE_MISMATCH" || job.status === "PREP_MISSING" ? (
         <Card>
@@ -660,7 +721,7 @@ export default function TechJob() {
       (job.status === "SCHEDULED" ||
         job.status === "IN_PROGRESS" ||
         job.status === "COMPLETED") ? (
-        <CallbackFindingCard job={job} onDone={load} />
+        <CallbackFindingCard job={job} onDone={refreshCurrent} />
       ) : null}
 
       {packetChanged ? (
@@ -724,9 +785,9 @@ export default function TechJob() {
           <NoAccessCard
             job={job}
             ownerSub={techRecord?.userSub ?? null}
-            onDone={load}
+            onDone={refreshCurrent}
           />
-          <ScopePrepExits job={job} onDone={load} />
+          <ScopePrepExits job={job} onDone={refreshCurrent} />
         </>
       ) : null}
 
@@ -740,16 +801,17 @@ export default function TechJob() {
             />
             {report.pdfKey ? <DocButton docKey={report.pdfKey} /> : null}
           </div>
-          <ReportPhotos report={report} readOnly onChanged={load} />
+          <ReportPhotos report={report} readOnly onChanged={refreshCurrent} />
         </Card>
       ) : job.status === "IN_PROGRESS" || job.status === "COMPLETED" || report ? (
-        <ReportForm
+        <fieldset disabled={reportsUnavailable || catalogUnavailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}><ReportForm
+          key={`${job.id}:${job.customerId}:${techRecord?.id ?? "office"}`}
           job={job}
           technician={techRecord}
           existing={report}
           catalog={catalog}
-          onChanged={load}
-        />
+          onChanged={refreshCurrent}
+        /></fieldset>
       ) : null}
     </Page>
   );
@@ -1195,8 +1257,11 @@ function ReportForm({
   technician: Technician | null;
   existing: ServiceReport | null;
   catalog: CatalogProduct[];
-  onChanged: () => Promise<void>;
+  onChanged: (reportId?: string) => Promise<void>;
 }) {
+  const formAlive = useRef(true);
+  const editorScope = useRef(queryCache.writeScope());
+  useEffect(() => { formAlive.current = true; return () => { formAlive.current = false; }; }, []);
   // R12: if this phone holds typing the office never got — battery died,
   // signal dropped, tab evicted — put the tech back exactly where they were.
   // Content is the arbiter, not clocks: a save that lands after the tech kept
@@ -1400,6 +1465,9 @@ function ReportForm({
   };
 
   const save = async (): Promise<string> => {
+    const scope = editorScope.current;
+    assertLogin(scope);
+    if (!formAlive.current) throw new Error("Reload this job before saving the report");
     if (!technician) {
       throw new Error("Your login isn't linked to a technician record — ask the office");
     }
@@ -1468,13 +1536,13 @@ function ReportForm({
         ...fields,
       }))
     );
+    assertLogin(scope);
     // A refusal is the server saying "no" in words meant for this screen
     // (finalized record, someone else's draft) — surface it verbatim.
     if (saved?.refused) throw new Error(saved.refused);
     if (!saved?.reportId) throw new Error("Could not save the report");
     // Remember what this tech applied, to prefill the next report.
-    rememberAmounts(products);
-    setReportId(saved.reportId);
+    if (formAlive.current) { rememberAmounts(products); setReportId(saved.reportId); }
     return saved.reportId;
   };
 
@@ -1496,11 +1564,13 @@ function ReportForm({
   // A report with no id yet mints one on its first save, so two saves racing
   // each other created two draft reports for the same visit.
   const saveAction = useAction(async () => {
+    const scope = editorScope.current;
     const gen = editGen.current;
     try {
-      await save();
-      markDelivered(gen);
-      await onChanged();
+      const savedId = await save();
+      assertLogin(scope);
+      if (formAlive.current) markDelivered(gen);
+      await onChanged(savedId);
     } catch (err) {
       if (isConnectivityError(err)) {
         // The draft is already on this phone (mirrored on every edit) —
@@ -1517,9 +1587,11 @@ function ReportForm({
   // Finalizing emails the customer their pesticide record; a second one is a
   // duplicate record they cannot tell from the first.
   const finalizeAction = useAction(async () => {
+    const scope = editorScope.current;
     const gen = editGen.current;
     try {
       const id = await save();
+      assertLogin(scope);
       // Stop the application clock first, server-stamped. The
       // first stamp wins, so if finalize fails here and is
       // retried tomorrow morning, the record's end time is still
@@ -1528,10 +1600,12 @@ function ReportForm({
       const ended = await confirmedMutation(api().mutations.endApplication({
         jobId: job.id,
       }));
+      assertLogin(scope);
       if (ended.errors?.length) {
         throw new Error(ended.errors[0].message);
       }
       const res = await confirmedMutation(api().mutations.finalizeServiceReport({ reportId: id }));
+      assertLogin(scope);
       if (res.errors?.length) throw new Error(res.errors[0].message);
       // MUST precede markDelivered. Every finalize refusal is a field the
       // technician still has to fill in, and markDelivered CLEARS THE LOCAL
@@ -1540,8 +1614,8 @@ function ReportForm({
       // than the page this replaces.
       const finalized = opResult<{ refused?: string }>(res);
       if (finalized?.refused) throw new Error(finalized.refused);
-      markDelivered(gen);
-      await onChanged();
+      if (formAlive.current) markDelivered(gen);
+      await onChanged(id);
     } catch (err) {
       if (isConnectivityError(err)) setSendFailed(true);
       throw asOfflineError(

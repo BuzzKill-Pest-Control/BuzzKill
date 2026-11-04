@@ -174,6 +174,20 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
     { attributeName: "status", keyType: "HASH" },
     { attributeName: "scheduledDate", keyType: "RANGE" },
   ]);
+  expect(indexes).toHaveLength(9);
+  expect(indexes.find((index) => index.indexName === "gsi-Route.jobs")?.keySchema).toEqual([{ attributeName: "routeId", keyType: "HASH" }]);
+  expect(indexes.find((index) => index.indexName === "gsi-Customer.jobs")?.keySchema).toEqual([{ attributeName: "customerId", keyType: "HASH" }]);
+  const policies = allResources(released).filter((resource) => resource.Type === "AWS::IAM::Policy");
+  const readPolicy = policies.find((resource) => JSON.stringify(resource.Properties).includes("/index/gsi-Route.jobs"))!;
+  expect(readPolicy).toBeDefined();
+  const statements = (readPolicy.Properties?.PolicyDocument as { Statement: { Action: string | string[]; Resource: unknown }[] }).Statement;
+  const keyedRead = statements.find((entry) => JSON.stringify(entry.Resource).includes("/index/gsi-Route.jobs"))!;
+  expect(keyedRead.Action).toBe("dynamodb:Query");
+  expect(JSON.stringify(keyedRead.Resource)).toContain("/index/gsi-Customer.jobs");
+  expect(JSON.stringify(keyedRead.Resource)).toContain("/index/serviceReportsByJobId");
+  expect(JSON.stringify(keyedRead.Resource)).toContain("/index/techniciansByUserSub");
+  const sourceRead = statements.find((entry) => Array.isArray(entry.Action) && entry.Action.includes("dynamodb:BatchGetItem") && JSON.stringify(entry.Resource).includes("ServiceReport-*"))!;
+  expect(sourceRead.Action).toEqual(["dynamodb:GetItem", "dynamodb:BatchGetItem"]);
 });
 
 it("retains the real schema, tables, auth, IAM and all other non-API resources across bootstrap", () => {

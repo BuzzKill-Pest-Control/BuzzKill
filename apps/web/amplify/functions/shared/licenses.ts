@@ -116,10 +116,10 @@ export async function licenseRecordsFor(
           { technicianId },
           { limit: 100, nextToken }
         ),
-      { pageErrors: "ignore" }
+      { pageErrors: "throw" }
     )) as LicenseRecordLike[];
-  } catch (err) {
-    console.error("licenseRecordsFor failed", technicianId, err);
+  } catch {
+    console.error("licenseRecordsFor: licence records could not be verified");
     return null;
   }
 }

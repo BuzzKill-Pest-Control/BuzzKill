@@ -263,6 +263,12 @@ export type TechnicianJobDetail = {
   onsiteMinutes?: number;
   /** GL-12: the packet changed since the technician last acknowledged. */
   packetChanged?: boolean;
+  historyAllowed?: boolean;
+  reportsUnavailable?: boolean;
+  customerUnavailable?: boolean;
+  catalogUnavailable?: boolean;
+  historyUnavailable?: boolean;
+  lineageUnavailable?: boolean;
   /** GL-12: this visit's chain of earlier attempts (rebook lineage). */
   lineage?: {
     id: string;
@@ -283,7 +289,7 @@ export type TechnicianJobDetail = {
   priorVisits: (Pick<
     Job,
     "id" | "status" | "serviceType" | "scheduledDate" | "noAccessReason"
-  > & { notPerformedReason?: string | null; findings?: PriorVisitFindings | null })[];
+  > & { notPerformedReason?: string | null; findings?: PriorVisitFindings | null; findingsUnavailable?: boolean })[];
 };
 
 export async function technicianJob(
@@ -292,6 +298,19 @@ export async function technicianJob(
   const res = await api().queries.technicianJob({ jobId });
   const parsed = opResult<TechnicianJobDetail>(res);
   if (!parsed) throw new Error("Job not found");
+  return parsed;
+}
+
+export type TechnicianJobCurrent = Omit<TechnicianJobDetail, "catalog" | "priorVisits" | "lineage"> & { currentOnly: true };
+export async function technicianJobCurrent(jobId: string, reportId?: string): Promise<TechnicianJobCurrent> {
+  const parsed = opResult<TechnicianJobCurrent>(await api().queries.technicianJob({ jobId, view: "CURRENT", reportId }));
+  if (!parsed || parsed.currentOnly !== true || parsed.job?.id !== jobId) throw new Error("Could not refresh this job");
+  return parsed;
+}
+export type TechnicianHistoryPage = { historyPage: true; historyAllowed: boolean; priorVisits: TechnicianJobDetail["priorVisits"]; historyNextToken: string | null };
+export async function technicianJobHistory(jobId: string, historyToken?: string): Promise<TechnicianHistoryPage> {
+  const parsed = opResult<TechnicianHistoryPage>(await api().queries.technicianJob({ jobId, view: "HISTORY", historyToken, historyLimit: 20 }));
+  if (!parsed || parsed.historyPage !== true || typeof parsed.historyAllowed !== "boolean" || !Array.isArray(parsed.priorVisits) || !(parsed.historyNextToken === null || typeof parsed.historyNextToken === "string")) throw new Error("Could not read visit history");
   return parsed;
 }
 
