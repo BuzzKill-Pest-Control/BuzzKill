@@ -47,7 +47,9 @@ export function verifyRetainedBackend(env, readAws) {
   const stack = readAws(["cloudformation", "describe-stacks", "--stack-name", ROOTS[branch]]).Stacks?.[0];
   // The CRM only reads outputs. Its schema polling must remain usable while
   // the website's concurrent build updates this same backend.
-  const allowedStatus = ["CREATE_COMPLETE", "UPDATE_COMPLETE", ...(env.AWS_APP_ID === CRM_APP ? ["UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS"] : [])];
+  // A completed update rollback restores the prior working stack and can be
+  // updated normally. Never accept an ongoing or failed rollback as settled.
+  const allowedStatus = ["CREATE_COMPLETE", "UPDATE_COMPLETE", "UPDATE_ROLLBACK_COMPLETE", ...(env.AWS_APP_ID === CRM_APP ? ["UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS"] : [])];
   if (stack?.StackId !== ROOTS[branch] || stack?.EnableTerminationProtection !== true ||
       !allowedStatus.includes(stack?.StackStatus)) {
     throw new Error("Retained protected backend root identity does not match.");
