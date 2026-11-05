@@ -135,6 +135,7 @@ beforeEach(() => {
   emailReturnsFalse = false;
   sentryReports.length = 0;
   sentryFails = false;
+  delete process.env.SENTRY_ORG;
   delete process.env.SENTRY_INFRA_DSN;
   delete process.env.SENTRY_INFRA_ALARM_BRANCH;
   delete process.env.INFRA_ALERT_EMAIL;
@@ -185,6 +186,33 @@ describe("ops-alerts", () => {
     expect(sentEmails).toHaveLength(0);
     expect(logQueries).toHaveLength(0);
   });
+
+  it.each(["master-planning", "a", "business-123"])("links accepted events to the configured %s organization", async (org) => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    process.env.SENTRY_ORG = org;
+    await handler(snsEvent(alarm()));
+
+    const link = `https://${org}.sentry.io/issues/?query=0123456789abcdef0123456789abcdef`;
+    expect(sentryReports).toHaveLength(1);
+    expect(workOpened[0].detail).toContain(link);
+    expect(workOpened[0].resolutionAction).toContain(link);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it.each(["", "MasterPlanning", "master.planning", "master-planning/evil", "master-planning?target=x", "evil@example.com", "-master", "master-", "a".repeat(64)])(
+    "still ingests but falls back and retries for an invalid organization slug %j",
+    async (org) => {
+      process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+      process.env.SENTRY_ORG = org;
+      await expect(handler(snsEvent(alarm()))).rejects.toThrow(/alarm record\(s\) failed/);
+
+      expect(sentryReports).toHaveLength(1);
+      expect(workOpened).toHaveLength(1);
+      expect(workOpened[0].detail).not.toContain("Sentry:");
+      expect(workOpened[0].resolutionAction).not.toContain("https://");
+      expect(sentEmails).toHaveLength(1);
+    },
+  );
 
   it("falls back to diagnostic email and retries when Sentry rejects delivery", async () => {
     process.env.SENTRY_INFRA_DSN = "https://configured.example/1";

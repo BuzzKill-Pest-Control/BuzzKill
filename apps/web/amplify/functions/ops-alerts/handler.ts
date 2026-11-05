@@ -171,7 +171,13 @@ async function handleCurrentAlarmTransition(message: AlarmMessage): Promise<void
     try {
       const report = await reportInfraAlarmToSentry(message);
       if (!report) throw new Error("Sentry did not accept the alarm event");
-      sentryUrl = `https://buzzkill.sentry.io/issues/?query=${encodeURIComponent(report.eventId)}`;
+      // Ingestion follows the DSN even if the separate UI-link configuration
+      // is invalid. Never interpolate an arbitrary host or path into work.
+      const org = process.env.SENTRY_ORG ?? "buzzkill";
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(org)) {
+        throw new Error("SENTRY_ORG must be a lowercase organization slug");
+      }
+      sentryUrl = `https://${org}.sentry.io/issues/?query=${encodeURIComponent(report.eventId)}`;
     } catch (error) {
       failures.push(error);
     }
