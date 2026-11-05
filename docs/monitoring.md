@@ -1,4 +1,4 @@
-# Browser error monitoring
+# Production error and infrastructure monitoring
 
 BuzzKill's public website and CRM report production browser errors to separate
 Sentry projects. The initial integration covers errors and deployed releases.
@@ -90,3 +90,51 @@ real user's task.
 After confirming the integration, resolve the synthetic verification issues.
 For each future business, repeat the ownership and free-plan checks rather than
 assuming the previous organization's settings apply.
+
+## Infrastructure incidents
+
+`buzzkill-backend` receives production infrastructure incidents from the
+existing `ops-alerts` bridge. CloudWatch continues detecting Lambda errors and
+throttles, missed scheduled runs, email dead letters, and customer-search
+indexing failures/backlog. Throttled or missing invocations cannot report
+their own application errors, so those AWS detectors remain in place.
+
+Set `SENTRY_INFRA_DSN` on the website's **main Hosting branch** to the
+`buzzkill-backend` public ingestion DSN. This is separate from the website's
+`VITE_SENTRY_DSN`; do not change either browser project's configuration.
+The backend derives `SENTRY_ENVIRONMENT`, the exact retained alarm namespace
+(`SENTRY_INFRA_ALARM_BRANCH`), the AWS account, and its transition-state table.
+Preview and staging deployments keep the prior diagnostic-email route.
+
+An ALARM sends one structured Sentry error with a stable issue fingerprint
+and transition-specific event ID. It includes the logical function, signal,
+numeric alarm policy, repository path, and AWS alarm link. Raw log excerpts,
+alarm descriptions/reasons, dimensions, request payloads, and customer data
+never go to Sentry. SNS retries reuse the event ID. A per-alarm DynamoDB lease
+and durable transition timestamp prevent delayed deliveries from reopening
+an incident after a newer recovery.
+
+The CRM still owns its deduplicated `INFRA_ALERT` and automatically resolves it
+when AWS reports OK. The Sentry issue is diagnostic history: resolving it does
+not change AWS or the CRM, and AWS recovery does not automatically resolve the
+Sentry issue. Confirm recovery before marking the Sentry issue resolved.
+
+The Sentry alert **BuzzKill infrastructure — production alarm events** selects
+`buzzkill-backend`, environment `production`, and **An event or issue activity
+is captured**, notifying Jake with a one-hour per-issue throttle. Listening to
+every event allows a later ALARM transition to notify even when the historical
+issue is still unresolved. Browser alert rules remain separate.
+
+Successful Sentry delivery replaces the bridge's custom diagnostic email.
+Missing DSN keeps that previous route for rollback. Failed or rate-limited
+Sentry ingestion sends the diagnostic fallback and fails the invocation so
+SNS/Lambda retries and the existing dead-letter queue remain effective. The
+three bridge watchdog alarms retain their independent direct SNS email path:
+an alert bridge cannot reliably report its own failure through itself.
+
+Verify a clearly labelled synthetic event in the backend project and its
+notification history before enabling the main branch DSN. Verify the deployed
+bridge, state table, IAM, all existing alarm actions, and normal recovery
+after rollout. Do not create a real business failure to test monitoring.
+To revert routing, remove `SENTRY_INFRA_DSN` from main Hosting settings and
+redeploy; keep the AWS detectors, queue, and watchdog subscriptions intact.

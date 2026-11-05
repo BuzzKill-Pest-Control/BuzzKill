@@ -1,23 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * GL-22 — the alarm-to-owned-work bridge. An ALARM state change becomes ONE
- * deduplicated shared-Office INFRA_ALERT item plus a diagnostic email to the
- * owner (INFRA_ALERT_EMAIL); OK auto-resolves the item silently; a processing
- * failure THROWS so the delivery retries and dead-letters visibly instead of
- * being silently acknowledged.
- *
- * Owner rule (2026-08-15): the email must carry enough to hand straight to a
- * debugging session — repo path, log group, recent error log excerpts, and a
- * ready-to-paste prompt block.
+ * Alarm delivery moves to Sentry when configured. CRM incident ownership and
+ * automatic recovery remain durable, and missing/failed Sentry delivery keeps
+ * the diagnostic-email fallback. Any incomplete required delivery retries
+ * through the existing SNS, Lambda, dead-letter and independent-watchdog path.
  */
+
+const guardedTransitions: Record<string, unknown>[] = [];
+let ignoreTransition = false;
+let transitionGuardFails = false;
+vi.mock("../shared/infraAlarmTransition", () => ({
+  withInfraAlarmTransition: async (message: Record<string, unknown>, action: () => Promise<void>) => {
+    guardedTransitions.push(message);
+    if (transitionGuardFails) throw new Error("Transition lease unavailable");
+    if (!ignoreTransition) await action();
+  },
+}));
 
 const workOpened: Record<string, unknown>[] = [];
 const workResolved: Record<string, unknown>[] = [];
 let openFails = false;
+let openReturnsNull = false;
 vi.mock("../shared/ownedWork", () => ({
   openOwnedWork: async (o: Record<string, unknown>) => {
     if (openFails) throw new Error("dynamo down");
+    if (openReturnsNull) return null;
     workOpened.push(o);
     return "w1";
   },
@@ -27,12 +35,25 @@ vi.mock("../shared/ownedWork", () => ({
   },
 }));
 
+const sentryReports: Record<string, unknown>[] = [];
+let sentryFails = false;
+vi.mock("../shared/infraSentry", () => ({
+  reportInfraAlarmToSentry: async (message: Record<string, unknown>) => {
+    sentryReports.push(message);
+    if (sentryFails) throw new Error("Sentry unavailable");
+    return { eventId: "0123456789abcdef0123456789abcdef", cloudWatchUrl: "https://example.test/alarm" };
+  },
+}));
+
 const sentEmails: { to: string; subject: string; html: string }[] = [];
+let emailFails = false;
+let emailReturnsFalse = false;
 vi.mock("../shared/email", () => ({
   emailShell: (heading: string, body: string) => `${heading}${body}`,
   sendEmail: async (o: { to: string; subject: string; html: string }) => {
     sentEmails.push(o);
-    return true;
+    if (emailFails) throw new Error("SES unavailable");
+    return !emailReturnsFalse;
   },
 }));
 
@@ -65,7 +86,7 @@ vi.mock("@aws-sdk/client-cloudwatch-logs", () => ({
   },
 }));
 
-const { handler } = await import("./handler");
+const { handler, parseAlarmName } = await import("./handler");
 
 const snsEvent = (message: Record<string, unknown>) =>
   ({
@@ -89,6 +110,9 @@ const alarm = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  guardedTransitions.length = 0;
+  ignoreTransition = false;
+  transitionGuardFails = false;
   workOpened.length = 0;
   workResolved.length = 0;
   sentEmails.length = 0;
@@ -106,11 +130,124 @@ beforeEach(() => {
   ];
   logsFail = false;
   openFails = false;
+  openReturnsNull = false;
+  emailFails = false;
+  emailReturnsFalse = false;
+  sentryReports.length = 0;
+  sentryFails = false;
+  delete process.env.SENTRY_INFRA_DSN;
+  delete process.env.SENTRY_INFRA_ALARM_BRANCH;
   delete process.env.INFRA_ALERT_EMAIL;
   delete process.env.OPS_EMAIL_MUTED;
 });
 
 describe("ops-alerts", () => {
+  it("runs ALARM and OK effects through the durable transition guard", async () => {
+    await handler(snsEvent(alarm()));
+    await handler(snsEvent(alarm({ NewStateValue: "OK" })));
+    await handler(snsEvent(alarm({ NewStateValue: "INSUFFICIENT_DATA" })));
+    expect(guardedTransitions.map((message) => message.NewStateValue)).toEqual(["ALARM", "OK"]);
+    expect(workOpened).toHaveLength(1);
+    expect(workResolved).toHaveLength(1);
+  });
+
+  it("does not send or reopen work when the guard suppresses an older transition", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    ignoreTransition = true;
+    await handler(snsEvent(alarm()));
+    expect(guardedTransitions).toHaveLength(1);
+    expect(sentryReports).toHaveLength(0);
+    expect(workOpened).toHaveLength(0);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it("retries without side effects when transition storage is unavailable", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    transitionGuardFails = true;
+    await expect(handler(snsEvent(alarm()))).rejects.toThrow(/alarm record\(s\) failed/);
+    expect(sentryReports).toHaveLength(0);
+    expect(workOpened).toHaveLength(0);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it("routes configured alarms to Sentry with a CRM link and skips diagnostic email/log scanning", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    await handler(snsEvent(alarm()));
+
+    expect(sentryReports).toHaveLength(1);
+    expect(workOpened).toHaveLength(1);
+    expect(workOpened[0]).toMatchObject({
+      kind: "INFRA_ALERT",
+      dedupeKey: "alarm:buzzkill-staging-stripe-webhook-errors",
+    });
+    expect(workOpened[0].detail).toContain("https://buzzkill.sentry.io/issues/?query=0123456789abcdef0123456789abcdef");
+    expect(workOpened[0].resolutionAction).toContain("Investigate in Sentry");
+    expect(sentEmails).toHaveLength(0);
+    expect(logQueries).toHaveLength(0);
+  });
+
+  it("falls back to diagnostic email and retries when Sentry rejects delivery", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    sentryFails = true;
+    await expect(handler(snsEvent(alarm()))).rejects.toThrow(/alarm record\(s\) failed/);
+
+    expect(sentryReports).toHaveLength(1);
+    expect(workOpened).toHaveLength(1);
+    expect(sentEmails).toHaveLength(1);
+    expect(logQueries).toHaveLength(1);
+    expect(workOpened[0].detail).not.toContain("Sentry:");
+  });
+
+  it.each(["throw", "null"])("still reports to Sentry and retries when owned work fails with %s", async (failure) => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    openFails = failure === "throw";
+    openReturnsNull = failure === "null";
+    await expect(handler(snsEvent(alarm()))).rejects.toThrow(/alarm record\(s\) failed/);
+
+    expect(sentryReports).toHaveLength(1);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it("does not emit a Sentry error for recovery or insufficient data", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    await handler(snsEvent(alarm({ NewStateValue: "OK" })));
+    await handler(snsEvent(alarm({ NewStateValue: "INSUFFICIENT_DATA" })));
+    expect(workResolved).toHaveLength(1);
+    expect(sentryReports).toHaveLength(0);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it("mutes Sentry and diagnostic email while retaining owned work", async () => {
+    process.env.SENTRY_INFRA_DSN = "https://configured.example/1";
+    process.env.OPS_EMAIL_MUTED = "1";
+    await handler(snsEvent(alarm()));
+    expect(workOpened).toHaveLength(1);
+    expect(sentryReports).toHaveLength(0);
+    expect(sentEmails).toHaveLength(0);
+    expect(logQueries).toHaveLength(0);
+  });
+
+  it.each(["throw", "false"])("retries when the fallback diagnostic email fails with %s", async (failure) => {
+    emailFails = failure === "throw";
+    emailReturnsFalse = failure === "false";
+    await expect(handler(snsEvent(alarm()))).rejects.toThrow(/alarm record\(s\) failed/);
+    expect(workOpened).toHaveLength(1);
+    expect(sentEmails).toHaveLength(1);
+  });
+
+  it("parses the entire retained namespace and indexer signal suffixes", () => {
+    process.env.SENTRY_INFRA_ALARM_BRANCH = "codex-buzzkill-account-migration";
+    expect(parseAlarmName("buzzkill-codex-buzzkill-account-migration-stripe-webhook-errors")).toEqual({
+      logicalFunction: "stripe-webhook", kind: "errors",
+    });
+    expect(parseAlarmName("buzzkill-codex-buzzkill-account-migration-customer-search-indexer-record-failures")).toEqual({
+      logicalFunction: "customer-search-indexer", kind: "record-failures",
+    });
+    expect(parseAlarmName("buzzkill-codex-buzzkill-account-migration-customer-search-indexer-backlog")).toEqual({
+      logicalFunction: "customer-search-indexer", kind: "backlog",
+    });
+  });
+
   it("an ALARM becomes one deduplicated owned item and a diagnostic email to the owner", async () => {
     await handler(snsEvent(alarm()));
 
