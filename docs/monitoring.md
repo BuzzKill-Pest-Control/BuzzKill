@@ -5,33 +5,45 @@ Sentry projects. The initial integration covers errors and deployed releases.
 Session replay, performance tracing, log collection, and paid AI features are
 outside this setup.
 
-## Ownership across businesses
+## Shared organization and repo ownership
 
-Use one Sentry organization **per business**, with a separate project for each
-application or service. BuzzKill's organization belongs to Jake and must not
-include OmniForce's teams or members. Membership in another Sentry organization
-does not authorize access to BuzzKill. Check the member list before connecting
-another application.
+Owner decision (2026-11-04): use one shared Sentry organization named
+**Master Planning**, organization ID `4512373753249792`, in the US region.
+Its canonical slug is `master-planning`. The existing BuzzKill organization
+is renamed in place so its projects and ingestion identities are retained.
+This decision supersedes the earlier per-business organization convention.
 
-A personal Sentry login can manage several organizations. Each organization has
-independent membership, billing, project keys, and CI credentials. Do not reuse
-an OmniForce credential, project, or organization for BuzzKill. Future businesses
-should follow the same boundary, even when their repositories share an owner.
-
-Within BuzzKill, use `buzzkill-web` for the public website/booking flow and
+Keep separate projects for each independently deployed application or service.
+Use `buzzkill-web` for the public website/booking flow and
 `buzzkill-crm` for the staff application/customer portal. Production and staging
 are environments, not businesses. This release enables only canonical production
 hosts; development, preview, and staging builds do not send events.
 
-## Free-plan operation
+Jake coordinates organization identity, billing, membership, and the shared
+Slack installation. Repo chats must not create another organization or modify
+those shared settings. Each repo uses its own project DSNs and a separately
+named CI upload credential kept in its existing secret store. Do not reuse
+another repo's token. Inspect membership before inviting collaborators:
+organization-wide administrators span projects, and project names alone do
+not establish access isolation.
 
-Keep the organization on the free Developer plan with Jake as its sole member.
-Use email alerts addressed to that owner, filtered to the production environment.
-Alert on newly observed and regressed errors rather than each occurrence.
-Keep paid products and pay-as-you-go disabled. The free error quota is shared by
-the organization's projects; inspect project usage if one application becomes
-noisy. Suppress known benign errors deliberately rather than hiding new failures
-with broad filters.
+Use the **Master Planning** Slack workspace, ID `T0C66F8M9U3` (some connectors
+still display its former name, ERP). BuzzKill's private channel is
+`#sentry-buzzkill`, ID `C0CEZEQCML6`; other repos use their own private
+`#sentry-<repo>` channel. Route only the matching projects' production alerts
+there and preserve existing email actions.
+
+## Plan and alert operation
+
+Native Slack notifications require Team or above. The shared organization
+uses one subscription across its projects; usage allowances are also shared.
+Only Jake may authorize the central plan change. Do not start trials, enable
+paid add-ons, or enable pay-as-you-go through repo setup work.
+
+Alert on newly observed and regressed browser errors rather than each occurrence.
+Keep infrastructure transition alerts on their separate event-based rule below.
+Inspect project usage if one application becomes noisy. Suppress known benign
+errors deliberately rather than hiding new failures with broad filters.
 
 ## Build configuration
 
@@ -40,7 +52,7 @@ Each production Amplify app supplies its own branch-scoped values:
 | Variable | Purpose |
 | --- | --- |
 | `VITE_SENTRY_DSN` | Public event-ingestion key for that application's project |
-| `SENTRY_ORG` | This business's organization slug |
+| `SENTRY_ORG` | Shared organization slug, `master-planning` |
 | `SENTRY_PROJECT` | The matching app project slug |
 | `SENTRY_AUTH_TOKEN` | Private CI credential scoped to this organization for release/artifact uploads |
 | `SENTRY_UPLOAD_SOURCEMAPS` | Explicit production source-map upload opt-in |
@@ -62,7 +74,8 @@ hidden source maps are still files and must not be served publicly.
 Local builds work without Sentry credentials. The shared browser initialization
 and privacy policy are reused by both apps; app entry points provide their own
 identity and allowed production hosts. A future repository can reuse that
-pattern with its own business organization, projects, hostnames, and credentials.
+pattern in the shared Master Planning organization with its own projects,
+hostnames, and CI credentials.
 
 ## Event contents
 
@@ -88,8 +101,8 @@ work. Verification must not modify customer records or deliberately interrupt a
 real user's task.
 
 After confirming the integration, resolve the synthetic verification issues.
-For each future business, repeat the ownership and free-plan checks rather than
-assuming the previous organization's settings apply.
+For each additional repo, verify its project identity, secret storage, membership,
+Slack routing, and shared usage impact before switching its production settings.
 
 ## Infrastructure incidents
 

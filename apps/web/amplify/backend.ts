@@ -823,6 +823,7 @@ backend.opsAlerts.addEnvironment(
     : ""
 );
 backend.opsAlerts.addEnvironment("SENTRY_ENVIRONMENT", businessMode === "main" ? "production" : "staging");
+backend.opsAlerts.addEnvironment("SENTRY_ORG", process.env.SENTRY_ORG ?? "buzzkill");
 // Physical alarm names retain the original deployment namespace, which is
 // distinct from the logical production/staging environment after migration.
 backend.opsAlerts.addEnvironment("SENTRY_INFRA_ALARM_BRANCH", branch);
