@@ -142,7 +142,10 @@ Sentry issue. Confirm recovery before marking the Sentry issue resolved.
 The Sentry alert **BuzzKill infrastructure — production alarm events** selects
 `buzzkill-backend`, environment `production`, and **An event or issue activity
 is captured**, posting to private `#sentry-buzzkill` with a one-hour per-issue
-throttle. The browser and infrastructure rules have no email action. Listening to
+throttle. The browser and infrastructure rules have no email action. Jake's personal
+Issue Workflow overrides are explicitly Off for `buzzkill-web`, `buzzkill-crm`,
+and `buzzkill-backend`; regression/assignment emails are a separate Sentry path
+from alert-rule actions. Other projects and global preferences remain separate. Listening to
 every event allows a later ALARM transition to notify even when the historical
 issue is still unresolved. Browser alert rules remain separate.
 
@@ -152,6 +155,9 @@ route to channel `C0CEZEQCML6`.
 
 AWS emergency delivery uses a separate Amazon Q Developer in chat applications
 configuration, subscribed directly to the existing `OpsBridgeFailureTopic`.
+It is owned by a separate CloudFormation stack using
+`apps/web/amplify/operational-slack.template.json`; application deployments own
+the topic and publisher grant but do not create another chat configuration.
 The three watchdog alarms retain ALARM and OK actions to that topic, following
 **CloudWatch → SNS → Amazon Q → #sentry-buzzkill** without Sentry or the
 `ops-alerts` Lambda in the delivery path. The channel uses an explicit
@@ -182,18 +188,38 @@ redeploy; the operational Slack fallback remains active. Keep the AWS
 detectors, queue, managed Slack configuration, and watchdog subscriptions intact.
 
 
-## Operational Slack cutover verification
+## Operational Slack route ownership and verification
 
-Authorize the AWS Amazon Q app in Master Planning and invite it only to private
-`#sentry-buzzkill`. Before deploying a change that removes the confirmed AWS
-email subscription, create a temporary notifications-only channel configuration
-on the existing watchdog topic and verify both a labelled native CloudWatch
-payload and a sanitized custom payload arrive in Slack. This keeps the old
-emergency email available until its replacement is proven.
+The standalone routing stack is
+`buzzkill-slack-cutover-preflight-20261105-041453-84f14e`. Its configuration name
+is `buzzkill-operational-preflight-20261105-041453-84f14e`. These verified
+identities are retained in production: AWS permits only one configuration per
+account, workspace, and channel. A second application-owned configuration for
+the same destination is rejected. Do not delete the existing routing stack or
+attempt to replace it during an application deployment.
 
-Deploy the reviewed CDK configuration and bridge change, verify the final managed
-channel and both notification formats, then remove the temporary configuration
-and role. Check all 33 alarm ALARM/OK actions, the 14-day dead-letter queue,
-transition state, exact SNS publish permission, and absence of monitoring email
-subscriptions. Use synthetic SNS payloads and an isolated reporter test; do not
-force a real business alarm or modify customer records.
+Update that existing stack with `operational-slack.template.json`, preserving
+its ConfigurationName parameter and setting ProductionTopicArn to the shared
+ALARM/OK action of the three deployed watchdog alarms. The template owns exactly
+the existing configuration, role, and notifications-only policy; their legacy
+logical IDs preserve identity. The former test SNS topic is removed during this
+update. Tag the stack `owner=buzzkill-operational-slack` and `stage=production`.
+Amazon Q bot `U0CEW0YCK51` is a member only of private `#sentry-buzzkill`.
+
+Before removing a confirmed AWS email subscription, verify labelled native
+CloudWatch and sanitized custom notifications through the managed route on a
+test-only SNS topic. Keep the proven route attached to the real watchdog topic
+through the application rollout. This preserves independent delivery while the
+bridge and IAM update. After monitoring email is removed, verify both formats
+on the production operational topic without invoking business handlers or
+changing real alarm states.
+
+Verify all 33 ALARM/OK actions, the 14-day dead-letter queue, transition state,
+exact SNS publish permission, absence of monitoring email subscriptions, and
+permanent routing-stack ownership. Use an isolated copy of the real sanitizer
+for the custom test payload, with a clear verification title and injected
+privacy markers that must not survive. Resolve synthetic Sentry issues after
+checking the native channel rules and personal workflow preferences.
+
+Shared organization digests, billing, and security notifications are account
+settings and are outside BuzzKill's incident-alert routes.

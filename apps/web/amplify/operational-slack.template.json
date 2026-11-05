@@ -1,0 +1,150 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "BuzzKill production operational Slack route, independent of application deployments. Retained verified resource identities.",
+  "Parameters": {
+    "ConfigurationName": {
+      "Type": "String",
+      "Default": "buzzkill-operational-preflight-20261105-041453-84f14e",
+      "AllowedValues": [
+        "buzzkill-operational-preflight-20261105-041453-84f14e"
+      ],
+      "Description": "Retain the verified configuration identity. AWS permits one configuration per account/workspace/channel."
+    },
+    "ProductionTopicArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:aws:sns:us-east-1:743917687359:[A-Za-z0-9_-]{1,256}$",
+      "Description": "Existing production OpsBridgeFailureTopic used by all three independent watchdog alarms."
+    }
+  },
+  "Resources": {
+    "PreflightNotificationsPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Amazon Q notifications-only CloudWatch reads for the temporary BuzzKill preflight.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudwatch:Describe*",
+                "cloudwatch:Get*",
+                "cloudwatch:List*"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      },
+      "Metadata": {
+        "Purpose": "Production operational Slack; logical identity retained from the verified cutover."
+      }
+    },
+    "PreflightNotificationsRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "chatbot.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Ref": "PreflightNotificationsPolicy"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "owner",
+            "Value": "buzzkill-operational-slack"
+          },
+          {
+            "Key": "stage",
+            "Value": "production"
+          }
+        ]
+      },
+      "Metadata": {
+        "Purpose": "Production operational Slack; logical identity retained from the verified cutover."
+      }
+    },
+    "PreflightSlackConfiguration": {
+      "Type": "AWS::Chatbot::SlackChannelConfiguration",
+      "Properties": {
+        "ConfigurationName": {
+          "Ref": "ConfigurationName"
+        },
+        "IamRoleArn": {
+          "Fn::GetAtt": [
+            "PreflightNotificationsRole",
+            "Arn"
+          ]
+        },
+        "SlackWorkspaceId": "T0C66F8M9U3",
+        "SlackChannelId": "C0CEZEQCML6",
+        "SnsTopicArns": [
+          {
+            "Ref": "ProductionTopicArn"
+          }
+        ],
+        "GuardrailPolicies": [
+          {
+            "Ref": "PreflightNotificationsPolicy"
+          }
+        ],
+        "UserRoleRequired": true,
+        "LoggingLevel": "NONE",
+        "Tags": [
+          {
+            "Key": "owner",
+            "Value": "buzzkill-operational-slack"
+          },
+          {
+            "Key": "stage",
+            "Value": "production"
+          }
+        ]
+      },
+      "Metadata": {
+        "Purpose": "Production operational Slack; logical identity retained from the verified cutover."
+      }
+    }
+  },
+  "Outputs": {
+    "TopicArn": {
+      "Value": {
+        "Ref": "ProductionTopicArn"
+      }
+    },
+    "ConfigurationArn": {
+      "Value": {
+        "Ref": "PreflightSlackConfiguration"
+      }
+    },
+    "ConfigurationName": {
+      "Value": {
+        "Ref": "ConfigurationName"
+      }
+    },
+    "RoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "PreflightNotificationsRole",
+          "Arn"
+        ]
+      }
+    },
+    "PolicyArn": {
+      "Value": {
+        "Ref": "PreflightNotificationsPolicy"
+      }
+    }
+  }
+}

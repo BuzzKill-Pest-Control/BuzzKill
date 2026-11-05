@@ -21,10 +21,9 @@ import {
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
 import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
-import { ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import { PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { LambdaSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
-import { LoggingLevel, SlackChannelConfiguration } from "aws-cdk-lib/aws-chatbot";
 import {
   ComparisonOperator,
   Metric,
@@ -865,30 +864,10 @@ backend.opsAlerts.addEnvironment(
   businessMode === "main" && !migrationPreview ? bridgeFailureTopic.topicArn : ""
 );
 if (businessMode === "main" && !migrationPreview) {
+  // The standalone operational-slack.template.json stack owns the managed
+  // Slack channel, role, guardrail and subscription. Application deployments
+  // preserve that already tested route and only grant this exact publisher.
   bridgeFailureTopic.grantPublish(backend.opsAlerts.resources.lambda);
-  // Use the documented notifications-only permissions for both the channel
-  // role and its guardrail. Never inherit the construct's AdministratorAccess
-  // guardrail, and do not grant AI, Lambda invocation or write permissions.
-  const notificationPolicy = new ManagedPolicy(opsAlarmsStack, "OpsSlackNotificationsOnly", {
-    statements: [new PolicyStatement({
-      actions: ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"],
-      resources: ["*"],
-    })],
-  });
-  const notificationRole = new Role(opsAlarmsStack, "OpsSlackNotificationRole", {
-    assumedBy: new ServicePrincipal("chatbot.amazonaws.com"),
-    managedPolicies: [notificationPolicy],
-  });
-  new SlackChannelConfiguration(opsAlarmsStack, "OpsSlackChannel", {
-    slackChannelConfigurationName: "buzzkill-production-infrastructure",
-    slackWorkspaceId: "T0C66F8M9U3",
-    slackChannelId: "C0CEZEQCML6",
-    notificationTopics: [bridgeFailureTopic],
-    role: notificationRole,
-    guardrailPolicies: [notificationPolicy],
-    userRoleRequired: true,
-    loggingLevel: LoggingLevel.NONE,
-  });
 }
 const bridgeAction = new SnsAction(bridgeFailureTopic);
 wireAlarm(
