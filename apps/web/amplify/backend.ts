@@ -21,12 +21,10 @@ import {
   InvokeMode,
 } from "aws-cdk-lib/aws-lambda";
 import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
-import { PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import { ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Topic } from "aws-cdk-lib/aws-sns";
-import {
-  EmailSubscription,
-  LambdaSubscription,
-} from "aws-cdk-lib/aws-sns-subscriptions";
+import { LambdaSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
+import { LoggingLevel, SlackChannelConfiguration } from "aws-cdk-lib/aws-chatbot";
 import {
   ComparisonOperator,
   Metric,
@@ -390,10 +388,6 @@ for (const fn of [
   // pricing-refresh emails the office (new-rate heads-ups, the weekly
   // report) and waiting leads ("your exact prices are ready").
   backend.pricingRefresh,
-  // GL-22: ops-alerts emails the owner (INFRA_ALERT_EMAIL, below) when an
-  // alarm turns a background failure into owned work; SES_NOTIFY_EMAIL stays
-  // for the unconfigured-inbox fallback path inside shared/email.
-  backend.opsAlerts,
 ]) {
   if (!migrationPreview) fn.resources.lambda.addToRolePolicy(sesPolicy);
   // The From stays info@ on every branch: it is the verified SES sender
@@ -800,20 +794,13 @@ backend.addOutput({
 // clock, and auto-resolves it when the alarm recovers. A background failure
 // pages the QUEUE — never only a log group.
 //
-// Owner rule (2026-08-15): the alert EMAIL goes straight to the owner, and
-// it carries the diagnostics (recent error logs, console links, repo path)
-// — so the function needs read access to the monitored Lambdas' log groups.
-// Same split as OPS_INBOX: staging alarm noise stays filterable behind a
-// +alias and can never blend into the production alert stream.
-backend.opsAlerts.addEnvironment(
-  "INFRA_ALERT_EMAIL",
-  businessMode === "main"
-    ? "jake@pestbuzzkill.com"
-    : "jake+staginginfra@pestbuzzkill.com"
-);
+// Owner decision: monitoring notifications use Slack only. Keep the CRM's
+// ownership address independently of mail capability; this bridge cannot
+// send SES messages or read application log contents.
+backend.opsAlerts.addEnvironment("SES_NOTIFY_EMAIL", OPS_INBOX);
 // AWS keeps detecting platform failures (including invocations that never
 // start). The existing bridge delivers their sanitized incidents to Sentry;
-// its diagnostic email remains the fallback if ingestion is unavailable.
+// a separate managed SNS-to-Slack route remains the delivery fallback.
 // Enable only the live business environment, never a preview or staging
 // branch inheriting Hosting settings. The DSN is a public ingestion key.
 backend.opsAlerts.addEnvironment(
@@ -828,19 +815,6 @@ backend.opsAlerts.addEnvironment("SENTRY_ORG", process.env.SENTRY_ORG ?? "buzzki
 // distinct from the logical production/staging environment after migration.
 backend.opsAlerts.addEnvironment("SENTRY_INFRA_ALARM_BRANCH", branch);
 backend.opsAlerts.addEnvironment("SENTRY_INFRA_ACCOUNT_ID", Stack.of(backend.opsAlerts.resources.lambda).account);
-// Scoped to this account/region and the amplify-* physical-name prefix all
-// deployed functions share — the log-group name in the alert flows from the
-// SNS payload, so the grant must not cover arbitrary Lambdas.
-const opsAlertsStackRef = Stack.of(backend.opsAlerts.resources.lambda);
-backend.opsAlerts.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions: ["logs:FilterLogEvents"],
-    resources: [
-      `arn:aws:logs:${opsAlertsStackRef.region}:${opsAlertsStackRef.account}:log-group:/aws/lambda/amplify-*`,
-      `arn:aws:logs:${opsAlertsStackRef.region}:${opsAlertsStackRef.account}:log-group:/aws/lambda/amplify-*:*`,
-    ],
-  })
-);
 const opsAlarmsStack = backend.opsAlerts.resources.lambda.stack;
 // SNS/Lambda deliveries can arrive out of order or retry after recovery.
 // Serialize each alarm and retain its newest transition so an older ALARM
@@ -857,9 +831,8 @@ subscribeBusinessEvents(opsAlarmsTopic,
   new LambdaSubscription(backend.opsAlerts.resources.lambda)
 );
 const alarmAction = new SnsAction(opsAlarmsTopic);
-// EVERY alarm gets BOTH transitions: ALARM opens the owned item / failure
-// email, OK auto-resolves the item (no all-clear email — the queue shows
-// the recovery). The GL-22 staging drill
+// EVERY alarm gets BOTH transitions: ALARM opens the owned item and reports
+// the failure; OK auto-resolves the item. The GL-22 staging drill
 // demonstrated the miss: with only addAlarmAction, CloudWatch never
 // notifies on recovery, so ops-alerts' auto-resolve path was unreachable.
 const wireAlarm = (
@@ -873,9 +846,8 @@ const wireAlarm = (
 // routed through it silently stops becoming owned work — so its failures
 // must reach a channel with NO Lambda in the path. Its async invocations
 // (SNS deliveries) retry twice then dead-letter; the DLQ depth and the
-// bridge's own errors/throttles alarm to a SEPARATE topic whose only
-// subscriber is a direct SNS EMAIL to the office (subscription must be
-// confirmed once from the info@ inbox).
+// bridge's own errors/throttles alarm to a SEPARATE topic delivered by the
+// managed Amazon Q Slack integration, with no Lambda or Sentry in its path.
 const opsAlertsDlq = new Queue(opsAlarmsStack, "OpsAlertsDlq", {
   retentionPeriod: Duration.days(14),
 });
@@ -884,16 +856,39 @@ backend.opsAlerts.resources.lambda.configureAsyncInvoke({
   onFailure: new SqsDestination(opsAlertsDlq),
 });
 const bridgeFailureTopic = new Topic(opsAlarmsStack, "OpsBridgeFailureTopic");
-// Owner decision (2026-07-23): only production pages a real inbox — staging
-// alarm noise was flooding it alongside the real alerts. Owner rule
-// (2026-08-15): infra alerts go to the owner directly, not the office, so
-// the raw watchdog leg follows the branded one to jake@. NOTE: changing the
-// subscription address requires a ONE-TIME confirmation click from the new
-// inbox after deploy, or these emails silently never arrive.
+// Only the live business environment can publish monitoring notifications.
+// The production namespace/permissions remain stable while workers are
+// temporarily paused; the existing alarm-action and concurrency guards
+// independently stop delivery during those cutover phases.
+backend.opsAlerts.addEnvironment(
+  "OPS_SLACK_TOPIC_ARN",
+  businessMode === "main" && !migrationPreview ? bridgeFailureTopic.topicArn : ""
+);
 if (businessMode === "main" && !migrationPreview) {
-  subscribeBusinessEvents(bridgeFailureTopic,
-    new EmailSubscription("jake@pestbuzzkill.com")
-  );
+  bridgeFailureTopic.grantPublish(backend.opsAlerts.resources.lambda);
+  // Use the documented notifications-only permissions for both the channel
+  // role and its guardrail. Never inherit the construct's AdministratorAccess
+  // guardrail, and do not grant AI, Lambda invocation or write permissions.
+  const notificationPolicy = new ManagedPolicy(opsAlarmsStack, "OpsSlackNotificationsOnly", {
+    statements: [new PolicyStatement({
+      actions: ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"],
+      resources: ["*"],
+    })],
+  });
+  const notificationRole = new Role(opsAlarmsStack, "OpsSlackNotificationRole", {
+    assumedBy: new ServicePrincipal("chatbot.amazonaws.com"),
+    managedPolicies: [notificationPolicy],
+  });
+  new SlackChannelConfiguration(opsAlarmsStack, "OpsSlackChannel", {
+    slackChannelConfigurationName: "buzzkill-production-infrastructure",
+    slackWorkspaceId: "T0C66F8M9U3",
+    slackChannelId: "C0CEZEQCML6",
+    notificationTopics: [bridgeFailureTopic],
+    role: notificationRole,
+    guardrailPolicies: [notificationPolicy],
+    userRoleRequired: true,
+    loggingLevel: LoggingLevel.NONE,
+  });
 }
 const bridgeAction = new SnsAction(bridgeFailureTopic);
 wireAlarm(

@@ -7,8 +7,8 @@ import { defineFunction } from "@aws-amplify/backend";
  * queue) publishes to the ops-alarms SNS topic; this function turns each
  * alarm into ONE deduplicated shared-Office work item (INFRA_ALERT, keyed
  * by alarm name, common one-business-day clock, escalation via the normal
- * overdue sweep) and an office email. A background failure pages the queue
- * — never only a log group.
+ * overdue sweep) and a sanitized Sentry incident. Independent SNS-to-Slack
+ * fallback and watchdog notifications do not depend on Sentry or SES.
  */
 export const opsAlerts = defineFunction({
   environment: { BUZZKILL_MIGRATION_PREVIEW: String(isMigrationPreview()) },
