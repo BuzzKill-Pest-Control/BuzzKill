@@ -6,6 +6,8 @@ import {
 } from "@aws-sdk/client-cloudwatch-logs";
 import { emailShell, sendEmail } from "../shared/email";
 import { openOwnedWork, resolveOwnedWork } from "../shared/ownedWork";
+import { reportInfraAlarmToSentry, type InfraAlarmMessage } from "../shared/infraSentry";
+import { withInfraAlarmTransition } from "../shared/infraAlarmTransition";
 
 /**
  * GL-22 — CloudWatch alarm state changes become deduplicated, owned
@@ -15,29 +17,13 @@ import { openOwnedWork, resolveOwnedWork } from "../shared/ownedWork";
  * claim/escalation behavior — no critical/high/routine classes, no
  * permanently named primary.
  *
- * Owner rule (2026-08-15): the alert EMAIL goes to the owner directly
- * (INFRA_ALERT_EMAIL), not the office inbox, and it must carry enough
- * diagnostics to hand straight to a debugging session: the CloudWatch
- * reason and time, the failing function's repo path and log group, recent
- * error log excerpts pulled at send time, console deep links, and a
- * ready-to-paste prompt block. The office queue still gets the owned work
- * item exactly as before.
+ * Configured alarms go to Sentry with sanitized infrastructure context.
+ * The previous diagnostic email remains a rollback and delivery-failure
+ * fallback addressed to INFRA_ALERT_EMAIL. Raw log excerpts never go to
+ * Sentry. The office queue retains its owned work and automatic recovery.
  */
 
-type AlarmMessage = {
-  AlarmName?: string;
-  AlarmDescription?: string | null;
-  AlarmArn?: string;
-  NewStateValue?: string;
-  NewStateReason?: string;
-  StateChangeTime?: string;
-  Region?: string;
-  Trigger?: {
-    MetricName?: string;
-    Namespace?: string;
-    Dimensions?: { name?: string; value?: string }[];
-  };
-};
+type AlarmMessage = InfraAlarmMessage;
 
 const logsClient = new CloudWatchLogsClient();
 
@@ -53,16 +39,19 @@ const MAX_LOG_PAGES = 5;
 const escHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** `buzzkill-{branch}-{function}-{errors|throttles|did-not-run|dead-letter}` */
+/** The branch may be a retained Amplify namespace containing hyphens. */
 export function parseAlarmName(name: string): {
   logicalFunction: string | null;
   kind: string | null;
 } {
-  const m = name.match(
-    /^buzzkill-[^-]+-(.+?)-(errors|throttles|did-not-run|dead-letter)$/
+  const branch = process.env.SENTRY_INFRA_ALARM_BRANCH;
+  const prefix = branch ? `buzzkill-${branch}-` : name.match(/^buzzkill-(?:main|staging)-/)?.[0];
+  const suffix = prefix && name.startsWith(prefix) ? name.slice(prefix.length) : "";
+  const match = suffix.match(
+    /^(.+?)-(errors|throttles|did-not-run|dead-letter|record-failures|backlog)$/
   );
-  return m
-    ? { logicalFunction: m[1], kind: m[2] }
+  return match
+    ? { logicalFunction: match[1], kind: match[2] }
     : { logicalFunction: null, kind: null };
 }
 
@@ -151,7 +140,16 @@ async function recentErrorLogs(
   }
 }
 
+/** Sentry owns delivery; the CRM retains the durable incident and recovery state. */
 export async function handleAlarm(message: AlarmMessage): Promise<void> {
+  const state = (message.NewStateValue ?? "").toUpperCase();
+  if (state !== "ALARM" && state !== "OK") return;
+  // The durable guard serializes alarm transitions and rejects older retries.
+  // An ALARM that failed delivery cannot reopen an incident after a newer OK.
+  await withInfraAlarmTransition(message, () => handleCurrentAlarmTransition(message));
+}
+
+async function handleCurrentAlarmTransition(message: AlarmMessage): Promise<void> {
   const name = message.AlarmName ?? "unknown-alarm";
   const state = (message.NewStateValue ?? "").toUpperCase();
   if (state === "OK") {
@@ -162,24 +160,62 @@ export async function handleAlarm(message: AlarmMessage): Promise<void> {
     });
     return;
   }
-  if (state !== "ALARM") return; // INSUFFICIENT_DATA carries no action
+  if (state !== "ALARM") return;
+
+  const failures: unknown[] = [];
+  const muted = Boolean(process.env.OPS_EMAIL_MUTED);
+  let sentryUrl: string | undefined;
+  // Delivery is independent of the business database: a database outage must
+  // still reach Sentry. The reporter awaits ingestion and deduplicates retries.
+  if (process.env.SENTRY_INFRA_DSN && !muted) {
+    try {
+      const report = await reportInfraAlarmToSentry(message);
+      if (!report) throw new Error("Sentry did not accept the alarm event");
+      sentryUrl = `https://buzzkill.sentry.io/issues/?query=${encodeURIComponent(report.eventId)}`;
+    } catch (error) {
+      failures.push(error);
+    }
+  }
 
   const detailLines = [
     message.AlarmDescription?.trim(),
     `CloudWatch reason: ${message.NewStateReason ?? "n/a"}`,
     `State change: ${message.StateChangeTime ?? "n/a"} (${message.Region ?? ""})`,
+    sentryUrl ? `Sentry: ${sentryUrl}` : undefined,
   ].filter(Boolean);
-  await openOwnedWork({
-    kind: "INFRA_ALERT",
-    dedupeKey: `alarm:${name}`,
-    title: `Infrastructure alert: ${name}`,
-    detail: detailLines.join("\n"),
-    relatedId: name,
-    resolutionAction:
-      "Open CloudWatch for this alarm, fix or escalate the underlying failure, and close only when the system fact is verified healthy.",
-    ownerTeam: "OPS",
-  });
+  try {
+    const workId = await openOwnedWork({
+      kind: "INFRA_ALERT",
+      dedupeKey: `alarm:${name}`,
+      title: `Infrastructure alert: ${name}`,
+      detail: detailLines.join("\n"),
+      relatedId: name,
+      resolutionAction: sentryUrl
+        ? `Investigate in Sentry: ${sentryUrl}. Confirm the underlying AWS alarm is healthy before closing; the CRM incident resolves when CloudWatch reports recovery.`
+        : "Open CloudWatch for this alarm, fix or escalate the underlying failure, and close only when the system fact is verified healthy.",
+      ownerTeam: "OPS",
+    });
+    // openOwnedWork logs and returns null on storage failures rather than
+    // throwing. This bridge must retry instead of acknowledging lost work.
+    if (!workId) throw new Error("Could not persist the infrastructure incident");
+  } catch (error) {
+    failures.push(error);
+  }
 
+  // An absent DSN preserves the previous route for rollback. A failed Sentry
+  // delivery uses it as a fallback AND retries through SNS/DLQ/watchdog.
+  if (!muted && !sentryUrl) {
+    try {
+      await sendDiagnosticEmail(message);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, "Infrastructure incident processing failed");
+}
+
+async function sendDiagnosticEmail(message: AlarmMessage): Promise<void> {
+  const name = message.AlarmName ?? "unknown-alarm";
   // ---- the diagnostic email --------------------------------------------
   const region = alarmRegion(message);
   const { logicalFunction, kind } = parseAlarmName(name);
@@ -237,20 +273,14 @@ ${
 <pre style="${preStyle}">${escHtml(promptBlock)}</pre>
 <p>An owned work item is on the shared queue with the one-business-day clock.</p>`;
 
-  // Honor the shared internal-pager kill switch (OPS_EMAIL_MUTED): this is
-  // an internal alert, so an environment silenced outright must not keep
-  // paging through this one path. Nothing sets the flag today.
-  if (process.env.OPS_EMAIL_MUTED) {
-    console.log("ops-alerts: infra alert email muted:", name);
-    return;
-  }
-  await sendEmail({
+  const delivered = await sendEmail({
     to: process.env.INFRA_ALERT_EMAIL ?? "jake@pestbuzzkill.com",
     subject: `INFRA ALERT: ${name}`,
     template: "ops-infra-alert",
     relatedId: name,
     html: emailShell("A background system failure needs attention", bodyHtml),
-  }).catch(() => undefined);
+  });
+  if (!delivered) throw new Error("Infrastructure diagnostic email was not delivered");
 }
 
 export const handler = async (event: SNSEvent): Promise<void> => {

@@ -80,10 +80,12 @@ daily paid-booking reconciliation.
 
 ## 5. Outage (site, CRM, or provider down)
 
-**Detect:** INFRA_ALERT items (Lambda errors, scheduled-run-missing,
-dead-letter alarms), customer reports.
+**Detect:** Sentry `buzzkill-backend` alerts and INFRA_ALERT items (Lambda
+errors/throttles, scheduled-run-missing, dead-letter and search-index alarms),
+customer reports. A Sentry-delivery failure uses the diagnostic email fallback.
 
-1. Claim the INFRA_ALERT. Check the named alarm in CloudWatch.
+1. Claim the INFRA_ALERT. Open its Sentry event link, then follow the named
+   AWS alarm link for current metric state and the function's CloudWatch logs.
 2. If customers can pay into a broken flow, pause **new online bookings**
    (money must not enter a flow that cannot finish).
 3. Provider outage (Stripe/SES/Google): nothing to fix here — keep the
@@ -91,7 +93,9 @@ dead-letter alarms), customer reports.
    provider recovers, then verify the queues drained.
 4. Our outage: escalate to engineering; the alarm auto-resolves the case
    when the metric recovers, but verify the business facts (bookings,
-   emails, reconciliation) before considering it closed.
+   emails, reconciliation) before considering it closed. Mark the historical
+   Sentry issue resolved after verification; that action does not control AWS
+   or the CRM case.
 
 ## 6. Lost or corrupted report / document
 

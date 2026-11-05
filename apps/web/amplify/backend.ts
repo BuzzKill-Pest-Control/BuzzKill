@@ -34,6 +34,7 @@ import {
 } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { Queue } from "aws-cdk-lib/aws-sqs";
+import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
 import type { CfnBucket } from "aws-cdk-lib/aws-s3";
 import {
   CfnConfigurationSet,
@@ -810,6 +811,22 @@ backend.opsAlerts.addEnvironment(
     ? "jake@pestbuzzkill.com"
     : "jake+staginginfra@pestbuzzkill.com"
 );
+// AWS keeps detecting platform failures (including invocations that never
+// start). The existing bridge delivers their sanitized incidents to Sentry;
+// its diagnostic email remains the fallback if ingestion is unavailable.
+// Enable only the live business environment, never a preview or staging
+// branch inheriting Hosting settings. The DSN is a public ingestion key.
+backend.opsAlerts.addEnvironment(
+  "SENTRY_INFRA_DSN",
+  !migrationPreview && businessMode === "main"
+    ? process.env.SENTRY_INFRA_DSN ?? ""
+    : ""
+);
+backend.opsAlerts.addEnvironment("SENTRY_ENVIRONMENT", businessMode === "main" ? "production" : "staging");
+// Physical alarm names retain the original deployment namespace, which is
+// distinct from the logical production/staging environment after migration.
+backend.opsAlerts.addEnvironment("SENTRY_INFRA_ALARM_BRANCH", branch);
+backend.opsAlerts.addEnvironment("SENTRY_INFRA_ACCOUNT_ID", Stack.of(backend.opsAlerts.resources.lambda).account);
 // Scoped to this account/region and the amplify-* physical-name prefix all
 // deployed functions share — the log-group name in the alert flows from the
 // SNS payload, so the grant must not cover arbitrary Lambdas.
@@ -824,6 +841,16 @@ backend.opsAlerts.resources.lambda.addToRolePolicy(
   })
 );
 const opsAlarmsStack = backend.opsAlerts.resources.lambda.stack;
+// SNS/Lambda deliveries can arrive out of order or retry after recovery.
+// Serialize each alarm and retain its newest transition so an older ALARM
+// retry can never reopen a case already resolved by a newer OK message.
+const infraAlarmTransitions = new Table(opsAlarmsStack, "InfraAlarmTransitions", {
+  partitionKey: { name: "alarm", type: AttributeType.STRING },
+  billingMode: BillingMode.PAY_PER_REQUEST,
+  pointInTimeRecovery: true,
+});
+infraAlarmTransitions.grant(backend.opsAlerts.resources.lambda, "dynamodb:UpdateItem");
+backend.opsAlerts.addEnvironment("INFRA_ALARM_STATE_TABLE", infraAlarmTransitions.tableName);
 const opsAlarmsTopic = new Topic(opsAlarmsStack, "OpsAlarmsTopic");
 subscribeBusinessEvents(opsAlarmsTopic,
   new LambdaSubscription(backend.opsAlerts.resources.lambda)
