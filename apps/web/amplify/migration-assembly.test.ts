@@ -156,9 +156,10 @@ it("synthesizes the real full and bootstrap backends with closed references", ()
   assertReferenceClosure(full);
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
-  // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3094);
-  expect(allResources(bootstrap)).toHaveLength(2128);
+  // permission, plus one retained infrastructure-alarm transition table.
+  // No external provider is provisioned in migration preview.
+  expect(allResources(full)).toHaveLength(3095);
+  expect(allResources(bootstrap)).toHaveLength(2129);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(607);
   expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1821);
@@ -228,6 +229,41 @@ it("retains and backs up the private projection, reuses Customer's stream and al
       expect(alarm.Properties?.AlarmActions).toBeDefined();
       expect(alarm.Properties?.OKActions).toEqual(alarm.Properties?.AlarmActions);
     }
+  }
+});
+
+it("retains alarm transition state and confines its UpdateItem grant to the alert bridge in every phase", () => {
+  for (const assembly of [full, bootstrap, adminLogin, released, pausedRelease, primedRelease]) {
+    const tables = Object.values(assembly.templates).flatMap((template) =>
+      Object.entries(template.Resources).filter(([id, resource]) =>
+        id.startsWith("InfraAlarmTransitions") && resource.Type === "AWS::DynamoDB::Table")
+        .map(([id, resource]) => ({ template, id, resource })));
+    expect(tables).toHaveLength(1);
+    const { template, id, resource } = tables[0];
+    expect(resource).toMatchObject({ DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain", Properties: {
+      BillingMode: "PAY_PER_REQUEST", PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+    } });
+    expect(resource.Properties?.KeySchema).toEqual([{ AttributeName: "alarm", KeyType: "HASH" }]);
+    expect(resource.Properties?.AttributeDefinitions).toEqual([{ AttributeName: "alarm", AttributeType: "S" }]);
+    expect(resource.Properties).not.toHaveProperty("GlobalSecondaryIndexes");
+    expect(resource.Properties).not.toHaveProperty("TimeToLiveSpecification");
+    const consumers = Object.values(template.Resources).filter((entry) => entry.Type === "AWS::Lambda::Function" &&
+      (entry.Properties?.Environment as { Variables?: Record<string, unknown> })?.Variables?.INFRA_ALARM_STATE_TABLE);
+    expect(consumers).toHaveLength(1);
+    const variables = (consumers[0].Properties!.Environment as { Variables: Record<string, unknown> }).Variables;
+    expect(variables.INFRA_ALARM_STATE_TABLE).toEqual({ Ref: id });
+    const [roleId, attribute] = (consumers[0].Properties!.Role as { "Fn::GetAtt": [string, string] })["Fn::GetAtt"];
+    expect(attribute).toBe("Arn");
+    expect(template.Resources[roleId].Type).toBe("AWS::IAM::Role");
+    const grants = Object.values(template.Resources).filter((entry) => entry.Type === "AWS::IAM::Policy")
+      .flatMap((policy) => (policy.Properties!.PolicyDocument as { Statement: Record<string, unknown>[] }).Statement
+        .filter((statement) => JSON.stringify(statement.Resource).includes(id)).map((statement) => ({ policy, statement })));
+    expect(grants).toHaveLength(1);
+    const { policy, statement } = grants[0];
+    expect(policy.Properties?.Roles).toEqual([{ Ref: roleId }]);
+    expect(statement.Effect).toBe("Allow");
+    expect([statement.Action].flat()).toEqual(["dynamodb:UpdateItem"]);
+    expect([statement.Resource].flat()).toEqual([{ "Fn::GetAtt": [id, "Arn"] }]);
   }
 });
 
@@ -330,7 +366,8 @@ it("keeps destination stateful identities and properties when the retained backe
       checked++;
     }
   }
-  expect(checked).toBe(63);
+  // The infrastructure transition ledger adds one retained stateful identity.
+  expect(checked).toBe(64);
 });
 
 
@@ -412,7 +449,8 @@ it("deploys a production-configured cutover with every application worker and wr
       functionCount++;
     }
   }
-  expect(checked).toBe(63);
+  // The infrastructure transition ledger remains the same table during cutover.
+  expect(checked).toBe(64);
   expect(functionCount).toBe(functions.length);
 });
 
