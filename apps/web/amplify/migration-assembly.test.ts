@@ -267,7 +267,7 @@ it("retains alarm transition state and confines its UpdateItem grant to the aler
   }
 });
 
-it("routes production watchdogs and bridge failures to managed Slack without mail or broad channel permissions", () => {
+it("publishes production failures to the independent Slack route without app-owned channels or email", () => {
   const main = process.env.AWS_BRANCH !== "codex-buzzkill-staging-migration";
   for (const assembly of [full, bootstrap, adminLogin, released, pausedRelease, primedRelease]) {
     const resources = allResources(assembly);
@@ -288,9 +288,10 @@ it("routes production watchdogs and bridge failures to managed Slack without mai
       .flatMap((policy) => (policy.Properties!.PolicyDocument as { Statement: Record<string, unknown>[] }).Statement);
     const actions = statements.flatMap((statement) => [statement.Action].flat() as string[]);
     expect(actions.some((action) => action.startsWith("ses:") || action === "logs:FilterLogEvents")).toBe(false);
-    const configs = resources.filter((resource) => resource.Type === "AWS::Chatbot::SlackChannelConfiguration");
+    // AWS permits one configuration per channel/workspace/account. Its
+    // already tested standalone stack must retain ownership across app builds.
+    expect(resources.filter((resource) => resource.Type === "AWS::Chatbot::SlackChannelConfiguration")).toHaveLength(0);
     const publish = statements.filter((statement) => [statement.Action].flat().includes("sns:Publish"));
-    expect(configs).toHaveLength(production ? 1 : 0);
     expect(publish).toHaveLength(production ? 1 : 0);
     if (!production) {
       expect(variables.OPS_SLACK_TOPIC_ARN).toBe("");
@@ -303,24 +304,6 @@ it("routes production watchdogs and bridge failures to managed Slack without mai
     expect([publish[0].Action].flat()).toEqual(["sns:Publish"]);
     expect([publish[0].Resource].flat()).toEqual([topic]);
     expect(publish[0].Effect).toBe("Allow");
-    const config = configs[0].Properties!;
-    expect(config).toMatchObject({
-      ConfigurationName: "buzzkill-production-infrastructure", SlackWorkspaceId: "T0C66F8M9U3",
-      SlackChannelId: "C0CEZEQCML6", SnsTopicArns: [topic], UserRoleRequired: true, LoggingLevel: "NONE",
-    });
-    const [notificationRoleId] = (config.IamRoleArn as { "Fn::GetAtt": [string, string] })["Fn::GetAtt"];
-    const role = template.Resources[notificationRoleId];
-    expect(role.Properties?.AssumeRolePolicyDocument).toMatchObject({ Statement: [{
-      Action: "sts:AssumeRole", Effect: "Allow", Principal: { Service: "chatbot.amazonaws.com" },
-    }] });
-    expect(role.Properties?.ManagedPolicyArns).toEqual(config.GuardrailPolicies);
-    const guardrails = config.GuardrailPolicies as { Ref: string }[];
-    expect(guardrails).toHaveLength(1);
-    const policy = template.Resources[guardrails[0].Ref];
-    expect(policy.Type).toBe("AWS::IAM::ManagedPolicy");
-    expect(policy.Properties?.PolicyDocument).toEqual({ Version: "2012-10-17", Statement: [{
-      Action: ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"], Effect: "Allow", Resource: "*",
-    }] });
     const alarms = resources.filter((resource) => resource.Type === "AWS::CloudWatch::Alarm");
     expect(alarms).toHaveLength(33);
     const watchdogs = alarms.filter((alarm) => /-ops-alerts-(errors|throttles|dead-letter)$/.test(String(alarm.Properties?.AlarmName)));
