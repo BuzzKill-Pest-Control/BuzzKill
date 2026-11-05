@@ -162,10 +162,10 @@ describe("infrastructure configuration and input validation", () => {
   it.each([
     ["SENTRY_ENVIRONMENT", undefined], ["SENTRY_ENVIRONMENT", "dev"],
     ["SENTRY_INFRA_ALARM_BRANCH", undefined], ["SENTRY_INFRA_ALARM_BRANCH", "private@example.com"],
-    ["SENTRY_INFRA_ACCOUNT_ID", "private"], ["SENTRY_RELEASE", "jane@example.com"],
+    ["SENTRY_INFRA_ACCOUNT_ID", undefined], ["SENTRY_INFRA_ACCOUNT_ID", "private"], ["SENTRY_RELEASE", "jane@example.com"],
   ])("refuses invalid %s configuration", async (name, value) => {
     vi.stubEnv(name, value);
-    await expect(report(alarm())).rejects.toThrow(/Sentry infrastructure/);
+    await expect(report(alarm())).rejects.toThrow(/(?:Sentry infrastructure|Infrastructure alarm)/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

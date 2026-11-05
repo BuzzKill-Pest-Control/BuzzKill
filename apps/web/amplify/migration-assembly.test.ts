@@ -267,6 +267,72 @@ it("retains alarm transition state and confines its UpdateItem grant to the aler
   }
 });
 
+it("routes production watchdogs and bridge failures to managed Slack without mail or broad channel permissions", () => {
+  const main = process.env.AWS_BRANCH !== "codex-buzzkill-staging-migration";
+  for (const assembly of [full, bootstrap, adminLogin, released, pausedRelease, primedRelease]) {
+    const resources = allResources(assembly);
+    const production = main && [released, pausedRelease, primedRelease].includes(assembly);
+    expect(resources.filter((resource) => resource.Type === "AWS::SNS::Subscription" &&
+      resource.Properties?.Protocol === "email")).toHaveLength(0);
+    const template = Object.values(assembly.templates).find((candidate) => Object.values(candidate.Resources).some((resource) =>
+      resource.Type === "AWS::Lambda::Function" &&
+      (resource.Properties?.Environment as { Variables?: Record<string, unknown> })?.Variables?.INFRA_ALARM_STATE_TABLE))!;
+    const bridge = Object.values(template.Resources).find((resource) => resource.Type === "AWS::Lambda::Function" &&
+      (resource.Properties?.Environment as { Variables?: Record<string, unknown> })?.Variables?.INFRA_ALARM_STATE_TABLE)!;
+    const variables = (bridge.Properties!.Environment as { Variables: Record<string, unknown> }).Variables;
+    for (const key of ["INFRA_ALERT_EMAIL", "PRODUCTION_EMAIL", "SES_FROM_EMAIL"]) expect(variables).not.toHaveProperty(key);
+    expect(variables.SES_NOTIFY_EMAIL).toBeDefined(); // CRM ownership address, not permission to send mail.
+    const [bridgeRole] = (bridge.Properties!.Role as { "Fn::GetAtt": [string, string] })["Fn::GetAtt"];
+    const statements = Object.values(template.Resources).filter((resource) => resource.Type === "AWS::IAM::Policy" &&
+      (resource.Properties?.Roles as unknown[]).some((role) => JSON.stringify(role) === JSON.stringify({ Ref: bridgeRole })))
+      .flatMap((policy) => (policy.Properties!.PolicyDocument as { Statement: Record<string, unknown>[] }).Statement);
+    const actions = statements.flatMap((statement) => [statement.Action].flat() as string[]);
+    expect(actions.some((action) => action.startsWith("ses:") || action === "logs:FilterLogEvents")).toBe(false);
+    const configs = resources.filter((resource) => resource.Type === "AWS::Chatbot::SlackChannelConfiguration");
+    const publish = statements.filter((statement) => [statement.Action].flat().includes("sns:Publish"));
+    expect(configs).toHaveLength(production ? 1 : 0);
+    expect(publish).toHaveLength(production ? 1 : 0);
+    if (!production) {
+      expect(variables.OPS_SLACK_TOPIC_ARN).toBe("");
+      continue;
+    }
+    const [topicId] = Object.entries(template.Resources).find(([id, resource]) =>
+      id.startsWith("OpsBridgeFailureTopic") && resource.Type === "AWS::SNS::Topic")!;
+    const topic = { Ref: topicId };
+    expect(variables.OPS_SLACK_TOPIC_ARN).toEqual(topic);
+    expect([publish[0].Action].flat()).toEqual(["sns:Publish"]);
+    expect([publish[0].Resource].flat()).toEqual([topic]);
+    expect(publish[0].Effect).toBe("Allow");
+    const config = configs[0].Properties!;
+    expect(config).toMatchObject({
+      ConfigurationName: "buzzkill-production-infrastructure", SlackWorkspaceId: "T0C66F8M9U3",
+      SlackChannelId: "C0CEZEQCML6", SnsTopicArns: [topic], UserRoleRequired: true, LoggingLevel: "NONE",
+    });
+    const [notificationRoleId] = (config.IamRoleArn as { "Fn::GetAtt": [string, string] })["Fn::GetAtt"];
+    const role = template.Resources[notificationRoleId];
+    expect(role.Properties?.AssumeRolePolicyDocument).toMatchObject({ Statement: [{
+      Action: "sts:AssumeRole", Effect: "Allow", Principal: { Service: "chatbot.amazonaws.com" },
+    }] });
+    expect(role.Properties?.ManagedPolicyArns).toEqual(config.GuardrailPolicies);
+    const guardrails = config.GuardrailPolicies as { Ref: string }[];
+    expect(guardrails).toHaveLength(1);
+    const policy = template.Resources[guardrails[0].Ref];
+    expect(policy.Type).toBe("AWS::IAM::ManagedPolicy");
+    expect(policy.Properties?.PolicyDocument).toEqual({ Version: "2012-10-17", Statement: [{
+      Action: ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"], Effect: "Allow", Resource: "*",
+    }] });
+    const alarms = resources.filter((resource) => resource.Type === "AWS::CloudWatch::Alarm");
+    expect(alarms).toHaveLength(33);
+    const watchdogs = alarms.filter((alarm) => /-ops-alerts-(errors|throttles|dead-letter)$/.test(String(alarm.Properties?.AlarmName)));
+    expect(watchdogs).toHaveLength(3);
+    if (assembly === released) {
+      for (const alarm of alarms) expect(alarm.Properties?.OKActions).toEqual(alarm.Properties?.AlarmActions);
+      for (const alarm of watchdogs) expect(alarm.Properties?.AlarmActions).toEqual([topic]);
+      expect(alarms.filter((alarm) => !watchdogs.includes(alarm))).toHaveLength(30);
+    }
+  }
+});
+
 it("refuses every real mutation in both phases, including retained PromoCode and Route writes", () => {
   for (const assembly of [full, bootstrap]) {
     const resolvers = allResources(assembly).filter((r) => r.Type === "AWS::AppSync::Resolver");
