@@ -39,10 +39,30 @@ test("source builds and the retained staging namespace keep their original branc
   assert.equal(retainedBackendBranch({ AWS_APP_ID: "d3owdoeg1om341", AWS_BRANCH: "codex-buzzkill-staging-migration" }), "codex-buzzkill-staging-migration");
 });
 
-test("CRM output readers tolerate the website update but cannot accept a rollback or different root", () => {
+test("CRM output readers tolerate the website update but cannot accept an ongoing rollback", () => {
   const crm = { ...env, AWS_APP_ID: "d2y2zigtl5rx3", BUZZKILL_BACKEND_APP_ID: "d3owdoeg1om341" };
   const updating = [...responses]; updating[2] = { Stacks: [{ StackId: root, StackStatus: "UPDATE_IN_PROGRESS", EnableTerminationProtection: true }] };
   assert.equal(verifyRetainedBackend(crm, reader(updating)), physical);
   updating[2] = { Stacks: [{ StackId: root, StackStatus: "UPDATE_ROLLBACK_IN_PROGRESS", EnableTerminationProtection: true }] };
   assert.throws(() => verifyRetainedBackend(crm, reader(updating)));
+});
+
+test("both production apps can recover after a completed update rollback without relaxing identity guards", () => {
+  for (const app of [env, { ...env, AWS_APP_ID: "d2y2zigtl5rx3", BUZZKILL_BACKEND_APP_ID: "d3owdoeg1om341" }]) {
+    const recovered = [...responses];
+    recovered[2] = { Stacks: [{ StackId: root, StackStatus: "UPDATE_ROLLBACK_COMPLETE", EnableTerminationProtection: true }] };
+    assert.equal(verifyRetainedBackend(app, reader(recovered)), physical);
+    for (const patch of [{ StackId: root + "different" }, { EnableTerminationProtection: false }]) {
+      const wrong = [...recovered];
+      wrong[2] = { Stacks: [{ ...recovered[2].Stacks[0], ...patch }] };
+      assert.throws(() => verifyRetainedBackend(app, reader(wrong)));
+    }
+    const foreign = [...recovered]; foreign[0] = { Account: "637423611040" };
+    assert.throws(() => verifyRetainedBackend(app, reader(foreign)));
+    for (const status of ["UPDATE_ROLLBACK_IN_PROGRESS", "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS", "UPDATE_ROLLBACK_FAILED", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED", "DELETE_COMPLETE"]) {
+      const unsettled = [...recovered];
+      unsettled[2] = { Stacks: [{ StackId: root, StackStatus: status, EnableTerminationProtection: true }] };
+      assert.throws(() => verifyRetainedBackend(app, reader(unsettled)));
+    }
+  }
 });
