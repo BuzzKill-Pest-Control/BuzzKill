@@ -123,7 +123,7 @@ describe("Sentry event allowlist", () => {
         type: "TypeError", value: "render.crm_screen (TypeError)", mechanism: { type: "generic", handled: true },
         stacktrace: { frames: [{ filename: asset, lineno: 182, colno: 44, in_app: true, debug_id: debugId }] },
       }] },
-      tags: { app: "buzzkill-crm", monitoring_operation: "render.crm_screen", route: "/customers/:id" },
+      tags: { app: "buzzkill-crm", monitoring_operation: "render.crm_screen", monitoring_source_category: "app_asset", route: "/customers/:id" },
       request: { url: `${origin}/customers/:id` },
       debug_meta: { images: [{ type: "sourcemap", code_file: asset, debug_id: debugId }] },
     });
@@ -161,5 +161,67 @@ describe("Sentry event allowlist", () => {
     expect(result.timestamp).toBeUndefined();
     expect(result.exception.values[0].value).toBe("browser.unhandled_error (Error)");
     expect(result.request.url).toBe(`${origin}/[redacted]`);
+  });
+});
+
+describe("bounded source-category diagnostics", () => {
+  const cases = [
+    [asset, "app_asset"],
+    [`${asset}?private=${"auth-secret".repeat(500)}`, "app_asset"],
+    [location.href, "inline"],
+    [`${origin}/customers/customer-secret-id?other=auth-secret#private`, "inline"],
+    ["https://vendor.example/private-jane@example.com.js?token=auth-secret", "external"],
+    ["https://app.pestbuzzkill.com.evil.example/private.js", "external"],
+    ["chrome-extension://extension-secret-id/private.js", "extension"],
+    ["moz-extension://extension-secret-id/private.js", "extension"],
+    ["safari-web-extension://extension-secret-id/private.js", "extension"],
+    ["eval", "eval"],
+    ["debugger eval code", "eval"],
+    ["blob:https://app.pestbuzzkill.com/customer-secret-id", "eval"],
+    ["data:text/javascript,jane@example.com", "eval"],
+    ["javascript:privateCustomer()", "eval"],
+    ["<anonymous>", "unknown"],
+    ["[native code]", "unknown"],
+    ["https://[malformed", "unknown"],
+    [`${origin}/private-source.ts`, "unknown"],
+  ];
+
+  it.each(cases)("classifies %s as the fixed %s hint without retaining its location", (filename, category) => {
+    const raw = { tags: { customer: "jane@example.com" }, exception: { values: [{
+      type: "ReferenceError", value: "Jane Doe auth-secret", stacktrace: { frames: [
+        { filename: asset, lineno: 10, function: "outerPrivateWrapper" },
+        { filename, lineno: 20, colno: 3, function: "privateCustomerFunction" },
+      ] },
+    }] } };
+    const clean = scrubMonitoringEvent(raw, config, location.href)!;
+    expect(clean.tags.monitoring_source_category).toBe(category);
+    expect(clean.exception.values[0].stacktrace!.frames[0].filename).toBe(asset);
+    expect(scrubMonitoringEvent(clean, config, location.href)).toEqual(clean);
+    expect(JSON.stringify(clean)).not.toMatch(/Jane|jane|auth-secret|customer-secret|extension-secret|vendor\.example|privateCustomer|private-source|outerPrivate/);
+  });
+
+  it("handles stackless errors and rejects unbounded or forged metadata", () => {
+    const raw = { tags: { monitoring_source_category: "jane@example.com", monitoring_source_host: "customer-secret-id" },
+      exception: { values: [{ type: "ReferenceError", stacktrace: { frames: [{}] } }] } };
+    const clean = scrubMonitoringEvent(raw, config, location.href)!;
+    expect(clean.tags.monitoring_source_category).toBe("unknown");
+    expect(clean.tags).not.toHaveProperty("monitoring_source_host");
+    expect(scrubMonitoringEvent(clean, config, location.href)).toEqual(clean);
+    expect(JSON.stringify(clean)).not.toMatch(/jane|customer-secret/);
+  });
+
+  it("prefers an observed raw location to a conflicting category hint", () => {
+    const clean = scrubMonitoringEvent({ tags: { monitoring_source_category: "inline" }, exception: { values: [{
+      stacktrace: { frames: [{ abs_path: asset }] },
+    }] } }, config, location.href)!;
+    expect(clean.tags.monitoring_source_category).toBe("app_asset");
+  });
+
+  it("inspects only the primary exception's innermost retained frame", () => {
+    const clean = scrubMonitoringEvent({ exception: { values: [
+      { stacktrace: { frames: [{ filename: "chrome-extension://private/id.js" }] } },
+      { stacktrace: { frames: [{ filename: asset }, {}] } },
+    ] } }, config, location.href)!;
+    expect(clean.tags.monitoring_source_category).toBe("unknown");
   });
 });
