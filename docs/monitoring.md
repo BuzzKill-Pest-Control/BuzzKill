@@ -89,6 +89,33 @@ addresses, payment information, form contents, authentication links, URL query
 strings, raw console messages, or arbitrary application state. Preserve only
 validated source-map debug identifiers and public static asset filenames.
 
+The fixed `monitoring_source_category` tag describes the innermost frame of the
+primary exception before its location is redacted. Its values are bounded:
+
+| Value | Location hint |
+| --- | --- |
+| `app_asset` | A same-origin immutable JavaScript asset accepted by the existing asset allowlist |
+| `inline` | The current document's origin and pathname, ignoring query strings and fragments |
+| `external` | An HTTP or HTTPS location on another origin |
+| `extension` | A recognized browser-extension URI scheme |
+| `eval` | An explicit eval marker or a blob, data, or JavaScript URI scheme |
+| `unknown` | A missing or unrecognized location |
+
+These categories are location hints. They do not prove which application,
+vendor, or extension caused an error. External hostnames, extension identifiers,
+raw locations, function names, and error messages remain excluded. The category
+survives both privacy passes, including SDK-internal errors that bypass
+`beforeSend`. Existing error filters and event delivery remain in effect.
+
+Historical events whose original messages and locations were already removed
+cannot be reclassified from this tag. In particular, it does not establish the
+cause of the earlier unattributed ReferenceErrors. Future events provide the
+bounded hint alongside the existing operation, release, and sanitized route.
+
+Both apps use this shared policy. Verify its category and redaction contract with
+the local real-SDK tests and mocked fetch transport, including repeated
+sanitization and SDK-internal errors, and run both app builds before release.
+
 Monitoring must remain optional at runtime: an unavailable Sentry endpoint must
 not prevent sign-in, booking, payment, or normal navigation.
 
@@ -223,3 +250,43 @@ checking the native channel rules and personal workflow preferences.
 
 Shared organization digests, billing, and security notifications are account
 settings and are outside BuzzKill's incident-alert routes.
+
+## Frontend-only website release
+
+The website owns the shared backend. A normal `main` push builds both Hosting
+apps and runs `ampx pipeline-deploy`; a browser-only fix must explicitly isolate
+its release. Use account `743917687359`, region `us-east-1`, web app
+`d3owdoeg1om341`, and `BUZZKILL_FRONTEND_ONLY_RELEASE=true`. The wrapper reads
+existing outputs, validates the protected retained root and output bindings,
+and runs ordinary `npm run build`, including its prebuild guard. It never
+falls back to a backend deployment. Unset/false retains the normal deployment
+path; other flag values fail.
+
+QA before merging to `main`. Use the isolated Hosting branch
+`codex/browser-source-diagnostics`, with automatic builds and PR previews off,
+bound to `codex-buzzkill-staging-migration` and business environment `staging`.
+Keep the actual backend preview, cutover pause, worker pause, and preview-admin
+flags false. The wrapper sets only the client preview flag true for compilation,
+which disables customer integrations, analytics, and Sentry. Set source-map
+uploads false and do not copy production Sentry credentials or a DSN to this
+host. Require noindex HTML, disallow-all robots, and no sitemap. Preserve the
+existing staging host, Git branch, CRM, and backend. If the exact settled staging
+root is unprotected, enable termination protection as a separately recorded
+environment repair before the read-only guard can pass.
+
+Before the production merge, record and hold automatic builds on both main
+Hosting branches. Set the frontend-only flag only on web main, preserving its
+other settings. Its retained namespace is `codex-buzzkill-account-migration`,
+business environment `main`; the client preview flag must be absent/false.
+Merge the reviewed source after final-head Greptile 5/5 and validation, then
+release only web main. Verify its actual checkout, read-only build markers,
+served full release, and artifact checks. Confirm backend identity/update time
+and the CRM's existing job25 remain unchanged, then restore the recorded flag
+and automatic-build settings. Do not promote unrelated staging or recovery work.
+
+This rollout verifies only `buzzkill-web`; existing per-project integration
+setup remains unchanged. Combine real-SDK offline tests and hosted artifact
+checks with one separate, clearly labelled synthetic Sentry ingestion/Slack
+delivery test. Do not deliberately throw on a production page or invoke forms,
+customer workflows, or business APIs. Keep the original issue open while its
+historical cause remains unconfirmed.

@@ -32,7 +32,9 @@ function shellHead(): Plugin {
   }
 }
 
-const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true" || process.env.BUZZKILL_CUTOVER_PAUSED === "true";
+// The isolated frontend QA build can fence its UI without changing the active
+// retained backend flags or generated output metadata.
+const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true" || process.env.BUZZKILL_CUTOVER_PAUSED === "true" || process.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true";
 const previewDefines = migrationPreview ? {
   "import.meta.env.VITE_GOOGLE_MAPS_API_KEY": JSON.stringify(""),
   "import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY": JSON.stringify(""),

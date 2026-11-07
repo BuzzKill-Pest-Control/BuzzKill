@@ -9,31 +9,41 @@ applications:
             - nvm install 22.23.3 && nvm use 22.23.3
             - npm install --global npm@11.11.0
             - npm ci --cache .npm --prefer-offline
-            - node --test scripts/retainedBackend.test.mjs
+            - node --test scripts/retainedBackend.test.mjs scripts/frontendRelease.test.mjs
             # Backend business rules (billing cadence, lead capture) are tested
             # before anything deploys — a broken money rule must fail the build,
             # not reach production and wait to be noticed.
-            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
-            # Deploys the backend (auth, data, lead-intake function) and writes
-            # amplify_outputs.json — including the lead-intake Function URL —
-            # to the app root before the frontend phase runs.
+            - env -u VITE_BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
+            # The default path deploys the shared backend. Explicit frontend-only
+            # releases instead read and validate existing outputs, without a
+            # backend deployment or a fallback when those read-only checks fail.
             - |
-              if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ]; then
-                test -n "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Destination account ID is required"; exit 1; }
-                test "$BUZZKILL_DESTINATION_ACCOUNT_ID" != "637423611040" || { echo "Source account is forbidden in preview"; exit 1; }
-                test "$(aws sts get-caller-identity --query Account --output text)" = "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Build account mismatch"; exit 1; }
-              fi
-              if [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ] || [ "$BUZZKILL_PREVIEW_ADMIN_LOGIN" = "true" ] || [ "$BUZZKILL_CUTOVER_PAUSED" = "true" ]; then
-                export BUZZKILL_DEPLOY_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) || exit 1
-                test "$BUZZKILL_DEPLOY_ACCOUNT_ID" = "743917687359" || { echo "Destination override forbidden in this account"; exit 1; }
-                test "$AWS_APP_ID" = "d3owdoeg1om341" || { echo "Destination backend app mismatch"; exit 1; }
-                test "$AWS_REGION" = "us-east-1" || { echo "Destination region mismatch"; exit 1; }
-              fi
-              # Hosting main deploys the existing backend namespace. The live
-              # identity/root check prevents accidentally creating a new backend.
-              BACKEND_BRANCH=$(node scripts/retainedBackend.mjs --verify) || exit 1
-              export AWS_BRANCH="$BACKEND_BRANCH"
-              npx ampx pipeline-deploy --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID"
+              case "${BUZZKILL_FRONTEND_ONLY_RELEASE:-false}" in
+                true)
+                  BACKEND_BRANCH=$(node scripts/frontendRelease.mjs) || exit 1
+                  export AWS_BRANCH="$BACKEND_BRANCH"
+                  unset BUZZKILL_BACKEND_BRANCH
+                  ;;
+                false)
+                  if [ "$BUZZKILL_MIGRATION_PREVIEW" = "true" ] || [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ]; then
+                    test -n "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Destination account ID is required"; exit 1; }
+                    test "$BUZZKILL_DESTINATION_ACCOUNT_ID" != "637423611040" || { echo "Source account is forbidden in preview"; exit 1; }
+                    test "$(aws sts get-caller-identity --query Account --output text)" = "$BUZZKILL_DESTINATION_ACCOUNT_ID" || { echo "Build account mismatch"; exit 1; }
+                  fi
+                  if [ -n "$BUZZKILL_SOURCE_ENVIRONMENT" ] || [ "$BUZZKILL_PREVIEW_ADMIN_LOGIN" = "true" ] || [ "$BUZZKILL_CUTOVER_PAUSED" = "true" ]; then
+                    export BUZZKILL_DEPLOY_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) || exit 1
+                    test "$BUZZKILL_DEPLOY_ACCOUNT_ID" = "743917687359" || { echo "Destination override forbidden in this account"; exit 1; }
+                    test "$AWS_APP_ID" = "d3owdoeg1om341" || { echo "Destination backend app mismatch"; exit 1; }
+                    test "$AWS_REGION" = "us-east-1" || { echo "Destination region mismatch"; exit 1; }
+                  fi
+                  # Hosting main deploys the existing backend namespace. The live
+                  # identity/root check prevents accidentally creating a new backend.
+                  BACKEND_BRANCH=$(node scripts/retainedBackend.mjs --verify) || exit 1
+                  export AWS_BRANCH="$BACKEND_BRANCH"
+                  npx ampx pipeline-deploy --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID"
+                  ;;
+                *) echo "Invalid frontend-only release flag"; exit 1 ;;
+              esac
     frontend:
       phases:
         build:
@@ -44,7 +54,12 @@ applications:
             # file so import.meta.env can see it. Safe no-op when nothing is set.
             - env | grep -E '^VITE_' >> .env || true
             - node --test ../../monitoring/build.test.mjs
-            - npm run build
+            - |
+              if [ "${BUZZKILL_FRONTEND_ONLY_RELEASE:-false}" = "true" ]; then
+                node scripts/frontendRelease.mjs --build
+              else
+                npm run build
+              fi
             # Staging must never compete with www.pestbuzzkill.com in search:
             # non-main branches get a hard noindex (robots.txt + meta).
             - |
@@ -119,7 +134,7 @@ applications:
             - env | grep -E '^VITE_' >> .env || true
             # The office money screens compute revenue. Same rule as the backend:
             # a broken money rule fails the build rather than shipping.
-            - env -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
+            - env -u VITE_BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_MIGRATION_PREVIEW -u BUZZKILL_PREVIEW_ADMIN_LOGIN -u BUZZKILL_SOURCE_ENVIRONMENT -u BUZZKILL_CUTOVER_PAUSED -u BUZZKILL_WORKERS_PAUSED -u BUZZKILL_BACKEND_BRANCH npm test
             - node --test ../../monitoring/build.test.mjs
             - npm run build
             - node ../../monitoring/build.mjs --assert-artifacts dist

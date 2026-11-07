@@ -25,6 +25,8 @@ export const MONITORING_OPERATIONS = [
   "render.crm_screen", "render.web_page",
 ] as const;
 export type MonitoringOperation = typeof MONITORING_OPERATIONS[number];
+const SOURCE_CATEGORIES = ["app_asset", "inline", "external", "extension", "eval", "unknown"] as const;
+type SourceCategory = typeof SOURCE_CATEGORIES[number];
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): RecordValue => value && typeof value === "object" && !Array.isArray(value)
@@ -90,6 +92,46 @@ function cleanFrame(value: unknown, origin: string) {
   };
 }
 
+/** A bounded location hint, never a claim about which code caused an error. */
+function frameSourceCategory(value: unknown, origin: string, pageUrl: string): SourceCategory {
+  const frame = object(value);
+  const rawSources = [frame.filename, frame.abs_path];
+  // Every asset retained by cleanFrame must receive the same hint on both
+  // passes, including an asset URL whose discarded query is unusually long.
+  if (rawSources.some((source) => monitoringAsset(source, origin))) return "app_asset";
+  const sources = rawSources.filter((source): source is string =>
+    typeof source === "string" && source.length > 0 && source.length <= 4096
+  );
+  for (const source of sources) {
+    if (["eval", "eval code", "debugger eval code"].includes(source)) return "eval";
+    // Do not turn arbitrary function names or malformed source strings into URLs.
+    if (!/^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(source)) continue;
+    try {
+      const url = new URL(source, origin);
+      if (["chrome-extension:", "moz-extension:", "safari-extension:", "safari-web-extension:"].includes(url.protocol)) return "extension";
+      if (["blob:", "data:", "javascript:"].includes(url.protocol)) return "eval";
+      if (!["https:", "http:"].includes(url.protocol)) continue;
+      if (url.origin !== origin) return "external";
+      const page = new URL(pageUrl, origin);
+      if (page.origin === origin && url.pathname === page.pathname) return "inline";
+    } catch { /* Missing or malformed locations remain unknown. */ }
+  }
+  return frame.function === "eval" ? "eval" : "unknown";
+}
+
+function eventSourceCategory(event: RecordValue, values: unknown[], origin: string, pageUrl: string): SourceCategory {
+  // Sentry orders frames oldest to newest. Inspect the primary exception's
+  // innermost frame, not an outer app wrapper that called a vendor/inline source.
+  const frames = object(object(values[values.length - 1]).stacktrace).frames;
+  const retained = Array.isArray(frames) ? frames.slice(-100) : [];
+  const observed = frameSourceCategory(retained[retained.length - 1], origin, pageUrl);
+  if (observed !== "unknown") return observed;
+  // beforeSend and the outbound transport both scrub. Non-asset locations are
+  // gone on the second pass, so retain only an already bounded category hint.
+  const saved = object(event.tags).monitoring_source_category;
+  return SOURCE_CATEGORIES.includes(saved as SourceCategory) ? saved as SourceCategory : "unknown";
+}
+
 function operationFor(event: RecordValue): MonitoringOperation {
   const operation = object(event.tags).monitoring_operation;
   if (MONITORING_OPERATIONS.includes(operation as MonitoringOperation)) return operation as MonitoringOperation;
@@ -107,7 +149,9 @@ export function scrubMonitoringEvent(input: unknown, policy: EnabledMonitoring, 
   if (event.type !== undefined) return null; // Errors only: never transactions, feedback or replay.
   const operation = operationFor(event);
   const values = object(event.exception).values;
-  const exceptions = (Array.isArray(values) && values.length ? values : [{}]).slice(-5).map((value) => {
+  const retainedValues = (Array.isArray(values) && values.length ? values : [{}]).slice(-5);
+  const sourceCategory = eventSourceCategory(event, retainedValues, policy.origin, pageUrl);
+  const exceptions = retainedValues.map((value) => {
     const error = object(value);
     const type = typeof error.type === "string" && ERROR_TYPES.has(error.type) ? error.type : "Error";
     const frames = object(error.stacktrace).frames;
@@ -134,7 +178,7 @@ export function scrubMonitoringEvent(input: unknown, policy: EnabledMonitoring, 
     platform: "javascript", level: "error" as const,
     release: policy.release, environment: "production",
     exception: { values: exceptions },
-    tags: { app: policy.appId, monitoring_operation: operation, route },
+    tags: { app: policy.appId, monitoring_operation: operation, monitoring_source_category: sourceCategory, route },
     request: { url: `${policy.origin}${route}` },
     ...(debugImages.length ? { debug_meta: { images: debugImages } } : {}),
   };
