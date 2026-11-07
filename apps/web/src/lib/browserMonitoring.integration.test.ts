@@ -36,7 +36,11 @@ it("runs the real SDK global handlers through its fetch transport, scrubs PII, p
   await import("./monitoringBootstrap");
   expect(Sentry.getClient()).toBeDefined();
   expect(Sentry.getClient()!.getOptions().release).toBe(release);
-  const options = Sentry.getClient()!.getOptions();
+  // Initialization above supplies this optional SDK hook; make that required
+  // callback explicit for Vitest's method-only spy overload.
+  const options = Sentry.getClient()!.getOptions() as {
+    beforeSend: NonNullable<Sentry.BrowserOptions["beforeSend"]>;
+  };
   const originalBeforeSend = options.beforeSend!;
   const firstPassEvents: unknown[] = [];
   const beforeSend = vi.spyOn(options, "beforeSend").mockImplementation(async (event, hint) => {
