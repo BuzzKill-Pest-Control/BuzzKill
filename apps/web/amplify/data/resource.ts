@@ -1806,6 +1806,9 @@ export const schema = a.schema({
     .secondaryIndexes((index) => [
       index("scheduledDate"),
       index("status").sortKeys(["scheduledDate"]),
+      // Date-less office/rebooked jobs must appear in the scheduling pool.
+      // The status/date index is sparse when scheduledDate is absent.
+      index("status"),
       index("servicePlanId"),
       // Public "On My Way" tracking resolves the opaque token to its one job.
       index("trackToken"),
@@ -2977,6 +2980,12 @@ export const schema = a.schema({
    */
   staffRoster: a
     .query()
+    .arguments({
+      lookup: a.string(),
+      query: a.string(),
+      limit: a.integer(),
+      nextToken: a.string(),
+    })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER"])])
     .handler(a.handler.function(crmAdmin)),
@@ -4048,7 +4057,13 @@ export const schema = a.schema({
 
   technicianJob: a
     .query()
-    .arguments({ jobId: a.string().required() })
+    .arguments({
+      jobId: a.string().required(),
+      view: a.string(),
+      historyToken: a.string(),
+      historyLimit: a.integer(),
+      reportId: a.string(),
+    })
     .returns(a.json())
     .authorization((allow) => [allow.groups(["OWNER", "TECH"])])
     .handler(a.handler.function(crmDocs)),

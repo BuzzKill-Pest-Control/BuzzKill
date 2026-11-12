@@ -94,6 +94,15 @@ if (process.env.BUZZKILL_SOURCE_ENVIRONMENT !== undefined || process.env.BUZZKIL
   assertDestinationDeploymentIdentity(process.env.BUZZKILL_DEPLOY_ACCOUNT_ID ?? "", process.env.AWS_REGION ?? "");
 }
 
+// Preserve the retained staging root's existing protection during this repair.
+if (process.env.AWS_APP_ID === "d3owdoeg1om341" &&
+    process.env.AWS_BRANCH === "codex-buzzkill-staging-migration" &&
+    process.env.BUZZKILL_DESTINATION_ACCOUNT_ID === "743917687359" &&
+    process.env.AWS_REGION === "us-east-1" &&
+    businessMode === "staging") {
+  backend.stack.terminationProtection = true;
+}
+
 // CRM logins are invite-only (office provisions staff and portal users via
 // adminCreateUser) — block public self-signup. Invites go out as single-use
 // magic sign-in links (crm-admin + the auth-challenge triggers), not
@@ -229,6 +238,31 @@ const lockTablePolicy = new PolicyStatement({
 backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
   actions: ["dynamodb:ConditionCheckItem"],
   resources: ["arn:aws:dynamodb:us-east-1:*:table/Job-*"],
+}));
+// The read contracts use existing source tables and relationship indexes.
+// They resolve this backend's existing API-ID parameter at runtime.
+const readStack = Stack.of(backend.crmDocs.resources.lambda);
+const readTableArn = (model: string) => readStack.formatArn({
+  service: "dynamodb", resource: "table", resourceName: `${model}-*`,
+});
+backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:GetItem", "dynamodb:BatchGetItem"],
+  resources: [readTableArn("Job"), readTableArn("Technician"), readTableArn("ServiceReport")],
+}));
+backend.crmDocs.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:Query"],
+  resources: [
+    `${readTableArn("Job")}/index/gsi-Customer.jobs`,
+    `${readTableArn("Technician")}/index/techniciansByUserSub`,
+    `${readTableArn("ServiceReport")}/index/serviceReportsByJobId`,
+  ],
+}));
+backend.crmAdmin.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:BatchGetItem"], resources: [readTableArn("Customer")],
+}));
+backend.crmAdmin.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions: ["dynamodb:Query"],
+  resources: [`${readTableArn("Customer")}/index/customersByStatusAndDisplayName`],
 }));
 // The table names end `-<apiId>-NONE`, and the apiId is NOT derivable at
 // runtime (the GraphQL endpoint hostname is a separate DNS id — deriving
