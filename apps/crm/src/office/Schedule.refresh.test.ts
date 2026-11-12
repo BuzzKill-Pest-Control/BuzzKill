@@ -5,15 +5,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Schedule from "./Schedule";
 import { queryCache } from "../lib/queryCache";
-const mocks = vi.hoisted(() => ({ technicians: vi.fn(), unscheduled: vi.fn(), mutate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ technicians: vi.fn(), routes: vi.fn(), scheduled: vi.fn(), unscheduled: vi.fn(), mutate: vi.fn() }));
 vi.mock("../lib/auth", () => ({ useRoles: () => ({ sub: "refresh-owner", office: true, owner: true }) }));
 vi.mock("./technicians", () => ({ technicianComplianceIssue: () => null }));
 vi.mock("../lib/api", async (original) => ({
   ...await original<typeof import("../lib/api")>(),
   api: () => ({
     models: {
-      Technician: { list: mocks.technicians }, Route: { listRouteByDate: async () => ({ data: [] }) },
-      Job: { listJobByScheduledDate: async () => ({ data: [] }), listJobByStatus: mocks.unscheduled },
+      Technician: { list: mocks.technicians }, Route: { listRouteByDate: mocks.routes },
+      Job: { listJobByScheduledDate: mocks.scheduled, listJobByStatus: mocks.unscheduled },
       Customer: { list: async () => ({ data: [{ id: "customer", displayName: "Example Home" }] }) },
     },
     mutations: { updateJobSchedule: mocks.mutate },
@@ -34,8 +34,10 @@ beforeEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   mocks.technicians.mockReset(); mocks.unscheduled.mockReset().mockResolvedValue({ data: [] }); mocks.mutate.mockReset();
+  mocks.routes.mockReset().mockResolvedValue({ data: [] }); mocks.scheduled.mockReset().mockResolvedValue({ data: [] });
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
+
 afterEach(async () => { await act(async () => root.unmount());
   queryCache.activate(null); container.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -76,5 +78,106 @@ describe("schedule refresh", () => {
     expect(mocks.technicians).toHaveBeenCalledTimes(2); expect(mocks.mutate).not.toHaveBeenCalled();
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Refresh schedule"]')!.disabled).toBe(true);
     expect(container.textContent).toContain("Assign — Example Home");
+  });
+});
+
+describe("schedule route ordering", () => {
+  const date = "2026-11-03";
+  const technician = "Current technician";
+  function loadStops(jobs: { id: string; routeId: string; routeOrder: number }[]) {
+    mocks.technicians.mockResolvedValue({ data: [tech(technician)] });
+    mocks.routes.mockImplementation(async ({ date: day }: { date: string }) => ({
+      data: day === date ? [...new Set(jobs.map((job) => job.routeId))].map((id) => ({
+        id, technicianId: technician, date, status: "PLANNED",
+      })) : [],
+    }));
+    mocks.scheduled.mockImplementation(async ({ scheduledDate }: { scheduledDate: string }) => ({
+      data: scheduledDate === date ? jobs.map((job) => ({
+        ...job, technicianId: technician, customerId: "customer", scheduledDate: date,
+        status: "SCHEDULED", serviceType: job.id,
+      })) : [],
+    }));
+    mocks.mutate.mockResolvedValue({ data: {} });
+  }
+  const arrows = (group: HTMLElement, arrow: string) =>
+    Array.from(group.querySelectorAll("button")).filter((b) => b.textContent?.trim() === arrow);
+  const stopTitles = (group: HTMLElement) =>
+    Array.from(group.querySelectorAll(".list-row-title")).map((row) => row.textContent);
+
+  it("keeps interleaved routes visible and swaps only neighbors on the same route", async () => {
+    loadStops([
+      { id: "First A stop", routeId: "route-a", routeOrder: 1 },
+      { id: "Only B stop", routeId: "route-b", routeOrder: 2 },
+      { id: "Last A stop", routeId: "route-a", routeOrder: 3 },
+    ]);
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
+    const groupA = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    const groupB = container.querySelector<HTMLElement>('[aria-label="Route 2 stops"]')!;
+    expect(groupA.textContent).toContain("First A stop");
+    expect(groupA.textContent).toContain("Last A stop");
+    expect(groupA.textContent).not.toContain("Only B stop");
+    expect(groupB.textContent).toContain("Only B stop");
+    expect(stopTitles(groupA)).toEqual(["1. Example Home", "2. Example Home"]);
+    expect(stopTitles(groupB)).toEqual(["1. Example Home"]);
+    expect(arrows(groupA, "↑").map((b) => b.disabled)).toEqual([true, false]);
+    expect(arrows(groupA, "↓").map((b) => b.disabled)).toEqual([false, true]);
+    expect(arrows(groupB, "↑")[0].disabled).toBe(true);
+    expect(arrows(groupB, "↓")[0].disabled).toBe(true);
+    await act(async () => arrows(groupA, "↓")[0].click());
+    expect(mocks.mutate).toHaveBeenCalledTimes(1);
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      jobId: "First A stop", operation: "REORDER", routeOrder: 3,
+      otherJobId: "Last A stop", otherRouteOrder: 1,
+    });
+  });
+
+  it("keeps route identities stable when refreshed stop orders overlap", async () => {
+    const jobs = [
+      { id: "First A stop", routeId: "route-a", routeOrder: 1 },
+      { id: "First B stop", routeId: "route-b", routeOrder: 1 },
+      { id: "Last A stop", routeId: "route-a", routeOrder: 2 },
+      { id: "Last B stop", routeId: "route-b", routeOrder: 2 },
+    ];
+    loadStops(jobs);
+    mocks.mutate.mockImplementation(async (args: {
+      jobId: string; otherJobId: string; routeOrder: number; otherRouteOrder: number;
+    }) => {
+      jobs.find((job) => job.id === args.jobId)!.routeOrder = args.routeOrder;
+      jobs.find((job) => job.id === args.otherJobId)!.routeOrder = args.otherRouteOrder;
+      return { data: {} };
+    });
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
+    const groupA = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    await act(async () => arrows(groupA, "↓")[0].click());
+    expect(mocks.mutate).toHaveBeenCalledTimes(1);
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      jobId: "First A stop", operation: "REORDER", routeOrder: 2,
+      otherJobId: "Last A stop", otherRouteOrder: 1,
+    });
+    const refreshedA = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    const refreshedB = container.querySelector<HTMLElement>('[aria-label="Route 2 stops"]')!;
+    expect(Array.from(refreshedA.querySelectorAll(".list-row-sub")).map((row) => row.textContent))
+      .toEqual(["Last A stop", "First A stop"]);
+    expect(Array.from(refreshedB.querySelectorAll(".list-row-sub")).map((row) => row.textContent))
+      .toEqual(["First B stop", "Last B stop"]);
+  });
+
+  it("preserves a single route's numbering, boundaries and upward swap", async () => {
+    loadStops([
+      { id: "First stop", routeId: "route-a", routeOrder: 1 },
+      { id: "Last stop", routeId: "route-a", routeOrder: 2 },
+    ]);
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
+    expect(container.querySelectorAll('section[aria-label$=" stops"]')).toHaveLength(1);
+    const group = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    expect(stopTitles(group)).toEqual(["1. Example Home", "2. Example Home"]);
+    expect(arrows(group, "↑").map((b) => b.disabled)).toEqual([true, false]);
+    expect(arrows(group, "↓").map((b) => b.disabled)).toEqual([false, true]);
+    await act(async () => arrows(group, "↑")[1].click());
+    expect(mocks.mutate).toHaveBeenCalledTimes(1);
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      jobId: "Last stop", operation: "REORDER", routeOrder: 1,
+      otherJobId: "First stop", otherRouteOrder: 2,
+    });
   });
 });

@@ -303,7 +303,7 @@ export default function Schedule() {
   const bump = async (job: Job, dir: -1 | 1, routeJobs: Job[]) => {
     const idx = routeJobs.findIndex((j) => j.id === job.id);
     const swap = routeJobs[idx + dir];
-    if (!swap) return;
+    if (!swap || !job.routeId || swap.routeId !== job.routeId) return;
     setBusy(job.id);
     try {
       await bumpAct.run(job, swap);
@@ -526,10 +526,23 @@ export default function Schedule() {
               const dayJobs = techJobs
                 .filter((j) => j.scheduledDate === selDate)
                 .sort((a, b) => (a.routeOrder ?? 0) - (b.routeOrder ?? 0));
+              // Older/concurrent assignments can split a technician-day over
+              // multiple routes. A reorder can only swap within one route.
+              const jobsByRoute = new Map<string, Job[]>();
+              for (const job of dayJobs) {
+                const routeJobs = jobsByRoute.get(job.routeId!) ?? [];
+                routeJobs.push(job);
+                jobsByRoute.set(job.routeId!, routeJobs);
+              }
+              const routeGroups = [...jobsByRoute].sort(([left], [right]) =>
+                left.localeCompare(right)
+              );
               const mapUrl = dayJobs.length ? mapsRouteUrl(tech, dayJobs) : null;
               const complianceIssue = technicianComplianceIssue(tech, selDate);
               const route = routes.find(
-                (r) => r.technicianId === tech.id && r.date === selDate
+                (r) =>
+                  r.technicianId === tech.id && r.date === selDate &&
+                  (routeGroups.length !== 1 || r.id === routeGroups[0][0])
               );
               const weekTotal = techJobs.length;
               return (
@@ -592,7 +605,9 @@ export default function Schedule() {
                   <div className="tech-day-detail">
                     <div className="row-split tech-day-detail-head">
                       <strong>{prettyWeekday(selDate)}</strong>
-                      {route ? (
+                      {routeGroups.length > 1 ? (
+                        <Badge tone="muted">{routeGroups.length} routes</Badge>
+                      ) : route ? (
                         <StatusBadge status={route.status} />
                       ) : (
                         <Badge tone="muted">no route yet</Badge>
@@ -601,55 +616,76 @@ export default function Schedule() {
                     {dayJobs.length === 0 ? (
                       <p className="muted small">No stops on this day.</p>
                     ) : (
-                      dayJobs.map((j, i) => {
-                        const blocked = unassignBlockedNote(j.status, tech.name);
+                      routeGroups.map(([routeId, routeJobs], routeIndex) => {
+                        const groupRoute = routes.find((r) => r.id === routeId);
                         return (
-                          <ListRow
-                            key={j.id}
-                            title={
-                              <span>
-                                {i + 1}. {customerLink(j)}
-                                {etaLabel(j) ? (
-                                  <span className="muted small" style={{ marginLeft: 8 }}>
-                                    Est. arrival ~{etaLabel(j)}
-                                  </span>
+                          <section
+                            key={routeId}
+                            aria-label={`Route ${routeIndex + 1} stops`}
+                          >
+                            {routeGroups.length > 1 ? (
+                              <div
+                                className="row-split"
+                                style={{ marginTop: routeIndex ? 16 : 0 }}
+                              >
+                                <strong>Route {routeIndex + 1}</strong>
+                                {groupRoute ? (
+                                  <StatusBadge status={groupRoute.status} />
                                 ) : null}
-                              </span>
-                            }
-                            subtitle={
-                              <>
-                                {`${j.serviceType}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
-                                {j.scheduledDate && formatJobAppointmentTime(j) ? (
-                                  <span className="nested-line">
-                                    Appointment: {formatJobAppointmentTime(j)}
-                                  </span>
-                                ) : null}
-                              </>
-                            }
-                            meta={
-                              <>
-                                <StatusBadge status={j.status} />
-                                <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                                  <Button small variant="ghost" disabled={i === 0 || busy === j.id} onClick={() => void bump(j, -1, dayJobs)}>
-                                    ↑
-                                  </Button>
-                                  <Button small variant="ghost" disabled={i === dayJobs.length - 1 || busy === j.id} onClick={() => void bump(j, 1, dayJobs)}>
-                                    ↓
-                                  </Button>
-                                  {/* ✕ is a scheduling move, not an eraser: a
-                                      completed or in-progress stop gets the
-                                      honest words instead of a status flip. */}
-                                  {blocked ? (
-                                    <span className="muted small">{blocked}</span>
-                                  ) : (
-                                    <Button small variant="ghost" loading={busy === j.id} onClick={() => void unassign(j)}>
-                                      ✕
-                                    </Button>
-                                  )}
-                                </span>
-                              </>
-                            }
-                          />
+                              </div>
+                            ) : null}
+                            {routeJobs.map((j, i) => {
+                              const blocked = unassignBlockedNote(j.status, tech.name);
+                              return (
+                                <ListRow
+                                  key={j.id}
+                                  title={
+                                    <span>
+                                      {i + 1}. {customerLink(j)}
+                                      {etaLabel(j) ? (
+                                        <span className="muted small" style={{ marginLeft: 8 }}>
+                                          Est. arrival ~{etaLabel(j)}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  }
+                                  subtitle={
+                                    <>
+                                      {`${j.serviceType}${!j.paidAt && j.paymentPendingIntentId ? " · payment pending (bank)" : ""}`}
+                                      {j.scheduledDate && formatJobAppointmentTime(j) ? (
+                                        <span className="nested-line">
+                                          Appointment: {formatJobAppointmentTime(j)}
+                                        </span>
+                                      ) : null}
+                                    </>
+                                  }
+                                  meta={
+                                    <>
+                                      <StatusBadge status={j.status} />
+                                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                                        <Button small variant="ghost" disabled={i === 0 || busy === j.id} onClick={() => void bump(j, -1, routeJobs)}>
+                                          ↑
+                                        </Button>
+                                        <Button small variant="ghost" disabled={i === routeJobs.length - 1 || busy === j.id} onClick={() => void bump(j, 1, routeJobs)}>
+                                          ↓
+                                        </Button>
+                                        {/* ✕ is a scheduling move, not an eraser: a
+                                            completed or in-progress stop gets the
+                                            honest words instead of a status flip. */}
+                                        {blocked ? (
+                                          <span className="muted small">{blocked}</span>
+                                        ) : (
+                                          <Button small variant="ghost" loading={busy === j.id} onClick={() => void unassign(j)}>
+                                            ✕
+                                          </Button>
+                                        )}
+                                      </span>
+                                    </>
+                                  }
+                                />
+                              );
+                            })}
+                          </section>
                         );
                       })
                     )}
