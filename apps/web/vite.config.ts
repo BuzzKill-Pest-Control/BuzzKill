@@ -21,7 +21,7 @@ function shellHead(): Plugin {
           throw new Error('index.html is missing the <!--bk:head--> marker')
         }
         const rendered = html.replace('<!--bk:head-->', renderShellHead())
-        return process.env.BUZZKILL_MIGRATION_PREVIEW === "true"
+        return migrationPreview
           ? rendered.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, (script) =>
               /googletagmanager|clarity\.ms/.test(script) ? "" : script)
           : rendered
@@ -30,7 +30,7 @@ function shellHead(): Plugin {
   }
 }
 
-const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true";
+const migrationPreview = process.env.BUZZKILL_MIGRATION_PREVIEW === "true" || process.env.BUZZKILL_CUTOVER_PAUSED === "true";
 const previewDefines = migrationPreview ? {
   "import.meta.env.VITE_GOOGLE_MAPS_API_KEY": JSON.stringify(""),
   "import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY": JSON.stringify(""),
