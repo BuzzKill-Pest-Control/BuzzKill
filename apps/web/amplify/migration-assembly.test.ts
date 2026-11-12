@@ -12,7 +12,7 @@ type Template = {
   Parameters?: Record<string, { Default?: unknown }>;
   Outputs?: Record<string, unknown>;
 };
-type Assembly = { templates: Record<string, Template>; assets: Record<string, string> };
+type Assembly = { templates: Record<string, Template>; assets: Record<string, string>; terminationProtection: boolean };
 const directory = mkdtempSync(join(tmpdir(), "buzzkill-migration-assembly-"));
 const execFileAsync = promisify(execFile);
 let full: Assembly;
@@ -22,10 +22,10 @@ let released: Assembly;
 let pausedRelease: Assembly;
 let primedRelease: Assembly;
 
-async function synth(phase: "full" | "bootstrap" | "release" | "paused-release" | "primed-release", authTest = false): Promise<Assembly> {
-  const outdir = join(directory, phase + (authTest ? "-auth" : ""));
-  const branch = !authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
-    ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration";
+async function synth(phase: "full" | "bootstrap" | "release" | "paused-release" | "primed-release", authTest = false, branchOverride?: string): Promise<Assembly> {
+  const outdir = join(directory, phase + (authTest ? "-auth" : "") + (branchOverride ? `-${branchOverride}` : ""));
+  const branch = branchOverride ?? (!authTest && process.env.AWS_BRANCH === "codex-buzzkill-staging-migration"
+    ? process.env.AWS_BRANCH : "codex-buzzkill-account-migration");
   try {
     // Synthesis can exceed Vitest's RPC timeout on CI. Keep this worker's
     // event loop free to receive acknowledgements while the child runs.
@@ -47,7 +47,11 @@ async function synth(phase: "full" | "bootstrap" | "release" | "paused-release" 
       for (const [hash, asset] of Object.entries(manifest.files)) assets[hash] = asset.source.path;
     }
   }
-  return { templates, assets };
+  const manifest = JSON.parse(readFileSync(join(outdir, "manifest.json"), "utf8")) as {
+    artifacts: Record<string, { type: string; properties?: { terminationProtection?: boolean } }>;
+  };
+  const root = Object.values(manifest.artifacts).find((artifact) => artifact.type === "aws:cloudformation:stack");
+  return { templates, assets, terminationProtection: root?.properties?.terminationProtection === true };
 }
 
 /** CloudFormation validates references per template. Nested transport must
@@ -149,16 +153,23 @@ beforeAll(async () => {
 }, 600_000);
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
+it("preserves retained staging protection without changing the other namespace", async () => {
+  const staging = await synth("release", false, "codex-buzzkill-staging-migration");
+  const other = await synth("release", false, "codex-buzzkill-account-migration");
+  expect(staging.terminationProtection).toBe(true);
+  expect(other.terminationProtection).toBe(false);
+}, 240_000);
+
 it("synthesizes the real full and bootstrap backends with closed references", () => {
   assertReferenceClosure(full);
   assertReferenceClosure(bootstrap);
   // Includes the guarded Google linking Lambda, execution role, and trigger
   // permission. No external provider is provisioned in migration preview.
-  expect(allResources(full)).toHaveLength(3086);
+  expect(allResources(full)).toHaveLength(3090);
   expect(allResources(bootstrap)).toHaveLength(2124);
   expect(allResources(full).filter((r) => r.Type === "AWS::Cognito::UserPoolIdentityProvider")).toHaveLength(0);
-  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(606);
-  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1818);
+  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::Resolver")).toHaveLength(607);
+  expect(allResources(full).filter((r) => r.Type === "AWS::AppSync::FunctionConfiguration")).toHaveLength(1821);
 });
 
 it("retains the real schema, tables, auth, IAM and all other non-API resources across bootstrap", () => {

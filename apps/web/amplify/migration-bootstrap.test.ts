@@ -39,9 +39,9 @@ it("requires every exact destination and empty-preflight guard", () => {
   expect(() => bootstrapEnabled({ ...scope, BUZZKILL_DESTINATION_ACCOUNT_ID: "637423611040" })).toThrow();
   expect(bootstrapEnabled({ ...scope, AWS_BRANCH: "codex-buzzkill-staging-migration" })).toBe(true);
 });
-it("physically omits exactly 962 stateless resources and retains all 55 tables", () => {
+it("physically omits exactly 966 stateless resources and retains all 55 tables", () => {
   enabled(); const { stack, models } = fixture();
-  expect(applyMigrationBootstrap(stack)).toBe(962);
+  expect(applyMigrationBootstrap(stack)).toBe(966);
   let tables = 0;
   for (const [name, model] of Object.entries(models)) {
     const template = Template.fromStack(model);

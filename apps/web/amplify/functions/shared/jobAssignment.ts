@@ -1,7 +1,7 @@
 import type { AppSyncIdentity } from "aws-lambda";
 import { callerIsOffice, callerSub } from "./authz";
 import { assertTechnicianCompliance, hasCurrentLicense } from "./compliance";
-import { licenseFactsFor } from "./licenses";
+import { licenseFactsFor, type LicenseFacts } from "./licenses";
 import { dataClient } from "./dataClient";
 import { openOwnedWork } from "./ownedWork";
 import { forEachPage, listAll } from "./pagination";
@@ -29,7 +29,7 @@ const NOT_AUTHORIZED_REPORT = "Not authorized for this report";
 const UNLINKED_TECHNICIAN =
   "Your login isn't linked to a technician record — ask the office to link it before acting on this job";
 
-type LinkedTechnician = {
+export type LinkedTechnician = {
   id: string;
   name?: string | null;
   active?: boolean | null;
@@ -145,18 +145,19 @@ export async function assertCanActOnJob(
  */
 export async function assertCanReadJob(
   identity: AppSyncIdentity | undefined | null,
-  job: JobAssignment | null | undefined
+  job: JobAssignment | null | undefined,
+  scope?: { technician: () => Promise<LinkedTechnician | null>; license: (tech: LinkedTechnician) => Promise<LicenseFacts> }
 ): Promise<void> {
   if (callerIsOffice(identity)) return;
   if (!job) throw new Error(NOT_AUTHORIZED_JOB);
-  const tech = await technicianForCaller(identity);
+  const tech = await (scope ? scope.technician() : technicianForCaller(identity));
   if (!tech) throw new Error(UNLINKED_TECHNICIAN);
   if (!tech.active) throw new Error(NOT_AUTHORIZED_JOB);
   if (!job.technicianId || job.technicianId !== tech.id) {
     throw new Error(NOT_AUTHORIZED_JOB);
   }
   if (job.status !== "COMPLETED") {
-    const facts = await licenseFactsFor(tech);
+    const facts = await (scope ? scope.license(tech) : licenseFactsFor(tech));
     if (!facts.current) throw new Error(NOT_AUTHORIZED_JOB);
   }
 }
