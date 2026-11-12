@@ -534,7 +534,9 @@ export default function Schedule() {
                 routeJobs.push(job);
                 jobsByRoute.set(job.routeId!, routeJobs);
               }
-              const routeGroups = [...jobsByRoute];
+              const routeGroups = [...jobsByRoute].sort(([left], [right]) =>
+                left.localeCompare(right)
+              );
               const mapUrl = dayJobs.length ? mapsRouteUrl(tech, dayJobs) : null;
               const complianceIssue = technicianComplianceIssue(tech, selDate);
               const route = routes.find(

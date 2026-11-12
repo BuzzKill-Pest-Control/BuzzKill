@@ -131,6 +131,37 @@ describe("schedule route ordering", () => {
     });
   });
 
+  it("keeps route identities stable when refreshed stop orders overlap", async () => {
+    const jobs = [
+      { id: "First A stop", routeId: "route-a", routeOrder: 1 },
+      { id: "First B stop", routeId: "route-b", routeOrder: 1 },
+      { id: "Last A stop", routeId: "route-a", routeOrder: 2 },
+      { id: "Last B stop", routeId: "route-b", routeOrder: 2 },
+    ];
+    loadStops(jobs);
+    mocks.mutate.mockImplementation(async (args: {
+      jobId: string; otherJobId: string; routeOrder: number; otherRouteOrder: number;
+    }) => {
+      jobs.find((job) => job.id === args.jobId)!.routeOrder = args.routeOrder;
+      jobs.find((job) => job.id === args.otherJobId)!.routeOrder = args.otherRouteOrder;
+      return { data: {} };
+    });
+    await act(async () => root.render(createElement(MemoryRouter, null, createElement(Schedule))));
+    const groupA = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    await act(async () => arrows(groupA, "↓")[0].click());
+    expect(mocks.mutate).toHaveBeenCalledTimes(1);
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      jobId: "First A stop", operation: "REORDER", routeOrder: 2,
+      otherJobId: "Last A stop", otherRouteOrder: 1,
+    });
+    const refreshedA = container.querySelector<HTMLElement>('[aria-label="Route 1 stops"]')!;
+    const refreshedB = container.querySelector<HTMLElement>('[aria-label="Route 2 stops"]')!;
+    expect(Array.from(refreshedA.querySelectorAll(".list-row-sub")).map((row) => row.textContent))
+      .toEqual(["Last A stop", "First A stop"]);
+    expect(Array.from(refreshedB.querySelectorAll(".list-row-sub")).map((row) => row.textContent))
+      .toEqual(["First B stop", "Last B stop"]);
+  });
+
   it("preserves a single route's numbering, boundaries and upward swap", async () => {
     loadStops([
       { id: "First stop", routeId: "route-a", routeOrder: 1 },
