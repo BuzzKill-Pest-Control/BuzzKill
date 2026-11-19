@@ -1,3 +1,4 @@
+import { buildTechnicianJobView, type TechnicianJobArgs } from "./technicianJobViews";
 import type { AppSyncIdentity } from "aws-lambda";
 import { callerIsOffice } from "./authz";
 import { licenseFactsFor } from "./licenses";
@@ -296,7 +297,7 @@ export type TechnicianJobResult = {
  * is its current assignee (or office). A non-assignee, or a known id for another
  * technician's job, gets the same opaque refusal as a missing job.
  */
-export async function buildTechnicianJob(
+async function buildLegacyTechnicianJob(
   identity: AppSyncIdentity | undefined | null,
   jobId: string
 ): Promise<TechnicianJobResult> {
@@ -460,4 +461,30 @@ export async function buildTechnicianJob(
     catalog,
     priorVisits,
   };
+}
+
+/** Preserve jobId-only callers while exposing explicit proportional read views. */
+export function buildTechnicianJob(
+  identity: AppSyncIdentity | undefined | null,
+  jobId: string
+): Promise<TechnicianJobResult>;
+export function buildTechnicianJob(
+  identity: AppSyncIdentity | undefined | null,
+  jobId: string,
+  args: TechnicianJobArgs
+): ReturnType<typeof buildTechnicianJobView> | Promise<TechnicianJobResult>;
+export function buildTechnicianJob(
+  identity: AppSyncIdentity | undefined | null,
+  jobId: string,
+  args: TechnicianJobArgs = {}
+) {
+  if (
+    args.view == null &&
+    args.historyToken == null &&
+    args.historyLimit == null &&
+    args.reportId == null
+  ) {
+    return buildLegacyTechnicianJob(identity, jobId);
+  }
+  return buildTechnicianJobView(identity, jobId, args);
 }

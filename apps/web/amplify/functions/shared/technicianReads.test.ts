@@ -165,6 +165,22 @@ beforeEach(() => {
 });
 
 describe("buildTechnicianJob", () => {
+  it("preserves the legacy full packet for jobId-only and null optional arguments", async () => {
+    const legacy = await buildTechnicianJob(TECH_A, "job_a");
+    const nullArgs = await buildTechnicianJob(TECH_A, "job_a", {
+      view: null,
+      historyToken: null,
+      historyLimit: null,
+      reportId: null,
+    });
+    expect(nullArgs).toEqual(legacy);
+    expect(legacy).toMatchObject({
+      job: { id: "job_a" }, catalog: [], priorVisits: [], lineage: [],
+    });
+    expect(legacy).not.toHaveProperty("currentOnly");
+    expect(legacy).not.toHaveProperty("historyPage");
+  });
+
   it("gives the assignee the job, with the customer reduced to visit fields", async () => {
     const d = await buildTechnicianJob(TECH_A, "job_a");
     expect(d.job.id).toBe("job_a");

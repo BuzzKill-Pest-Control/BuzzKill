@@ -1,3 +1,4 @@
+import { previewAdminLoginAvailable } from "../lib/previewAdmin";
 import { useEffect, useRef, useState } from "react";
 import {
   confirmSignIn,
@@ -21,7 +22,7 @@ export default function Welcome() {
     if (ran.current) return; // React strict-mode double-mount guard
     ran.current = true;
 
-    if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true") {
+    if (import.meta.env.VITE_BUZZKILL_MIGRATION_PREVIEW === "true" && !previewAdminLoginAvailable()) {
       setMessage("Email sign-in links are disabled in this migration preview.");
       setState("error");
       return;

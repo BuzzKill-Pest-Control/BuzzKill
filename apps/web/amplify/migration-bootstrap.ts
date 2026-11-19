@@ -25,7 +25,7 @@ export const BOOTSTRAP_DEFERRED_MODELS = {
   EmailLog: [32, 10],
   GroupChangeCommand: [29, 9],
   Invoice: [32, 10],
-  Job: [38, 12],
+  Job: [41, 13],
   JobAssignmentEvent: [29, 9],
   JobPacketEvent: [29, 9],
   LeadActivity: [29, 9],
@@ -87,7 +87,7 @@ export function applyMigrationBootstrap(dataStack: Stack): number {
       selected.push(...matches);
     }
   }
-  if (selected.length !== 962) throw new Error("Migration bootstrap selection changed.");
+  if (selected.length !== 966) throw new Error("Migration bootstrap selection changed.");
   // Validate the complete selection before removing anything. Only stateless
   // resources inside the 25 reviewed model stacks can reach this loop.
   for (const resource of selected) {

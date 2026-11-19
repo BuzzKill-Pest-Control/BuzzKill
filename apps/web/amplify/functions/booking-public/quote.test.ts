@@ -2182,25 +2182,32 @@ describe("GL-17 — mosquito seasonal plans on the funnel", () => {
 
   it("ADVERSARIAL: a fully-booked IN-SEASON month is 'fully booked' — never a false April promise", async () => {
     // Staging-drill finding: an empty day board must not read as
-    // off-season while the season is running.
-    for (let i = 0; i <= 41; i++) {
-      const d = new Date(Date.now() + i * 86_400_000).toISOString().slice(0, 10);
-      capacityFixture.maps.capacityDays.set(`${d}#t1`, {
-        id: `${d}#t1`,
-        date: d,
-        technicianId: "t1",
-        committedMinutes: 540,
+    // off-season while the season is running. Keep this case in July even
+    // when CI runs outside mosquito season; leave asynchronous timers real.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-07-14T15:00:00Z"));
+      for (let i = 0; i <= 41; i++) {
+        const d = new Date(Date.now() + i * 86_400_000).toISOString().slice(0, 10);
+        capacityFixture.maps.capacityDays.set(`${d}#t1`, {
+          id: `${d}#t1`,
+          date: d,
+          technicianId: "t1",
+          committedMinutes: 540,
+        });
+      }
+
+      const res = await postQuote({
+        ...mosquitoInput,
+        email: "dana+booked@example.com",
       });
+
+      expect(res.body.decision).toBe("CONTACT");
+      expect(String(res.body.message)).toMatch(/fully booked/i);
+      expect(res.body.offSeason).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
     }
-
-    const res = await postQuote({
-      ...mosquitoInput,
-      email: "dana+booked@example.com",
-    });
-
-    expect(res.body.decision).toBe("CONTACT");
-    expect(String(res.body.message)).toMatch(/fully booked/i);
-    expect(res.body.offSeason).toBeUndefined();
   });
 
   it("a fully off-season ask is a REAL date-less sale: PRICED, empty day board, truthful copy", async () => {

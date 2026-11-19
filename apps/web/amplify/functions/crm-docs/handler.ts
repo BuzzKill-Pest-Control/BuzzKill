@@ -204,6 +204,9 @@ function describeWriteErrors(
 type Args = {
   reportId?: string;
   jobId?: string;
+  view?: string | null;
+  historyToken?: string | null;
+  historyLimit?: number | null;
   key?: string;
   customerId?: string;
   kind?: string;
@@ -700,7 +703,12 @@ export const handler = async (event: AppSyncResolverEvent<Args>) => {
       });
     }
     case "technicianJob": {
-      return buildTechnicianJob(event.identity, event.arguments.jobId!);
+      return buildTechnicianJob(event.identity, event.arguments.jobId!, {
+        view: event.arguments.view,
+        historyToken: event.arguments.historyToken,
+        historyLimit: event.arguments.historyLimit,
+        reportId: event.arguments.reportId,
+      });
     }
     case "getReportPhotoUploadUrl": {
       await assertCanActOnReportId(event.identity, event.arguments.reportId!);

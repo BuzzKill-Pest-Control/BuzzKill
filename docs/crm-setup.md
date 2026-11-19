@@ -180,6 +180,87 @@ aws amplify update-app --app-id d5ln2hbbp9s2j --region us-east-1 \
 
 Do not restore the incident's web-only rules backup; retain it as evidence.
 
+## 7. Google sign-in (optional)
+
+Google sign-in connects to an existing BuzzKill login and preserves its user
+ID, roles, and customer access. The native Cognito account must be enabled,
+`CONFIRMED`, and have the same verified email. Automatic linking accepts Gmail
+addresses and Google Workspace addresses whose email domain matches Google's
+hosted-domain claim. Google accounts using other email providers should use
+their password or an emailed sign-in link. New Google accounts cannot create
+BuzzKill access.
+
+Google configuration belongs to the destination AWS account `743917687359`
+in `us-east-1`. Its **WEB/backend app is `d3owdoeg1om341`** and its **CRM app
+is `d2y2zigtl5rx3`**. The backend keeps its physical namespace through release:
+
+| Business environment | Physical backend branch | CRM origin |
+| --- | --- | --- |
+| Active staging | `codex-buzzkill-staging-migration` | `https://migration-staging.d2y2zigtl5rx3.amplifyapp.com/` |
+| Later production (`main`) | `codex-buzzkill-account-migration` | `https://app.pestbuzzkill.com/` |
+
+Configure staging first. Preserve the existing account/region checks,
+`BUZZKILL_SOURCE_ENVIRONMENT=staging` binding, and retained resources. Staging
+is an active environment with `BUZZKILL_MIGRATION_PREVIEW=false`; the physical
+branch's name alone does not make it a read-only preview.
+
+1. Use a **Web application** OAuth client in Google Auth Platform with the
+   basic `openid`, `email`, and `profile` scopes. Save its client ID and secret
+   as Amplify secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on WEB app
+   `d3owdoeg1om341`, physical branch `codex-buzzkill-staging-migration`.
+   Keep the secret out of frontend `VITE_` variables.
+2. Set `GOOGLE_SIGN_IN_ENABLED=true` on that WEB branch and set its explicit
+   allowlist:
+
+   ```text
+   GOOGLE_AUTH_REDIRECT_URLS=https://migration-staging.d2y2zigtl5rx3.amplifyapp.com/,http://localhost:5174/
+   ```
+
+   URLs must use HTTPS and a root path (`/`); HTTP is allowed for localhost
+   and `127.0.0.1`. Query strings, fragments, credentials, and non-root paths
+   are rejected. If the allowlist is unset, `CRM_APP_URL` supplies the app
+   origin. Without either setting, destination staging defaults to its CRM
+   origin above, while business `main` defaults to `https://app.pestbuzzkill.com/`.
+   Non-production defaults also include `http://localhost:5174/`. The validated
+   `BUZZKILL_SOURCE_ENVIRONMENT` controls these defaults, so the retained
+   production namespace receives production callbacks when released.
+3. Deploy the backend. Read `auth.oauth.domain` from the generated
+   `amplify_outputs.json`, then register
+   `https://<auth.oauth.domain>/oauth2/idpresponse` as an **Authorized redirect
+   URI** on the Google OAuth client. This Cognito URL is Google's callback;
+   the app URLs in step 2 are Cognito's callbacks to the CRM. Register each
+   environment's Cognito URL if sharing a Google client.
+4. Regenerate the CRM's outputs and rebuild the CRM **after** the backend
+   deploy finishes. For destination staging locally, run from `apps/crm`:
+
+   ```bash
+   BUZZKILL_BACKEND_APP_ID=d3owdoeg1om341 AWS_BRANCH=codex-buzzkill-staging-migration npm run outputs
+   ```
+
+   In Hosting, rerun the CRM build if its parallel build picked up older auth
+   outputs. The Google button appears only when the outputs contain Google
+   OAuth and both callback and sign-out URLs for the current exact origin.
+
+Before enabling production, smoke-test staging: first and repeat Google login
+for an existing account; unchanged Cognito `sub`, roles, and portal visibility;
+rejection of unknown and disabled accounts; cancel/failure feedback followed by
+a successful retry; sign-out returning to the same host; and password and
+magic-link login. Later production uses the retained physical backend branch
+`codex-buzzkill-account-migration` with `BUZZKILL_SOURCE_ENVIRONMENT=main`.
+Apply its branch secrets, production `CRM_APP_URL`/allowlist, and Cognito callback
+registration, then regenerate outputs and rebuild the paired CRM. Verify its
+existing pool and backend identifiers remain the retained production resources.
+
+Leaving `GOOGLE_SIGN_IN_ENABLED` unset keeps Google disabled. Migration preview
+mode also disables Google even when that flag is set; it cannot link copied
+accounts or call Google. The CRM enforces its preview flag and the backend
+outputs' preview marker before exposing OAuth. Cutover/worker pauses also fence
+the Google linking Lambda with the other application functions.
+
+See the [Amplify external-provider setup](https://docs.amplify.aws/react/build-a-backend/auth/concepts/external-identity-providers/)
+and [Cognito Google setup](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-social-idp-google.html)
+for console details.
+
 ## What was E2E-verified in the sandbox (2026-07-14)
 
 - Lead → convert (plan or scheduled 1-time job) → active customer

@@ -713,7 +713,7 @@ export type StaffRosterRow = {
 };
 
 export function staffRoster(): OpResult {
-  return api().queries.staffRoster();
+  return api().queries.staffRoster({});
 }
 
 /** The controlled reason codes for a staff-access change (GL-14). Re-exported

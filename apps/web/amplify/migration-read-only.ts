@@ -1,3 +1,4 @@
+import { isCutoverPaused } from "./cutover-pause";
 import { CfnResource, Stack } from "aws-cdk-lib";
 import { CfnResolver } from "aws-cdk-lib/aws-appsync";
 import { isMigrationPreview, MIGRATION_PREVIEW_MESSAGE } from "./functions/shared/migrationPreview";
@@ -10,7 +11,7 @@ export const PREVIEW_MUTATION_REFUSAL =
  * auth, queries and physical resources intact for migration permission checks.
  */
 export function makeMigrationPreviewReadOnly(dataStack: Stack): number {
-  if (!isMigrationPreview()) return 0;
+  if (!isMigrationPreview() && !isCutoverPaused()) return 0;
   let guarded = 0;
   for (const resource of dataStack.node.findAll().filter(CfnResource.isCfnResource)) {
     if (resource.cfnResourceType !== "AWS::AppSync::Resolver") continue;

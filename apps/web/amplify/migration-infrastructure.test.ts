@@ -6,7 +6,7 @@ import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription, LambdaSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import { Metric } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
+import { leadIntakeCorsOrigins, migrationBookingCorsOrigins, publicFunctionUrlAuthType, subscribeBusinessEvents, wireBusinessAlarm } from "./migration-infrastructure";
 afterEach(() => vi.unstubAllEnvs());
 function synth() {
   const stack = new Stack(new App(), "MigrationBoundaries");
@@ -65,5 +65,33 @@ describe("migration booking CORS", () => {
     const website = "https://migration.d3owdoeg1om341.amplifyapp.com";
     expect(() => migrationBookingCorsOrigins(website, website)).toThrow();
     expect(() => migrationBookingCorsOrigins(website, "https://migration-staging.d2y2zigtl5rx3.amplifyapp.com")).toThrow();
+  });
+});
+
+describe("isolated staging lead CORS", () => {
+  const destination = {
+    AWS_APP_ID: "d3owdoeg1om341", AWS_BRANCH: "codex-buzzkill-staging-migration",
+    BUZZKILL_SOURCE_ENVIRONMENT: "staging", BUZZKILL_DESTINATION_ACCOUNT_ID: "743917687359",
+    BUZZKILL_DEPLOY_ACCOUNT_ID: "743917687359", AWS_REGION: "us-east-1",
+    MARKETING_URL: "https://migration-staging.d3owdoeg1om341.amplifyapp.com",
+  };
+  const baseline = leadIntakeCorsOrigins({});
+  it("adds exactly the configured destination staging website to the public lead URL", () => {
+    expect(leadIntakeCorsOrigins(destination)).toEqual([...baseline, destination.MARKETING_URL]);
+    const stack = new Stack(new App(), "StagingLeadCors");
+    new Function(stack, "Lead", { runtime: Runtime.NODEJS_20_X, handler: "index.handler", code: Code.fromInline("exports.handler=async()=>{}") })
+      .addFunctionUrl({ authType: publicFunctionUrlAuthType(), cors: { allowedOrigins: leadIntakeCorsOrigins(destination) } });
+    Template.fromStack(stack).hasResourceProperties("AWS::Lambda::Url", { Cors: { AllowOrigins: [...baseline, destination.MARKETING_URL] } });
+  });
+  it("preserves source and main origins", () => {
+    expect(leadIntakeCorsOrigins({ ...destination, AWS_APP_ID: "d26qpsjewk0bee" })).toEqual(baseline);
+    expect(leadIntakeCorsOrigins({ ...destination, AWS_BRANCH: "codex-buzzkill-account-migration", BUZZKILL_SOURCE_ENVIRONMENT: "main" })).toEqual(baseline);
+  });
+  it.each([
+    { MARKETING_URL: "https://other.example.com" }, { MARKETING_URL: "*" },
+    { BUZZKILL_DEPLOY_ACCOUNT_ID: "637423611040" }, { BUZZKILL_DESTINATION_ACCOUNT_ID: "637423611040" },
+    { AWS_REGION: "us-west-2" },
+  ])("refuses unrelated origins or deployment identities: %j", (overrides) => {
+    expect(() => leadIntakeCorsOrigins({ ...destination, ...overrides })).toThrow();
   });
 });

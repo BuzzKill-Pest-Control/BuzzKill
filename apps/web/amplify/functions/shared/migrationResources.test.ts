@@ -17,14 +17,18 @@ afterEach(() => vi.unstubAllEnvs());
 describe("migration resource configuration", () => {
   it("omits all business schedules/secrets and propagates every guard", async () => {
     vi.stubEnv("BUZZKILL_MIGRATION_PREVIEW", "true");
+    vi.stubEnv("GOOGLE_SIGN_IN_ENABLED", "true");
     const configs = await load();
-    expect(configs).toHaveLength(17);
+    expect(configs).toHaveLength(18);
     for (const config of configs) { expect(config).not.toHaveProperty("schedule"); expect(config.environment?.BUZZKILL_MIGRATION_PREVIEW).toBe("true"); }
     expect(mocks.secret).not.toHaveBeenCalled();
     expect(mocks.auth.mock.calls[0][0].triggers.customMessage.name).toBe("preview-auth-message");
+    expect(mocks.auth.mock.calls[0][0].triggers.preSignUp.name).toBe("google-sign-in");
+    expect(mocks.auth.mock.calls[0][0].loginWith).not.toHaveProperty("externalProviders");
   });
   it("preserves normal schedules, secrets and auth triggers without the flag", async () => {
     vi.stubEnv("BUZZKILL_MIGRATION_PREVIEW", undefined);
+    vi.stubEnv("GOOGLE_SIGN_IN_ENABLED", undefined);
     const configs = await load();
     expect(configs.filter((c) => c.schedule).map((c) => c.name).sort()).toEqual(["daily-reminders", "lead-sweep", "pricing-refresh"]);
     expect(mocks.secret.mock.calls.map(([name]) => name).sort()).toEqual([...Array(6).fill("STRIPE_SECRET_KEY"), "STRIPE_WEBHOOK_SECRET", "THUMBTACK_WEBHOOK_SECRET"].sort());
