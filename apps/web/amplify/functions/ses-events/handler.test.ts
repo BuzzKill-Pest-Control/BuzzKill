@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type LogRow = Record<string, unknown> & { id: string; messageId: string };
 const logs: LogRow[] = [];
 let updateThrows = false;
+let suppressionFailure: "GET" | "CREATE" | null = null;
 const customers = new Map<string, Record<string, unknown>>();
 let customerGets = 0;
 const suppressions: Record<string, unknown>[] = [];
@@ -35,8 +36,11 @@ vi.mock("../shared/dataClient", () => ({
         },
       },
       SuppressedEmail: {
-        get: async () => ({ data: null }),
+        get: async () => suppressionFailure === "GET"
+          ? { data: null, errors: [{ message: "suppression lookup unavailable" }] }
+          : { data: null },
         create: async (row: Record<string, unknown>) => {
+          if (suppressionFailure === "CREATE") return { data: null, errors: [{ message: "suppression write unavailable" }] };
           suppressions.push(row);
           return { data: row };
         },
@@ -69,6 +73,7 @@ const snsEvent = (message: unknown, raw?: string) =>
 beforeEach(() => {
   logs.length = 0;
   updateThrows = false;
+  suppressionFailure = null;
   workOpened.length = 0;
   customers.clear();
   customerGets = 0;
@@ -76,6 +81,32 @@ beforeEach(() => {
 });
 
 describe("ses-events durability (GL-22)", () => {
+  it.each([
+    ["bounce", "GET"], ["bounce", "CREATE"],
+    ["complaint", "GET"], ["complaint", "CREATE"],
+  ] as const)("retries a %s after a failed suppression %s", async (type, failure) => {
+    const event = snsEvent({
+      notificationType: type,
+      mail: { messageId: "m1" },
+      bounce: { bounceType: "Permanent", bouncedRecipients: [{ emailAddress: "dana@example.com" }] },
+      complaint: { complainedRecipients: [{ emailAddress: "dana@example.com" }] },
+    });
+    suppressionFailure = failure;
+
+    await expect(handler(event)).rejects.toThrow(/notification\(s\) failed/);
+    expect(suppressions).toHaveLength(0);
+    expect(workOpened).toHaveLength(0);
+
+    suppressionFailure = null;
+    await handler(event);
+    expect(suppressions).toHaveLength(1);
+    expect(suppressions[0]).toMatchObject({
+      email: "dana@example.com", source: type === "bounce" ? "BOUNCED" : "COMPLAINED",
+    });
+    expect(workOpened).toHaveLength(1);
+    expect(workOpened[0].kind).toBe("EMAIL_FAILURE");
+  });
+
   it("a failed write THROWS so the event redelivers — never acknowledged unrecorded", async () => {
     logs.push({ id: "l1", messageId: "m1", deliveryStatus: "SENT" });
     updateThrows = true;
